@@ -1,0 +1,27 @@
+# A unique identifier for your project
+project_id = "new-crm-supabase"
+
+[api]
+enabled = true
+port = 54321
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "http://localhost:3001"
+
+[functions.create-user]
+verify_jwt = true
+
+[functions.ask-admin-assistant]
+verify_jwt = true
+
+[functions.send-workflow-email]
+verify_jwt = false
