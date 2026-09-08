@@ -75,6 +75,13 @@ const toYmd = (value) => {
 
 const todayYmd = () => toYmd(new Date())
 
+const monthStartYmd = () => {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  return `${y}-${m}-01`
+}
+
 const getLeaveBounds = (req) => {
   const start = toYmd(req.startDate) || toYmd(req.endDate)
   const end = toYmd(req.endDate) || start
@@ -114,7 +121,7 @@ export const LeaveManagement = () => {
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [viewDate, setViewDate] = useState('')
-  const [rangeFrom, setRangeFrom] = useState('')
+  const [rangeFrom, setRangeFrom] = useState(monthStartYmd)
   const [rangeTo, setRangeTo] = useState('')
   const [filterEmployee, setFilterEmployee] = useState('')
   const [filterLeaveType, setFilterLeaveType] = useState('')
@@ -487,13 +494,14 @@ export const LeaveManagement = () => {
     return Array.from(new Set([...LEAVE_TYPE_OPTIONS, ...fromData]))
   }, [leaveRequests])
 
-  const hasActiveFilters = Boolean(
-    viewDate || rangeFrom || rangeTo || filterEmployee || filterLeaveType || filterStatus
+  const defaultRangeFrom = monthStartYmd()
+  const hasCustomFilters = Boolean(
+    viewDate || rangeTo || filterEmployee || filterLeaveType || filterStatus || rangeFrom !== defaultRangeFrom
   )
 
   const clearFilters = () => {
     setViewDate('')
-    setRangeFrom('')
+    setRangeFrom(defaultRangeFrom)
     setRangeTo('')
     setFilterEmployee('')
     setFilterLeaveType('')
@@ -517,11 +525,9 @@ export const LeaveManagement = () => {
           <div className="flex items-center gap-2 text-fg">
             <Filter className="w-4 h-4 text-accent" />
             <h3 className="text-xs font-semibold">Filter leave & WFH requests</h3>
-            {hasActiveFilters && (
-              <span className="text-[11px] text-muted">
-                Showing {visibleRequests.length} of {leaveRequests.filter((r) => !r.hiddenFromAdmin).length}
-              </span>
-            )}
+            <span className="text-[11px] text-muted">
+              Showing {visibleRequests.length} of {leaveRequests.filter((r) => !r.hiddenFromAdmin).length}
+            </span>
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -538,7 +544,7 @@ export const LeaveManagement = () => {
             >
               Today
             </Button>
-            {hasActiveFilters && (
+            {hasCustomFilters && (
               <Button type="button" size="sm" variant="ghost" onClick={clearFilters}>
                 Clear filters
               </Button>
@@ -638,9 +644,9 @@ export const LeaveManagement = () => {
                 <td colSpan={6} className="p-8 text-center text-muted">
                   <p className="text-sm font-medium text-fg">No leave or WFH requests found</p>
                   <p className="text-xs mt-1">
-                    {hasActiveFilters
+                    {hasCustomFilters
                       ? 'Try another date, expand the date range, or clear filters.'
-                      : 'Leave and WFH requests will appear here once submitted.'}
+                      : 'No requests from this month onward. Set From to an earlier date to see past leave.'}
                   </p>
                 </td>
               </tr>

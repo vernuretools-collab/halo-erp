@@ -22,12 +22,42 @@ import {
 } from './monthlyReportEngine'
 import { applyLopConversion, resolveLeaveLimits } from './leaveEntitlementUtils'
 
+function collectEmployeeIdentityIds(rowId, data = {}) {
+  const ids = []
+  const seen = new Set()
+  const add = (value) => {
+    if (value == null || value === '' || typeof value === 'object') return
+    const key = String(value)
+    if (seen.has(key)) return
+    seen.add(key)
+    ids.push(key)
+  }
+  add(rowId)
+  add(data.uid)
+  add(data.id)
+  add(data.employeeId)
+  add(data.employeeDocId)
+  add(data.auth_id)
+  add(data.authId)
+  if (Array.isArray(data.identityIds)) data.identityIds.forEach(add)
+  return ids
+}
+
 /**
  * Fetch all employee profiles from Firestore /employees
  */
 export const getEmployees = async () => {
   const snap = await getDocs(collection(db, 'employees'))
-  return snap.docs.map((d) => ({ uid: d.id, employeeId: d.id, ...d.data() }))
+  return snap.docs.map((d) => {
+    const data = d.data() || {}
+    return {
+      uid: d.id,
+      employeeId: d.id,
+      ...data,
+      employeeDocId: d.id,
+      identityIds: collectEmployeeIdentityIds(d.id, data),
+    }
+  })
 }
 
 /**

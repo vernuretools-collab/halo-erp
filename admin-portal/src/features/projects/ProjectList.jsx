@@ -30,6 +30,17 @@ import {
   Calendar,
 } from 'lucide-react'
 
+const formatHoursAsHrsMins = (hours) => {
+  const totalMinutes = Math.round(Number(hours) * 60)
+  if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) return '0 mins'
+  const h = Math.floor(totalMinutes / 60)
+  const m = totalMinutes % 60
+  const hPart = h === 0 ? '' : h === 1 ? '1 hr' : `${h} hrs`
+  const mPart = m === 0 ? '' : m === 1 ? '1 min' : `${m} mins`
+  if (hPart && mPart) return `${hPart} ${mPart}`
+  return hPart || mPart
+}
+
 export const ProjectList = () => {
   const navigate = useNavigate()
   const {
@@ -431,7 +442,7 @@ export const ProjectList = () => {
             <span className="text-[11px] font-medium text-muted uppercase tracking-wider">
               Total Logged Hours
             </span>
-            <p className="text-xl font-bold text-purple-600 dark:text-purple-400 mt-1">{totalLoggedHours} hrs</p>
+            <p className="text-xl font-bold text-purple-600 dark:text-purple-400 mt-1">{formatHoursAsHrsMins(totalLoggedHours)}</p>
           </div>
           <div className="w-9 h-9 rounded-xl bg-purple-50 dark:bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center">
             <Clock className="w-5 h-5" />

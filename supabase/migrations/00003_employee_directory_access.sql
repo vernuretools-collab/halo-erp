@@ -103,19 +103,7 @@ drop index if exists profiles_auth_id_uidx;
 create unique index profiles_auth_id_uidx on public.profiles (auth_id)
   where auth_id is not null;
 
--- Directory rows for staff who only exist in profiles
-insert into public.employees (id, org_id, user_id, auth_id, data, created_at, updated_at)
-select
-  p.id,
-  coalesce(p.org_id, p.data->>'orgId', 'org_demo'),
-  p.id,
-  p.auth_id,
-  p.data || jsonb_build_object('orgId', coalesce(p.data->>'orgId', p.org_id, 'org_demo')),
-  coalesce(p.created_at, now()),
-  now()
-from public.profiles p
-where coalesce(lower(p.data->>'role'), 'employee') not in ('admin', 'owner', 'superadmin', 'client')
-  and not exists (select 1 from public.employees e where e.id = p.id);
+-- Employee directory is sourced only from Firebase /employees (not Auth/profiles).
 
 -- Refresh JWT app_metadata from remaining profiles
 update public.profiles

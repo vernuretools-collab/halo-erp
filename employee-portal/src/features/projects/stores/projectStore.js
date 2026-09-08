@@ -22,16 +22,14 @@ import {
   updateProjectStatsInDb,
   deleteProjectFromDb,
   computeProjectMetrics,
+  applyProjectTaskMetrics,
   DEFAULT_TASK_STATUSES,
 } from '../services/projectService'
 
 const applyMetricsToProjects = (projects = [], tasks = []) =>
   (projects || []).map((p) => {
     const pId = p.projectId || p.id
-    return {
-      ...p,
-      ...computeProjectMetrics(pId, tasks),
-    }
+    return applyProjectTaskMetrics(p, computeProjectMetrics(pId, tasks))
   })
 
 const DEMO_PROJECTS = [
@@ -298,7 +296,7 @@ export const useProjectStore = create(
 
           const updatedProjects = state.projects.map((p) =>
             p.projectId === newTask.projectId || p.id === newTask.projectId
-              ? { ...p, ...metrics }
+              ? applyProjectTaskMetrics(p, metrics)
               : p
           )
 
@@ -346,7 +344,7 @@ export const useProjectStore = create(
 
           const updatedProjects = state.projects.map((p) =>
             p.projectId === targetTask.projectId || p.id === targetTask.projectId
-              ? { ...p, ...metrics }
+              ? applyProjectTaskMetrics(p, metrics)
               : p
           )
 
@@ -377,7 +375,7 @@ export const useProjectStore = create(
           projectStats = metrics
           const updatedProjects = state.projects.map((p) =>
             p.projectId === targetProjectId || p.id === targetProjectId
-              ? { ...p, ...metrics }
+              ? applyProjectTaskMetrics(p, metrics)
               : p
           )
           return { tasks: updatedTasks, projects: updatedProjects }
@@ -425,7 +423,7 @@ export const useProjectStore = create(
           projectStats = metrics
           const updatedProjects = state.projects.map((p) =>
             p.projectId === targetProjectId || p.id === targetProjectId
-              ? { ...p, ...metrics }
+              ? applyProjectTaskMetrics(p, metrics)
               : p
           )
 
@@ -451,7 +449,7 @@ export const useProjectStore = create(
           projectStats = metrics
           const updatedProjects = state.projects.map((p) =>
             p.projectId === targetProjectId || p.id === targetProjectId
-              ? { ...p, ...metrics }
+              ? applyProjectTaskMetrics(p, metrics)
               : p
           )
 
@@ -586,7 +584,7 @@ export const useProjectStore = create(
           projectStats = metrics
           const updatedProjects = state.projects.map((p) =>
             p.projectId === targetProjectId || p.id === targetProjectId
-              ? { ...p, ...metrics }
+              ? applyProjectTaskMetrics(p, metrics)
               : p
           )
 

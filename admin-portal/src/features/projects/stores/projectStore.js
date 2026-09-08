@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { DEFAULT_TASK_STATUSES } from '../services/projectService'
+import { DEFAULT_TASK_STATUSES, deriveProjectStatusFromMetrics } from '../services/projectService'
 
 export const DEMO_PROJECTS = [
   {
@@ -232,6 +232,11 @@ export const useProjectStore = create((set) => ({
               totalTaskCount: totalCount,
               completedTaskCount: completedCount,
               completionPercent,
+              status: deriveProjectStatusFromMetrics(p, {
+                totalTaskCount: totalCount,
+                completedTaskCount: completedCount,
+                completionPercent,
+              }),
             }
           : p
       )
@@ -260,6 +265,11 @@ export const useProjectStore = create((set) => ({
               ...p,
               completedTaskCount: completedCount,
               completionPercent,
+              status: deriveProjectStatusFromMetrics(p, {
+                totalTaskCount: totalCount,
+                completedTaskCount: completedCount,
+                completionPercent,
+              }),
             }
           : p
       )

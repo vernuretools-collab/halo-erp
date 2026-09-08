@@ -26,7 +26,7 @@ export const AppShell = () => {
 
   useAnnouncementBrowserAlerts(identityIds)
   usePayslipBrowserAlerts(identityIds)
-  useProjectBrowserAlerts(identityIds)
+  useProjectBrowserAlerts(identityIds, { user, userDoc })
 
   useEffect(() => {
     if (!user?.uid) return

@@ -1,13 +1,19 @@
 /**
- * Backfill employees from profiles and normalize org_id.
+ * Keep the employee directory as Firebase /employees only.
+ * Dummy Auth / users-collection accounts stay in profiles, not employees.
+ *
  * Env: SUPABASE_URL (or VITE_SUPABASE_URL), SUPABASE_SERVICE_ROLE_KEY
+ * Optional: GOOGLE_APPLICATION_CREDENTIALS / FIREBASE_PROJECT_ID (default new-crm-8165a)
  */
 import { createClient } from '@supabase/supabase-js'
-import { readFileSync, existsSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { createRequire } from 'node:module'
+import { readFileSync, existsSync, writeFileSync } from 'node:fs'
+import { dirname, resolve, join } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
+const require = createRequire(import.meta.url)
 
 function loadEnvFile(filePath) {
   if (!existsSync(filePath)) return
@@ -35,49 +41,54 @@ if (!url || !key || url === 'mock') {
   process.exit(0)
 }
 
-const admin = createClient(url, key)
-const skipRoles = new Set(['admin', 'owner', 'superadmin', 'client'])
-
-const { data: profiles, error: pErr } = await admin.from('profiles').select('*')
-if (pErr) throw pErr
-
-let inserted = 0
-let updatedOrg = 0
-for (const p of profiles || []) {
-  const role = String(p.data?.role || 'employee').toLowerCase()
-  const orgId = p.org_id || p.data?.orgId || 'org_demo'
-  if (p.org_id !== orgId || p.data?.orgId !== orgId) {
-    const { error } = await admin.from('profiles').update({
-      org_id: orgId,
-      data: { ...(p.data || {}), orgId },
-    }).eq('id', p.id)
-    if (error) console.warn('profile org update failed', p.id, error.message)
-    else updatedOrg += 1
+function initFirebaseAdmin() {
+  const admin = require('firebase-admin')
+  if (admin.apps.length) return admin
+  const projectId = process.env.FIREBASE_PROJECT_ID || 'new-crm-8165a'
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    const cfgPath = join(homedir(), '.config', 'configstore', 'firebase-tools.json')
+    if (existsSync(cfgPath)) {
+      const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'))
+      const refresh = cfg.tokens?.refresh_token
+      if (refresh) {
+        const adcPath = join(tmpdir(), 'new-crm-firebase-adc.json')
+        writeFileSync(adcPath, JSON.stringify({
+          type: 'authorized_user',
+          client_id: '563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com',
+          client_secret: 'j9iVZfS8kkCEFUPaAeJV0sAi',
+          refresh_token: refresh,
+        }))
+        process.env.GOOGLE_APPLICATION_CREDENTIALS = adcPath
+      }
+    }
   }
-  if (skipRoles.has(role)) continue
-  const { data: existing } = await admin.from('employees').select('id').eq('id', p.id).maybeSingle()
-  if (existing) continue
-  const { error } = await admin.from('employees').upsert({
-    id: p.id,
-    org_id: orgId,
-    user_id: p.id,
-    auth_id: p.auth_id,
-    data: { ...(p.data || {}), orgId },
-    updated_at: new Date().toISOString(),
-  })
-  if (error) console.warn('employee insert failed', p.id, error.message)
-  else inserted += 1
+  admin.initializeApp({ projectId })
+  return admin
 }
 
-const { data: employees } = await admin.from('employees').select('id,org_id,data')
+const fbAdmin = initFirebaseAdmin()
+const empSnap = await fbAdmin.firestore().collection('employees').get()
+const realIds = new Set(empSnap.docs.map((d) => d.id))
+console.log(`Firebase /employees: ${realIds.size}`)
+
+const sb = createClient(url, key, { auth: { persistSession: false } })
+const { data: employees, error } = await sb.from('employees').select('id,org_id,data')
+if (error) throw error
+
+let removed = 0
+let kept = 0
 for (const e of employees || []) {
-  const orgId = e.org_id || e.data?.orgId || 'org_demo'
-  if (!e.org_id || !e.data?.orgId) {
-    await admin.from('employees').update({
-      org_id: orgId,
-      data: { ...(e.data || {}), orgId },
-    }).eq('id', e.id)
+  if (realIds.has(e.id)) {
+    kept += 1
+    continue
+  }
+  const { error: delErr } = await sb.from('employees').delete().eq('id', e.id)
+  if (delErr) console.warn('delete failed', e.id, delErr.message)
+  else {
+    removed += 1
+    const name = e.data?.displayName || e.data?.name || e.data?.email || e.id
+    console.log('removed dummy employee', name, e.id)
   }
 }
 
-console.log(`Employee directory repair: inserted ${inserted} employee rows, updated ${updatedOrg} profile orgs.`)
+console.log(`Employee directory repair: kept ${kept} real employees, removed ${removed} dummy rows.`)

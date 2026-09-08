@@ -28,7 +28,7 @@ import {
   resolveLeaveLimits,
   resolvePermissionHours,
 } from './services/leaveEntitlementUtils'
-import { Users, CheckCircle2, Calendar, Plus, X, Clock, AlertCircle, AlertTriangle, ShieldCheck, ChevronLeft, ChevronRight, ChevronDown, Trash2, Ban } from 'lucide-react'
+import { Users, CheckCircle2, Calendar, Plus, X, Clock, AlertCircle, AlertTriangle, ChevronLeft, ChevronRight, ChevronDown, Trash2, Ban, Home } from 'lucide-react'
 import { collection, onSnapshot } from 'firebase/firestore'
 import { db } from '../../shared/services/firebaseService'
 
@@ -600,10 +600,17 @@ export const LeaveManagement = () => {
 
   const pendingRequests = myLeaveRequests.filter((l) => l.status === 'pending').length
   const approvedRequests = myLeaveRequests.filter((l) => l.status === 'approved')
-  const rejectedRequests = myLeaveRequests.filter((l) => l.status === 'rejected')
 
   const currentMonthApproved = approvedRequests.filter((l) => {
     return l.startDate && l.startDate.startsWith(currentMonthStr)
+  })
+
+  const leaveMonthKey = (date) => (date ? String(date).slice(0, 7) : '')
+  const visibleLeaveRequests = myLeaveRequests.filter((l) => {
+    const startMonth = leaveMonthKey(l.startDate)
+    const endMonth = leaveMonthKey(l.endDate || l.startDate)
+    if (!startMonth && !endMonth) return true
+    return startMonth >= currentMonthStr || endMonth >= currentMonthStr
   })
 
   const employeeWfhFilter = {
@@ -654,6 +661,15 @@ export const LeaveManagement = () => {
     wfhPolicy.leaveFormEnabled || wfhPolicy.clockInChoice
       ? Math.max(0, (Number(wfhPolicy.limit) || 1) - usedWfhDays)
       : null
+  const isFullWfh = wfhPolicy.mode === 'full'
+  const isWeeklyWfh = wfhPolicy.mode === 'weekly'
+  const wfhCardLimit = isWeeklyWfh ? (Number(wfhPolicy.limit) || 1) : leaveLimits.wfh
+  const wfhCardUsed = isWeeklyWfh ? usedWfhDays : usedPaidWfhDaysThisMonth
+  const wfhCardRemaining = isWeeklyWfh
+    ? Math.max(0, wfhCardLimit - usedWfhDays)
+    : remainingPaidWfhDays
+  const wfhCardPeriodLabel = isWeeklyWfh ? 'this week' : currentMonthName
+  const wfhCardTitle = isWeeklyWfh ? 'Weekly Work From Home' : 'Monthly Work From Home'
 
   const handleRequestLeave = async (e) => {
     e.preventDefault()
@@ -974,66 +990,6 @@ export const LeaveManagement = () => {
         </div>
       </div>
 
-      {/* Granted / Approved Leave Status Notification Banner */}
-      {approvedRequests.length > 0 && (
-        <div className="bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-300 dark:border-emerald-500/30 rounded-2xl p-4 flex items-center justify-between shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-300 dark:border-emerald-500/30">
-              <CheckCircle2 className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="font-bold text-emerald-950 dark:text-slate-100 text-sm flex items-center gap-2">
-                Your leave is granted!
-              </h4>
-              <p className="text-xs text-emerald-800 dark:text-slate-300 mt-0.5">
-                {approvedRequests[0].leaveType} ({formatLeaveDuration(approvedRequests[0])}) for {approvedRequests[0].employeeName} has been approved
-                {approvedRequests[0].reviewedBy ? ` by ${approvedRequests[0].reviewedBy}` : ' by management'}.
-              </p>
-            </div>
-          </div>
-          <Badge variant="success">Granted</Badge>
-        </div>
-      )}
-
-      {/* Rejected Leave Status Banner */}
-      {rejectedRequests.length > 0 && (
-        <div className="bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 rounded-2xl p-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-rose-100 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center border border-rose-200 dark:border-rose-500/30">
-              <AlertTriangle className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="font-bold text-rose-950 dark:text-slate-100 text-sm">
-                Leave Request Notice
-              </h4>
-              <p className="text-xs text-rose-800 dark:text-slate-300 mt-0.5">
-                {rejectedRequests[0].leaveType} request for {rejectedRequests[0].employeeName} was declined
-                {rejectedRequests[0].reviewedBy ? ` by ${rejectedRequests[0].reviewedBy}` : ' by administrator'}.
-              </p>
-            </div>
-          </div>
-          <Badge variant="danger">Declined</Badge>
-        </div>
-      )}
-
-      {/* Monthly Policy Banner */}
-      <div className="bg-accent-soft dark:bg-accent/10 border border-accent/20 dark:border-accent/20 rounded-2xl p-4 flex items-center justify-between shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-accent-soft text-accent flex items-center justify-center border border-accent/20 dark:border-accent/30 shrink-0">
-            <ShieldCheck className="w-5 h-5" />
-          </div>
-          <div>
-            <h4 className="font-bold text-fg text-sm">
-              Monthly Leave Allowance Policy ({currentMonthName})
-            </h4>
-            <p className="text-xs text-muted mt-0.5">
-              This month: <strong className="text-accent font-semibold">{leaveLimits.casual} Casual</strong>, <strong className="text-accent font-semibold">{leaveLimits.sick} Sick</strong>, <strong className="text-accent font-semibold">{leaveLimits.wfh} WFH</strong>, and <strong className="text-accent font-semibold">{formatHoursAsHrsMins(permissionHoursLimit)} Permission</strong> (auto-granted, no admin approval). Additional day leave is marked LOP (unpaid) even if approved.
-            </p>
-          </div>
-        </div>
-        <Badge variant="indigo">Monthly Quota</Badge>
-      </div>
-
       {/* Monthly PTO Balance Summary Metrics */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <Card className="p-4 flex items-center justify-between border-border">
@@ -1087,18 +1043,37 @@ export const LeaveManagement = () => {
           </div>
         </Card>
 
-        <Card className="p-4 flex items-center justify-between border-border">
-          <div>
-            <span className="text-[11px] font-medium text-muted uppercase tracking-wider">
-              Pending Approvals
-            </span>
-            <p className="text-xl font-bold text-amber-600 dark:text-amber-400 mt-1">{pendingRequests} Requests</p>
-            <p className="text-[10px] text-slate-400 mt-0.5">Awaiting review</p>
-          </div>
-          <div className="w-9 h-9 rounded-xl bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
-            <AlertCircle className="w-5 h-5" />
-          </div>
-        </Card>
+        {isFullWfh ? (
+          <Card className="p-4 flex items-center justify-between border-border">
+            <div>
+              <span className="text-[11px] font-medium text-muted uppercase tracking-wider">
+                Pending Approvals
+              </span>
+              <p className="text-xl font-bold text-amber-600 dark:text-amber-400 mt-1">{pendingRequests} Requests</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">Awaiting review</p>
+            </div>
+            <div className="w-9 h-9 rounded-xl bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+              <AlertCircle className="w-5 h-5" />
+            </div>
+          </Card>
+        ) : (
+          <Card className="p-4 flex items-center justify-between border-border">
+            <div>
+              <span className="text-[11px] font-medium text-muted uppercase tracking-wider">
+                {wfhCardTitle}
+              </span>
+              <p className="text-xl font-bold text-cyan-600 dark:text-cyan-400 mt-1">
+                {wfhCardRemaining} {wfhCardRemaining === 1 ? 'Day' : 'Days'} Remaining
+              </p>
+              <p className="text-[10px] text-muted mt-0.5">
+                {wfhCardUsed} of {wfhCardLimit} {wfhCardLimit === 1 ? 'Day' : 'Days'} Used ({wfhCardPeriodLabel})
+              </p>
+            </div>
+            <div className="w-9 h-9 rounded-xl bg-cyan-50 dark:bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0">
+              <Home className="w-5 h-5" />
+            </div>
+          </Card>
+        )}
 
         <Card className="p-4 flex items-center justify-between border-border">
           <div>
@@ -1127,14 +1102,14 @@ export const LeaveManagement = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 dark:divide-slate-800/60">
-            {myLeaveRequests.length === 0 ? (
+            {visibleLeaveRequests.length === 0 ? (
               <tr>
                 <td colSpan="5" className="p-6 text-center text-muted text-xs">
-                  No leave requests submitted yet. Click "Request Leave" above to apply.
+                  No leave from {currentMonthName} onward. Click "Request Leave" above to apply.
                 </td>
               </tr>
             ) : (
-              myLeaveRequests.map((req) => {
+              visibleLeaveRequests.map((req) => {
                 const statusBadge = getStatusBadge(req.status)
                 const canCancel = isOwnPendingRequest(req)
                 const canDelete = canDeleteOwnRequest(req)

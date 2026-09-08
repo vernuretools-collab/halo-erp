@@ -15,6 +15,7 @@ const ROOT_TABLES = {
   clientOnboarding: 'client_onboarding',
   deliverables: 'deliverables',
   clientDocuments: 'client_documents',
+  documentFiles: 'document_files',
   attendance: 'attendance',
   attendanceLogs: 'attendance_logs',
   workTimelineEntries: 'work_timeline_entries',

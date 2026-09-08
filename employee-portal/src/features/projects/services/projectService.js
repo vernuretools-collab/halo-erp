@@ -262,15 +262,24 @@ export const computeProjectMetrics = (projectId, tasks = []) => {
   }
 }
 
-export const getProjectDisplayStatus = (project) => {
+export const deriveProjectStatusFromMetrics = (project, metrics = {}) => {
   const stored = String(project?.status || 'active').toLowerCase()
   if (stored === 'on_hold') return 'on_hold'
-  const total = Number(project?.totalTaskCount) || 0
-  const done = Number(project?.completedTaskCount) || 0
-  const pct = Number(project?.completionPercent) || 0
-  if ((total > 0 && done >= total) || pct >= 100) return 'completed'
+  const total = Number(metrics.totalTaskCount ?? project?.totalTaskCount) || 0
+  const done = Number(metrics.completedTaskCount ?? project?.completedTaskCount) || 0
+  const pct = Number(metrics.completionPercent ?? project?.completionPercent) || 0
+  if (total > 0 && (done >= total || pct >= 100)) return 'completed'
+  if (stored === 'completed') return 'active'
   return stored || 'active'
 }
+
+export const applyProjectTaskMetrics = (project, metrics) => ({
+  ...project,
+  ...metrics,
+  status: deriveProjectStatusFromMetrics(project, metrics),
+})
+
+export const getProjectDisplayStatus = (project) => deriveProjectStatusFromMetrics(project, project)
 
 export const getProjectStartDate = (project) =>
   project?.startDate || project?.estimatedDate || project?.dueDate || ''
@@ -432,9 +441,19 @@ export const updateProjectStatsInDb = async (projectId, stats) => {
       totalHoursLogged: Number(stats.totalHoursLogged) || 0,
       updatedAt: serverTimestamp(),
     }
-    if (totalTaskCount > 0 && completedTaskCount >= totalTaskCount) {
-      payload.status = 'completed'
+    let currentStatus = String(stats.currentStatus || '').toLowerCase()
+    if (!currentStatus) {
+      try {
+        const snap = await getDoc(doc(db, 'projects', projectId))
+        currentStatus = String(snap.data()?.status || 'active').toLowerCase()
+      } catch (_) {
+        currentStatus = 'active'
+      }
     }
+    payload.status = deriveProjectStatusFromMetrics(
+      { status: currentStatus },
+      { totalTaskCount, completedTaskCount, completionPercent }
+    )
     await updateDoc(doc(db, 'projects', projectId), payload)
   } catch (err) {
     console.error('Error updating project stats in Firestore:', err)

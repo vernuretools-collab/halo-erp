@@ -13,6 +13,7 @@ cd scripts/migrate
 npm install
 set GOOGLE_APPLICATION_CREDENTIALS=C:\path\to\serviceAccount.json
 set FIREBASE_PROJECT_ID=new-crm-8165a
+set FIREBASE_STORAGE_BUCKET=new-crm-8165a.firebasestorage.app
 set SUPABASE_URL=https://YOUR-PROJECT.supabase.co
 set SUPABASE_SERVICE_ROLE_KEY=eyJ...
 node export-and-import.mjs --auth --storage

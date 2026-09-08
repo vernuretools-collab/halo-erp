@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useUserStore } from '../../stores/userStore'
 import { useProjectStore } from '../projects/stores/projectStore'
 import { ClockInOverviewWidget } from './components/ClockInOverviewWidget'
@@ -9,6 +9,7 @@ import { useTeamStore } from '../team/stores/teamStore'
 import {
   formatLeaveDuration,
   getRequestedLeaveType,
+  isPermissionLeave,
   leaveMatchesEmployeeFilter,
 } from '../team/services/leaveEntitlementUtils'
 import {
@@ -28,11 +29,13 @@ import {
   Umbrella,
   HeartPulse,
   Laptop,
+  Pin,
 } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
-import { isTaskVisibleToUser } from '../projects/services/projectService'
+import { collectUserIdentityIds, isTaskVisibleToUser } from '../projects/services/projectService'
+import { subscribeAnnouncements, pickDashboardAnnouncements } from '../announcements/services/announcementsService'
 import { db } from '../../shared/services/firebaseService'
-import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore'
+import { collection, onSnapshot } from 'firebase/firestore'
 
 const quickLinks = [
   { name: 'Projects', path: '/projects/list', icon: FolderKanban, tile: 'bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400' },
@@ -70,12 +73,22 @@ const requestStatusVariant = (status) => {
   return 'warning'
 }
 
+const eventTimeMs = (value) => {
+  if (!value) return 0
+  if (typeof value.toMillis === 'function') return value.toMillis()
+  if (typeof value.seconds === 'number') return value.seconds * 1000
+  const t = Date.parse(value)
+  return Number.isNaN(t) ? 0 : t
+}
+
 export const EmployeeDashboard = () => {
   const { user, userDoc, claims } = useUserStore()
   const { tasks, projects, updateTaskStatus, fetchProjectsAndTasks } = useProjectStore()
   const leaveRequests = useTeamStore((s) => s.leaveRequests)
+  const setLeaveRequests = useTeamStore((s) => s.setLeaveRequests)
+  const identityIds = useMemo(() => collectUserIdentityIds(user, userDoc), [user, userDoc])
 
-  const currentUserId = userDoc?.uid || user?.uid
+  const currentUserId = identityIds[0] || userDoc?.uid || user?.uid
   const currentUserEmail = userDoc?.email || user?.email
 
   const displayName = userDoc?.displayName || user?.displayName || 'Team Member'
@@ -85,7 +98,6 @@ export const EmployeeDashboard = () => {
 
   // Dashboard data state
   const [announcements, setAnnouncements] = useState([])
-  const [leaveBalance, setLeaveBalance] = useState({ annual: 12, used: 0 })
   const [loadingWidgets, setLoadingWidgets] = useState(true)
 
   const [userQuote, setUserQuote] = useState(() => {
@@ -113,51 +125,24 @@ export const EmployeeDashboard = () => {
     return () => clearInterval(timer)
   }, [])
 
-  // Fetch dashboard widget data
   useEffect(() => {
-    if (!currentUserId) return
-    let cancelled = false
+    const unsubscribe = subscribeAnnouncements((list) => {
+      setAnnouncements(pickDashboardAnnouncements(list, 3))
+      setLoadingWidgets(false)
+    })
+    return () => unsubscribe()
+  }, [])
 
-    const fetchWidgetData = async () => {
-      try {
-        // Fetch latest 3 announcements
-        try {
-          const annRef = collection(db, 'announcements')
-          const annQ = query(annRef, orderBy('createdAt', 'desc'), limit(3))
-          const annSnap = await getDocs(annQ)
-          if (!cancelled) {
-            setAnnouncements(annSnap.docs.map((d) => ({ id: d.id, ...d.data() })))
-          }
-        } catch {
-          // Collection may not exist yet; silently skip
-        }
-
-        // Fetch leave balance (approved leave requests this year)
-        try {
-          const yearStart = new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0]
-          const leaveRef = collection(db, 'leaveRequests')
-          const leaveQ = query(
-            leaveRef,
-            where('employeeId', '==', currentUserId),
-            where('status', '==', 'approved'),
-            where('startDate', '>=', yearStart)
-          )
-          const leaveSnap = await getDocs(leaveQ)
-          const usedDays = leaveSnap.docs.reduce((sum, d) => sum + (Number(d.data().daysCount) || 1), 0)
-          if (!cancelled) {
-            setLeaveBalance({ annual: 24, used: usedDays })
-          }
-        } catch {
-          // Collection may not exist yet; silently skip
-        }
-      } finally {
-        if (!cancelled) setLoadingWidgets(false)
-      }
-    }
-
-    fetchWidgetData()
-    return () => { cancelled = true }
-  }, [currentUserId])
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(db, 'leaveRequests'),
+      (snap) => {
+        setLeaveRequests(snap.docs.map((d) => ({ ...d.data(), leaveId: d.id })))
+      },
+      (err) => console.error('Error listening to leave requests:', err)
+    )
+    return () => unsub()
+  }, [setLeaveRequests])
 
   const isBrightSun = currentHour >= 10 && currentHour < 17
 
@@ -177,21 +162,27 @@ export const EmployeeDashboard = () => {
     }
   }
 
-  const myRecentRequests = (Array.isArray(leaveRequests) ? leaveRequests : [])
-    .filter((l) =>
-      leaveMatchesEmployeeFilter(l, {
-        employeeId: currentUserId,
-        uid: currentUserId,
-        employeeEmail: currentUserEmail,
-        employeeName: displayName,
+  const myRecentRequests = useMemo(() => {
+    return (Array.isArray(leaveRequests) ? leaveRequests : [])
+      .filter((l) =>
+        leaveMatchesEmployeeFilter(l, {
+          employeeId: currentUserId,
+          uid: currentUserId,
+          employeeEmail: currentUserEmail,
+          employeeName: displayName,
+          identityIds,
+        })
+      )
+      .filter((l) => !(isPermissionLeave(l) && String(l.status || '').toLowerCase() === 'approved'))
+      .sort((a, b) => {
+        const aDate =
+          eventTimeMs(a.updatedAt) || eventTimeMs(a.createdAt) || eventTimeMs(a.startDate)
+        const bDate =
+          eventTimeMs(b.updatedAt) || eventTimeMs(b.createdAt) || eventTimeMs(b.startDate)
+        return bDate - aDate
       })
-    )
-    .sort((a, b) => {
-      const aDate = a.createdAt?.toDate?.() || new Date(a.startDate || 0)
-      const bDate = b.createdAt?.toDate?.() || new Date(b.startDate || 0)
-      return bDate - aDate
-    })
-    .slice(0, 5)
+      .slice(0, 5)
+  }, [leaveRequests, currentUserId, currentUserEmail, displayName, identityIds])
 
   const today = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
@@ -370,13 +361,17 @@ export const EmployeeDashboard = () => {
             </div>
           ) : (
             <div className="space-y-2">
-              {announcements.slice(0, 3).map((ann) => (
+              {announcements.map((ann) => (
                 <div
                   key={ann.id}
-                  className={`flex items-start gap-3 p-3 rounded-xl ${priorityColors[ann.priority] || priorityColors['info']}`}
+                  className={`flex items-start gap-3 p-3 rounded-xl ${
+                    ann.pinned
+                      ? 'bg-red-50 dark:bg-[#7F1D1D]/40 border border-red-200 dark:border-red-500/20'
+                      : priorityColors[ann.priority] || priorityColors['info']
+                  }`}
                 >
                   <div className="w-8 h-8 rounded-lg bg-white/70 dark:bg-slate-900/40 flex items-center justify-center shrink-0">
-                    <Megaphone className="w-4 h-4" />
+                    {ann.pinned ? <Pin className="w-4 h-4" /> : <Megaphone className="w-4 h-4" />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <span className="text-xs font-semibold text-fg block truncate">{ann.title}</span>

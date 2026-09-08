@@ -385,6 +385,23 @@ const leaveCoversDay = (data, ymd) => {
   return ymd >= startYmd && ymd <= endYmd
 }
 
+const isActivelyInOffice = (log) =>
+  Boolean(log?.isOnBreak || log?.clockedIn || log?.onDuty === true)
+
+const isAttendancePresent = (log) => {
+  if (!log) return false
+  // Break is still a present workday — never treat it as absent
+  if (log.isOnBreak === true) return true
+  if (log.present === false) return false
+  if (log.present === true || log.status === 'present' || log.onDuty === true) return true
+  if (log.clockedIn) return true
+  if (log.clockInTime && log.clockInTime !== '—') return true
+  if (log.clockInTimestamp || log.clockIn) return true
+  if (log.clockOutTime) return true
+  if (Number(log.regularSeconds) > 0) return true
+  return false
+}
+
 /**
  * Daily org snapshot (not date-filterable): all-time employees/tickets, today's attendance/leaves
  */
@@ -399,26 +416,60 @@ export const getOrgStats = async () => {
     ])
 
     const totalEmployees = empSnap.docs ? empSnap.docs.length : 0
+    const employeeUids = new Set()
+    const employeeRecords = []
+    empSnap.docs?.forEach((d) => {
+      const emp = d.data()
+      employeeRecords.push({ ...emp, id: d.id })
+      ;[emp.uid, emp.employeeId, d.id].forEach((id) => {
+        const uid = String(id || '').trim()
+        if (uid) employeeUids.add(uid)
+      })
+    })
+
+    const matchEmployeeIds = (data) => {
+      const ids = new Set()
+      ;[data?.uid, data?.employeeId, data?.id].forEach((id) => {
+        const uid = String(id || '').trim()
+        if (uid) ids.add(uid)
+      })
+      const email = String(data?.employeeEmail || data?.email || '').trim().toLowerCase()
+      employeeRecords.forEach((emp) => {
+        const empEmail = String(emp.email || '').trim().toLowerCase()
+        const empIds = [emp.uid, emp.employeeId, emp.id].map((id) => String(id || '').trim()).filter(Boolean)
+        const idHit = empIds.some((id) => ids.has(id))
+        const emailHit = Boolean(email && empEmail && email === empEmail)
+        if (!idHit && !emailHit) return
+        empIds.forEach((id) => ids.add(id))
+      })
+      return ids
+    }
+
+    const onLeaveUids = new Set()
+    let approvedLeaves = 0
+    leaveSnap.docs?.forEach((d) => {
+      const data = d.data()
+      if (String(data.leaveType || '') === 'On Duty') return
+      if ((data.status || '').toLowerCase() !== 'approved') return
+      if (!leaveCoversDay(data, todayYmd)) return
+      approvedLeaves++
+      matchEmployeeIds(data).forEach((id) => onLeaveUids.add(id))
+    })
 
     const presentUids = new Set()
     attSnap.docs?.forEach((d) => {
       const log = d.data()
       const logYmd = toLocalYmd(log.date) || toLocalYmd(log.checkIn || log.timestamp || log.createdAt)
       if (logYmd !== todayYmd) return
-      const isPresent = log.present === true || log.status === 'present' || log.clockedIn || log.checkIn
-      if (!isPresent) return
-      presentUids.add(String(log.uid || log.employeeId || d.id))
+      if (!isAttendancePresent(log)) return
+      const uid = String(log.uid || log.employeeId || '').trim()
+      if (!uid || !employeeUids.has(uid)) return
+      // Approved leave drops present only if they did not clock in / go on break today
+      if (onLeaveUids.has(uid) && !isActivelyInOffice(log)) return
+      presentUids.add(uid)
     })
     const presentCount = presentUids.size
     const attendancePercent = totalEmployees > 0 ? ((presentCount / totalEmployees) * 100).toFixed(1) : '0.0'
-
-    let approvedLeaves = 0
-    leaveSnap.docs?.forEach((d) => {
-      const data = d.data()
-      if (String(data.leaveType || '') === 'On Duty') return
-      if ((data.status || '').toLowerCase() !== 'approved') return
-      if (leaveCoversDay(data, todayYmd)) approvedLeaves++
-    })
 
     let openTickets = 0
     ticketSnap.docs?.forEach((d) => {

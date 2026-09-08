@@ -26,7 +26,7 @@ export const AppShell = () => {
     [user, userDoc, claims]
   )
 
-  useInboxBrowserAlerts(identityIds)
+  useInboxBrowserAlerts(identityIds, { user, userDoc })
 
   if (!sessionReady) {
     return (

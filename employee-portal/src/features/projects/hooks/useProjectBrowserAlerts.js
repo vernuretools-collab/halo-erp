@@ -1,13 +1,53 @@
 import { useEffect } from 'react'
 import { collection, onSnapshot } from 'firebase/firestore'
 import { db } from '../../../shared/services/firebaseService'
-import { showForegroundBrowserNotification } from '../../../shared/services/fcmService'
+import {
+  armBrowserNotifications,
+  showForegroundBrowserNotification,
+} from '../../../shared/services/fcmService'
+import { subscribeProjectTaskAlerts } from '../../../../../shared/supabase/subscribeProjectTaskAlerts.js'
 
 const asIdList = (userIdOrIds) =>
   [...new Set((Array.isArray(userIdOrIds) ? userIdOrIds : [userIdOrIds]).filter(Boolean).map(String))]
 
-export const useProjectBrowserAlerts = (userIdOrIds) => {
+const defaultProjectLink = (data) => {
+  if (data?.link) return data.link
+  if (data?.projectId) return `/projects/${data.projectId}/tasks`
+  return '/projects/list'
+}
+
+export const useProjectBrowserAlerts = (userIdOrIds, profile = {}) => {
   const ids = asIdList(userIdOrIds)
+  const { user, userDoc } = profile
+
+  useEffect(() => {
+    const unlock = () => {
+      void armBrowserNotifications()
+    }
+
+    document.addEventListener('click', unlock, { once: true })
+    document.addEventListener('keydown', unlock, { once: true })
+    void armBrowserNotifications()
+
+    return () => {
+      document.removeEventListener('click', unlock)
+      document.removeEventListener('keydown', unlock)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!ids.length && !user?.uid) return undefined
+
+    return subscribeProjectTaskAlerts({
+      mode: 'employee',
+      identityIds: ids,
+      user,
+      userDoc,
+      onAlert: (payload) => {
+        void showForegroundBrowserNotification(payload)
+      },
+    })
+  }, [ids.join('|'), user?.uid, userDoc?.uid, userDoc?.email])
 
   useEffect(() => {
     if (!ids.length) return undefined
@@ -26,12 +66,18 @@ export const useProjectBrowserAlerts = (userIdOrIds) => {
 
           void showForegroundBrowserNotification({
             notification: {
-              title: data.title || (data.type === 'project' ? 'New project created' : 'Task status updated'),
+              title:
+                data.title ||
+                (data.type === 'task'
+                  ? 'Task status updated'
+                  : data.tag?.startsWith('project-assigned-')
+                    ? 'Assigned to a project'
+                    : 'New project created'),
               body: data.message || '',
             },
             data: {
               type: data.type,
-              link: data.link || (data.type === 'project' ? '/projects/list' : '/tasks'),
+              link: data.type === 'task' ? data.link || '/projects/tasks' : defaultProjectLink(data),
               tag: data.tag || `${data.type}-${change.doc.id}`,
               projectId: data.projectId,
               taskId: data.taskId,

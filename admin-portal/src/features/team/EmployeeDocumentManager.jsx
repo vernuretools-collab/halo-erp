@@ -15,7 +15,7 @@ import {
   doc,
   getDocs,
 } from 'firebase/firestore'
-import { ref, deleteObject } from 'firebase/storage'
+import { ref, deleteObject, resolveFileUrl } from 'firebase/storage'
 import {
   FileText,
   Download,
@@ -32,6 +32,50 @@ import {
   Image as ImageIcon,
 } from 'lucide-react'
 
+const normalizeEmail = (value) => String(value || '').trim().toLowerCase()
+
+const uniqueIds = (...values) => {
+  const ids = []
+  const seen = new Set()
+  const add = (value) => {
+    if (value == null || value === '' || typeof value === 'object') return
+    const key = String(value)
+    if (seen.has(key)) return
+    seen.add(key)
+    ids.push(key)
+  }
+  values.flat().forEach(add)
+  return ids
+}
+
+const ownerIdsFromDocSnap = (snap) => {
+  const data = snap.data() || {}
+  const prefixedOwner = String(snap.id || '').includes('__') ? String(snap.id).split('__')[0] : null
+  return uniqueIds(
+    snap.ownerUserId,
+    data.uploadedBy,
+    data.employeeId,
+    data.employeeDocId,
+    data.uid,
+    prefixedOwner
+  )
+}
+
+const logicalFileId = (snap, ownerUserId) => {
+  const id = String(snap.id || '')
+  if (ownerUserId && id.startsWith(`${ownerUserId}__`)) return id.slice(ownerUserId.length + 2)
+  return id
+}
+
+const employeeMatchesDoc = (emp, docItem) => {
+  if (!emp) return false
+  const ids = new Set(uniqueIds(emp.identityIds, emp.uid, emp.employeeDocId, emp.employeeId))
+  if ((docItem.ownerIds || []).some((id) => ids.has(String(id)))) return true
+  const empEmail = normalizeEmail(emp.email)
+  const docEmail = normalizeEmail(docItem.employeeEmail)
+  return Boolean(empEmail && docEmail && empEmail === docEmail)
+}
+
 const CATEGORIES = [
   { id: 'all', label: 'All Categories', icon: FolderOpen },
   { id: 'certificate', label: 'Certificates', icon: Award },
@@ -43,7 +87,6 @@ const CATEGORIES = [
 export const EmployeeDocumentManager = () => {
   const [employees, setEmployees] = useState([])
   const [selectedEmployeeUid, setSelectedEmployeeUid] = useState('all')
-  const [loadingEmployees, setLoadingEmployees] = useState(true)
 
   const [documents, setDocuments] = useState([])
   const [loadingDocs, setLoadingDocs] = useState(true)
@@ -51,118 +94,118 @@ export const EmployeeDocumentManager = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
 
-  // Load all employees
+  // Load all employees and attach login/profile IDs so uploads can be matched
   useEffect(() => {
     const fetchEmps = async () => {
-      setLoadingEmployees(true)
       try {
-        const emps = await getEmployees()
-        setEmployees(emps || [])
+        const [emps, usersSnap] = await Promise.all([
+          getEmployees(),
+          getDocs(collection(db, 'users')).catch(() => ({ docs: [] })),
+        ])
+        const extraIdsByEmail = new Map()
+        ;(usersSnap.docs || []).forEach((d) => {
+          const data = d.data() || {}
+          const email = normalizeEmail(data.email)
+          if (!email) return
+          extraIdsByEmail.set(
+            email,
+            uniqueIds(extraIdsByEmail.get(email), d.id, data.uid, data.id, data.auth_id, data.authId)
+          )
+        })
+        setEmployees(
+          (emps || []).map((emp) => ({
+            ...emp,
+            identityIds: uniqueIds(
+              emp.identityIds,
+              emp.uid,
+              emp.employeeDocId,
+              emp.employeeId,
+              extraIdsByEmail.get(normalizeEmail(emp.email))
+            ),
+          }))
+        )
       } catch (err) {
         console.error('Error fetching employees:', err)
-      } finally {
-        setLoadingEmployees(false)
       }
     }
     fetchEmps()
   }, [])
 
-  // Listen to documents for selected employee OR all employees
+  // Listen to every uploaded document, then match it to directory employees
   useEffect(() => {
     setLoadingDocs(true)
 
-    if (selectedEmployeeUid !== 'all') {
-      // Single employee listener
-      const q = query(
-        collection(db, `documents/${selectedEmployeeUid}/files`),
-        orderBy('uploadedAt', 'desc')
-      )
+    const q = query(collection(db, 'documentFiles'), orderBy('uploadedAt', 'desc'))
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const selectedEmp =
+          selectedEmployeeUid === 'all'
+            ? null
+            : employees.find(
+                (e) =>
+                  e.uid === selectedEmployeeUid ||
+                  e.employeeDocId === selectedEmployeeUid ||
+                  (e.identityIds || []).includes(selectedEmployeeUid)
+              )
 
-      const unsub = onSnapshot(
-        q,
-        (snapshot) => {
-          const emp = employees.find((e) => e.uid === selectedEmployeeUid)
-          const docs = snapshot.docs.map((d) => ({
-            id: d.id,
-            employeeUid: selectedEmployeeUid,
-            employeeName: emp?.displayName || emp?.email || 'Unknown Employee',
-            employeeEmail: emp?.email || '',
-            employeeDept: emp?.department || emp?.departmentName || '',
-            ...d.data(),
-          }))
-          setDocuments(docs)
-          setLoadingDocs(false)
-        },
-        (err) => {
-          console.error('Error fetching employee documents:', err)
-          setDocuments([])
-          setLoadingDocs(false)
-        }
-      )
+        const docs = snapshot.docs
+          .map((d) => {
+            const data = d.data() || {}
+            const ownerIds = ownerIdsFromDocSnap(d)
+            const ownerUserId = d.ownerUserId || ownerIds[0] || ''
+            const emp = employees.find((employee) =>
+              employeeMatchesDoc(employee, { ownerIds, employeeEmail: data.employeeEmail })
+            )
+            return {
+              ...data,
+              id: logicalFileId(d, ownerUserId),
+              ownerUserId,
+              ownerIds,
+              employeeUid: emp?.uid || emp?.employeeDocId || ownerUserId,
+              employeeName:
+                emp?.displayName || emp?.name || emp?.email || data.employeeName || 'Unknown Employee',
+              employeeEmail: emp?.email || data.employeeEmail || '',
+              employeeDept: emp?.department || emp?.departmentName || '',
+            }
+          })
+          .filter((docItem) => {
+            if (selectedEmployeeUid === 'all') return true
+            return employeeMatchesDoc(
+              selectedEmp || { uid: selectedEmployeeUid, identityIds: [selectedEmployeeUid] },
+              docItem
+            )
+          })
 
-      return () => unsub()
-    } else {
-      // Fetch across all employees
-      if (employees.length === 0 && !loadingEmployees) {
+        setDocuments(docs)
+        setLoadingDocs(false)
+      },
+      (err) => {
+        console.error('Error fetching employee documents:', err)
         setDocuments([])
         setLoadingDocs(false)
-        return
       }
+    )
 
-      const unsubs = []
-      const docsByEmployee = {}
+    return () => unsub()
+  }, [selectedEmployeeUid, employees])
 
-      employees.forEach((emp) => {
-        if (!emp.uid) return
-        const q = query(
-          collection(db, `documents/${emp.uid}/files`),
-          orderBy('uploadedAt', 'desc')
-        )
-
-        const unsub = onSnapshot(
-          q,
-          (snapshot) => {
-            docsByEmployee[emp.uid] = snapshot.docs.map((d) => ({
-              id: d.id,
-              employeeUid: emp.uid,
-              employeeName: emp.displayName || emp.email || 'Unknown Employee',
-              employeeEmail: emp.email || '',
-              employeeDept: emp.department || emp.departmentName || '',
-              ...d.data(),
-            }))
-
-            // Merge and sort all documents
-            const allDocs = Object.values(docsByEmployee).flat()
-            allDocs.sort((a, b) => {
-              const timeA = a.uploadedAt?.toMillis?.() || (a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0)
-              const timeB = b.uploadedAt?.toMillis?.() || (b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0)
-              return timeB - timeA
-            })
-            setDocuments([...allDocs])
-            setLoadingDocs(false)
-          },
-          (err) => {
-            // Collection might not exist for some employees
-            docsByEmployee[emp.uid] = []
-            const allDocs = Object.values(docsByEmployee).flat()
-            setDocuments([...allDocs])
-            setLoadingDocs(false)
-          }
-        )
-        unsubs.push(unsub)
-      })
-
-      return () => {
-        unsubs.forEach((u) => u())
-      }
+  const handleDownload = async (docItem) => {
+    try {
+      const url = (await resolveFileUrl(docItem.storagePath)) || docItem.downloadURL
+      if (!url) throw new Error('No file location on record')
+      window.open(url, '_blank', 'noopener,noreferrer')
+    } catch (err) {
+      console.error('Could not open document:', err)
+      alert('Could not open this document.')
     }
-  }, [selectedEmployeeUid, employees, loadingEmployees])
+  }
 
   const handleDelete = async (docItem) => {
     if (!window.confirm(`Are you sure you want to delete "${docItem.fileName}"?`)) return
     try {
       // Delete Firestore doc
-      await deleteDoc(doc(db, `documents/${docItem.employeeUid}/files`, docItem.id))
+      await deleteDoc(doc(db, `documents/${docItem.ownerUserId || docItem.employeeUid}/files`, docItem.id))
       // Delete Storage file if path exists
       if (docItem.storagePath) {
         const storageRef = ref(storage, docItem.storagePath)
@@ -439,17 +482,15 @@ export const EmployeeDocumentManager = () => {
                       {/* Actions */}
                       <td className="px-5 py-3.5 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          {docItem.downloadURL && (
-                            <a
-                              href={docItem.downloadURL}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-accent-soft dark:bg-accent/15 text-accent hover:bg-accent-soft transition-colors"
+                          {(docItem.storagePath || docItem.downloadURL) && (
+                            <button
+                              onClick={() => handleDownload(docItem)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-accent-soft dark:bg-accent/15 text-accent hover:bg-accent-soft transition-colors cursor-pointer"
                               title="View / Download Document"
                             >
                               <Download className="w-3.5 h-3.5" />
                               <span>Download</span>
-                            </a>
+                            </button>
                           )}
                           <button
                             onClick={() => handleDelete(docItem)}

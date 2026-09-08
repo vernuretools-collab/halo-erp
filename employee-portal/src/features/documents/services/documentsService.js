@@ -2,15 +2,37 @@ import { db, storage } from '../../../shared/services/firebaseService';
 import { collection, addDoc, deleteDoc, doc, onSnapshot, serverTimestamp, query, orderBy } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 
-export const subscribeMyDocuments = (uid, callback) => {
-  const q = query(
-    collection(db, `documents/${uid}/files`),
-    orderBy('uploadedAt', 'desc')
-  );
-  return onSnapshot(q, (snapshot) => {
-    const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    callback(docs);
-  });
+export const subscribeMyDocuments = (uidOrIds, callback) => {
+  const ids = [...new Set((Array.isArray(uidOrIds) ? uidOrIds : [uidOrIds]).filter(Boolean).map(String))]
+  if (!ids.length) return () => {}
+
+  const byKey = new Map()
+  const unsubs = ids.map((uid) => {
+    const q = query(
+      collection(db, `documents/${uid}/files`),
+      orderBy('uploadedAt', 'desc')
+    )
+    return onSnapshot(q, (snapshot) => {
+      for (const key of [...byKey.keys()]) {
+        if (key.startsWith(`${uid}:`)) byKey.delete(key)
+      }
+      snapshot.docs.forEach((docSnap) => {
+        byKey.set(`${uid}:${docSnap.id}`, {
+          id: docSnap.id,
+          ownerUserId: uid,
+          ...docSnap.data(),
+        })
+      })
+      const docs = [...byKey.values()].sort((a, b) => {
+        const timeA = a.uploadedAt?.toMillis?.() || (a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0)
+        const timeB = b.uploadedAt?.toMillis?.() || (b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0)
+        return timeB - timeA
+      })
+      callback(docs)
+    })
+  })
+
+  return () => unsubs.forEach((unsub) => unsub())
 };
 
 export const uploadDocument = async (uid, file, metadata, onProgress) => {
@@ -37,7 +59,11 @@ export const uploadDocument = async (uid, file, metadata, onProgress) => {
           downloadURL,
           uploadedAt: serverTimestamp(),
           description: metadata.description || '',
-          category: metadata.category || 'other'
+          category: metadata.category || 'other',
+          uploadedBy: uid,
+          employeeId: metadata.employeeId || uid,
+          employeeEmail: metadata.employeeEmail || '',
+          employeeName: metadata.employeeName || '',
         });
         resolve({ id: docRef.id, downloadURL });
       }

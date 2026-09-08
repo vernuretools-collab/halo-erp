@@ -107,7 +107,9 @@ export const showForegroundBrowserNotification = async (payload) => {
       : type === 'wellness'
         ? 'Wellness reminder'
         : type === 'project'
-          ? 'New project created'
+          ? payload?.data?.tag?.startsWith('project-assigned-')
+            ? 'Assigned to a project'
+            : 'New project created'
           : type === 'task'
             ? 'Task status updated'
             : 'New Announcement')
@@ -151,17 +153,6 @@ export const showForegroundBrowserNotification = async (payload) => {
   }
 
   try {
-    const reg = await ensureNotificationServiceWorker()
-    const ready = (await navigator.serviceWorker?.ready) || reg
-    if (ready?.showNotification) {
-      await ready.showNotification(title, options)
-      return
-    }
-  } catch {
-    // fall through to Notification constructor
-  }
-
-  try {
     const notif = new Notification(title, options)
     notif.onclick = () => {
       window.focus()
@@ -169,6 +160,17 @@ export const showForegroundBrowserNotification = async (payload) => {
       notif.close()
     }
     setTimeout(() => notif.close(), 12000)
+    return
+  } catch {
+    // fall through to service worker
+  }
+
+  try {
+    const reg = await ensureNotificationServiceWorker()
+    const ready = (await navigator.serviceWorker?.ready) || reg
+    if (ready?.showNotification) {
+      await ready.showNotification(title, options)
+    }
   } catch {
     // In-app bell still updates via inbox documents.
   }

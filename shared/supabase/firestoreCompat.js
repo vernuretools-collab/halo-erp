@@ -139,6 +139,7 @@ function rowToSnap(row, loc) {
   const ref = { type: 'doc', id, ...loc }
   return {
     id,
+    ownerUserId: row.user_id || loc.user_id || null,
     ref,
     exists: () => true,
     data: () => data,
@@ -214,13 +215,71 @@ function applyConstraints(rows, constraints) {
   return out
 }
 
-async function fetchRows(loc) {
+/**
+ * `data->>a->>b` style accessor for a dotted logical field name.
+ */
+function jsonAccessor(field) {
+  const parts = String(field).split('.')
+  const last = parts.pop()
+  return ['data', ...parts].join('->') + '->>' + last
+}
+
+/**
+ * Timestamps are persisted as `{ "__ts": "<iso>" }` wrappers, so `data->>field`
+ * yields the JSON text of the object rather than the instant. Comparing that
+ * against an ISO string in SQL gives the wrong answer, so any constraint whose
+ * value looks like a timestamp stays in the JS pass.
+ */
+function isPushSafeValue(value) {
+  if (value == null) return false
+  if (typeof value === 'object') return false
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value)) return false
+  return true
+}
+
+/**
+ * Narrow the server-side result set where it is provably non-lossy. Range
+ * operators and orderBy are deliberately left to applyConstraints(), which
+ * unwraps timestamps first; pushing them down would drop rows whose field is
+ * object-encoded. applyConstraints() still runs over whatever comes back and
+ * remains authoritative.
+ */
+function applyPushdown(q, constraints) {
+  const wheres = constraints.filter((c) => c.kind === 'where')
+  const orders = constraints.filter((c) => c.kind === 'orderBy')
+  const lim = constraints.find((c) => c.kind === 'limit')
+
+  let pushedAll = true
+
+  for (const c of wheres) {
+    if (c.op === '==' && isPushSafeValue(c.value)) {
+      q = q.eq(jsonAccessor(c.field), String(c.value))
+      continue
+    }
+    if (c.op === 'in' && Array.isArray(c.value) && c.value.every(isPushSafeValue)) {
+      q = q.in(jsonAccessor(c.field), c.value.map(String))
+      continue
+    }
+    pushedAll = false
+  }
+
+  // A server-side limit is only correct once every filter is server-side and
+  // no client-side sort will reshuffle which rows win.
+  if (lim && pushedAll && !orders.length) {
+    q = q.limit(lim.n)
+  }
+
+  return q
+}
+
+async function fetchRows(loc, constraints = []) {
   if (!supabase) return []
   let q = supabase.from(loc.table).select('*')
   if (loc.org_id) q = q.eq('org_id', loc.org_id)
   if (loc.user_id) q = q.eq('user_id', loc.user_id)
   if (loc.parent_id) q = q.eq('parent_id', loc.parent_id)
   if (loc.collection_name) q = q.eq('collection_name', loc.collection_name)
+  q = applyPushdown(q, constraints)
   const { data, error } = await q
   if (error) throw error
   return (data || []).filter((row) => scopeMatch(row, loc))
@@ -340,7 +399,8 @@ export async function getDoc(ref) {
 
 export async function getDocs(q) {
   const loc = q
-  const rows = applyConstraints(await fetchRows(loc), loc._constraints || [])
+  const constraints = loc._constraints || []
+  const rows = applyConstraints(await fetchRows(loc, constraints), constraints)
   return snapshotFromRows(rows, loc)
 }
 
@@ -396,13 +456,31 @@ export async function deleteDoc(ref) {
   if (error) throw error
 }
 
+/**
+ * Restrict realtime notifications to the rows this listener actually cares
+ * about, so a change to one employee's row does not force every other
+ * listener on the same table to refetch it in full.
+ */
+function realtimeFilter(loc) {
+  if (loc.type === 'doc' && loc.id && !loc.user_id) return `id=eq.${loc.id}`
+  if (loc.user_id) return `user_id=eq.${loc.user_id}`
+  if (loc.parent_id) return `parent_id=eq.${loc.parent_id}`
+  if (loc.org_id) return `org_id=eq.${loc.org_id}`
+  return undefined
+}
+
+let channelSeq = 0
+
 export function onSnapshot(refOrQuery, onNext, onError) {
   let cancelled = false
   const loc = refOrQuery
   const isDoc = loc.type === 'doc'
+  const constraints = loc._constraints || []
   let prevDocs
+  let inFlight = false
+  let queued = false
 
-  const emit = async () => {
+  const run = async () => {
     try {
       if (cancelled) return
       if (isDoc) {
@@ -410,7 +488,7 @@ export function onSnapshot(refOrQuery, onNext, onError) {
         return
       }
       const snap = snapshotFromRows(
-        applyConstraints(await fetchRows(loc), loc._constraints || []),
+        applyConstraints(await fetchRows(loc, constraints), constraints),
         loc,
         prevDocs
       )
@@ -422,12 +500,36 @@ export function onSnapshot(refOrQuery, onNext, onError) {
     }
   }
 
+  // Collapse bursts of change events into a single trailing refetch.
+  const emit = async () => {
+    if (inFlight) {
+      queued = true
+      return
+    }
+    inFlight = true
+    try {
+      await run()
+      while (queued && !cancelled) {
+        queued = false
+        await run()
+      }
+    } finally {
+      inFlight = false
+    }
+  }
+
   emit()
   if (!supabase) return () => { cancelled = true }
 
+  const filter = realtimeFilter(loc)
+  channelSeq += 1
   const channel = supabase
-    .channel(`fs:${loc.table}:${loc.id || loc.org_id || loc.user_id || loc.parent_id || 'all'}:${Math.random()}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table: loc.table }, () => emit())
+    .channel(`fs:${loc.table}:${filter || 'all'}:${channelSeq}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: loc.table, ...(filter ? { filter } : {}) },
+      () => emit()
+    )
     .subscribe()
 
   return () => {

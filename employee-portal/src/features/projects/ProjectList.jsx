@@ -31,6 +31,18 @@ import {
   Calendar,
 } from 'lucide-react'
 
+/** Decimal hours → "101 hrs 43 mins" (avoids float leftovers like 101.71000000000001). */
+const formatHoursAsHrsMins = (hours) => {
+  const totalMinutes = Math.round(Number(hours) * 60)
+  if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) return '0 mins'
+  const h = Math.floor(totalMinutes / 60)
+  const m = totalMinutes % 60
+  const hPart = h === 0 ? '' : h === 1 ? '1 hr' : `${h} hrs`
+  const mPart = m === 0 ? '' : m === 1 ? '1 min' : `${m} mins`
+  if (hPart && mPart) return `${hPart} ${mPart}`
+  return hPart || mPart
+}
+
 // Default fallback client list
 const defaultClients = [
   { id: 'cli_acme', name: 'Acme Corp' },
@@ -470,7 +482,7 @@ export const ProjectList = () => {
             <span className="text-[11px] font-medium text-muted uppercase tracking-wider">
               Total Logged Hours
             </span>
-            <p className="text-xl font-bold text-accent mt-1">{totalLoggedHours} hrs</p>
+            <p className="text-xl font-bold text-accent mt-1">{formatHoursAsHrsMins(totalLoggedHours)}</p>
           </div>
           <div className="w-9 h-9 rounded-xl bg-accent-soft text-accent flex items-center justify-center">
             <Clock className="w-5 h-5" />
@@ -632,7 +644,7 @@ export const ProjectList = () => {
                       <Calendar className="w-3.5 h-3.5" /> Start: {startDate || '—'}
                     </span>
                     <span className="flex items-center gap-1 text-accent font-semibold">
-                      <Clock className="w-3.5 h-3.5" /> {proj.totalHoursLogged || 0} hrs
+                      <Clock className="w-3.5 h-3.5" /> {formatHoursAsHrsMins(proj.totalHoursLogged)}
                     </span>
                   </div>
                 </div>

@@ -164,7 +164,8 @@ function initAdmin() {
   const admin = require('firebase-admin')
   if (admin.apps.length) return admin
   const projectId = process.env.FIREBASE_PROJECT_ID || 'new-crm-8165a'
-  const bucket = process.env.FIREBASE_STORAGE_BUCKET || `${projectId}.appspot.com`
+  const bucket =
+    process.env.FIREBASE_STORAGE_BUCKET || `${projectId}.firebasestorage.app`
   const opts = { projectId, storageBucket: bucket }
 
   if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
@@ -216,7 +217,13 @@ async function main() {
     console.log('skipping --auth: use import-firebase-auth.mjs (scrypt passwords already imported)')
   }
 
-  if (process.argv.includes('--storage')) await copyStorage(admin, supabase)
+  if (process.argv.includes('--storage')) {
+    try {
+      await copyStorage(admin, supabase)
+    } catch (err) {
+      console.warn('storage copy failed (data import already saved):', err.message || err)
+    }
+  }
 
   console.log('Migration pass complete. Live Firebase data was not modified.')
 }

@@ -22,15 +22,18 @@ export const DEFAULT_TASK_STATUSES = [
   { id: 'done', name: 'Done', color: 'emerald' },
 ]
 
-export const getProjectDisplayStatus = (project) => {
+export const deriveProjectStatusFromMetrics = (project, metrics = {}) => {
   const stored = String(project?.status || 'active').toLowerCase()
   if (stored === 'on_hold') return 'on_hold'
-  const total = Number(project?.totalTaskCount) || 0
-  const done = Number(project?.completedTaskCount) || 0
-  const pct = Number(project?.completionPercent) || 0
-  if ((total > 0 && done >= total) || pct >= 100) return 'completed'
+  const total = Number(metrics.totalTaskCount ?? project?.totalTaskCount) || 0
+  const done = Number(metrics.completedTaskCount ?? project?.completedTaskCount) || 0
+  const pct = Number(metrics.completionPercent ?? project?.completionPercent) || 0
+  if (total > 0 && (done >= total || pct >= 100)) return 'completed'
+  if (stored === 'completed') return 'active'
   return stored || 'active'
 }
+
+export const getProjectDisplayStatus = (project) => deriveProjectStatusFromMetrics(project, project)
 
 export const getProjectStartDate = (project) =>
   project?.startDate || project?.estimatedDate || project?.dueDate || ''

@@ -1,9 +1,17 @@
 import { supabase } from './client.js'
 
+const BUCKETS = ['employees', 'deliverables', 'payslips']
+
+// `employees` and `payslips` hold personal data and are private, so their
+// objects can only be reached through a short-lived signed URL.
+const PRIVATE_BUCKETS = new Set(['employees', 'payslips'])
+
+const SIGNED_URL_TTL_SECONDS = 60 * 60
+
 function bucketAndPath(fullPath) {
   const clean = String(fullPath).replace(/^\/+/, '')
   const [bucket, ...rest] = clean.split('/')
-  if (['employees', 'deliverables', 'payslips'].includes(bucket) && rest.length) {
+  if (BUCKETS.includes(bucket) && rest.length) {
     return { bucket, path: rest.join('/') }
   }
   return { bucket: 'employees', path: clean }
@@ -43,8 +51,26 @@ export function uploadBytesResumable(storageRef, file) {
 }
 
 export async function getDownloadURL(storageRef) {
+  if (PRIVATE_BUCKETS.has(storageRef.bucket)) {
+    const { data, error } = await supabase.storage
+      .from(storageRef.bucket)
+      .createSignedUrl(storageRef.path, SIGNED_URL_TTL_SECONDS)
+    if (error) throw error
+    return data.signedUrl
+  }
   const { data } = supabase.storage.from(storageRef.bucket).getPublicUrl(storageRef.path)
   return data.publicUrl
+}
+
+/**
+ * Resolve a fresh URL for a stored `storagePath` at the moment of use.
+ * Signed URLs expire, and rows written while the buckets were public still
+ * carry a stale public URL, so viewers must re-resolve instead of trusting
+ * the persisted `downloadURL`.
+ */
+export async function resolveFileUrl(fullPath) {
+  if (!fullPath || !supabase) return null
+  return getDownloadURL(ref(null, fullPath))
 }
 
 export async function deleteObject(storageRef) {

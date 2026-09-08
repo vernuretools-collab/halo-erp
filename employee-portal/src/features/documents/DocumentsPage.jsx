@@ -1,6 +1,8 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useUserStore } from '../../stores/userStore';
+import { collectUserIdentityIds } from '../projects/services/projectService';
 import { subscribeMyDocuments, uploadDocument, deleteDocument } from './services/documentsService';
+import { resolveFileUrl } from 'firebase/storage';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
@@ -10,6 +12,9 @@ import { FolderOpen, Upload, FileText, FileImage, FileCode, File, Trash2, Downlo
 
 export const DocumentsPage = () => {
   const user = useUserStore(state => state.user);
+  const userDoc = useUserStore(state => state.userDoc);
+  const identityIds = useMemo(() => collectUserIdentityIds(user, userDoc), [user, userDoc]);
+  const uploadUid = identityIds[0] || user?.uid;
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -23,13 +28,13 @@ export const DocumentsPage = () => {
   const fileInputRef = useRef(null);
 
   useEffect(() => {
-    if (!user?.uid) return;
-    const unsubscribe = subscribeMyDocuments(user.uid, (docs) => {
+    if (!identityIds.length) return;
+    const unsubscribe = subscribeMyDocuments(identityIds, (docs) => {
       setDocuments(docs);
       setLoading(false);
     });
     return () => unsubscribe();
-  }, [user?.uid]);
+  }, [identityIds]);
 
   const handleFileChange = (e) => {
     if (e.target.files[0]) {
@@ -38,11 +43,17 @@ export const DocumentsPage = () => {
   };
 
   const handleUpload = async () => {
-    if (!file || !user?.uid) return;
+    if (!file || !uploadUid) return;
     setUploading(true);
     setProgress(0);
     try {
-      await uploadDocument(user.uid, file, { category, description }, (p) => setProgress(p));
+      await uploadDocument(uploadUid, file, {
+        category,
+        description,
+        employeeId: userDoc?.employeeDocId || userDoc?.employeeId || uploadUid,
+        employeeEmail: user?.email || userDoc?.email || '',
+        employeeName: userDoc?.displayName || user?.displayName || '',
+      }, (p) => setProgress(p));
       setFile(null);
       setCategory('other');
       setDescription('');
@@ -56,10 +67,21 @@ export const DocumentsPage = () => {
     }
   };
 
-  const handleDelete = async (docId, storagePath) => {
+  const handleOpen = async (docItem) => {
+    try {
+      const url = (await resolveFileUrl(docItem.storagePath)) || docItem.downloadURL;
+      if (!url) throw new Error('No file location on record');
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      console.error('Could not open document', error);
+      alert('Could not open this document.');
+    }
+  };
+
+  const handleDelete = async (ownerUid, docId, storagePath) => {
     if (!window.confirm('Are you sure you want to delete this document?')) return;
     try {
-      await deleteDocument(user.uid, docId, storagePath);
+      await deleteDocument(ownerUid || uploadUid, docId, storagePath);
     } catch (error) {
       console.error('Delete failed', error);
       alert('Delete failed');
@@ -203,10 +225,10 @@ export const DocumentsPage = () => {
                   {doc.uploadedAt?.toDate ? doc.uploadedAt.toDate().toLocaleDateString() : 'Just now'}
                 </span>
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => window.open(doc.downloadURL, '_blank')} className="px-2">
+                  <Button variant="outline" size="sm" onClick={() => handleOpen(doc)} className="px-2">
                     <Download className="w-4 h-4" />
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => handleDelete(doc.id, doc.storagePath)} className="px-2 text-red-600 hover:text-red-700 border-red-200 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-900/20">
+                  <Button variant="outline" size="sm" onClick={() => handleDelete(doc.ownerUserId || uploadUid, doc.id, doc.storagePath)} className="px-2 text-red-600 hover:text-red-700 border-red-200 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-900/20">
                     <Trash2 className="w-4 h-4" />
                   </Button>
                 </div>

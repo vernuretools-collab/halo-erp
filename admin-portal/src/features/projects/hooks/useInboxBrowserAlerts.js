@@ -5,6 +5,7 @@ import {
   armBrowserNotifications,
   showForegroundBrowserNotification,
 } from '../../../shared/services/fcmService'
+import { subscribeProjectTaskAlerts } from '../../../../../shared/supabase/subscribeProjectTaskAlerts.js'
 
 const asIdList = (userIdOrIds) =>
   [...new Set((Array.isArray(userIdOrIds) ? userIdOrIds : [userIdOrIds]).filter(Boolean).map(String))]
@@ -29,12 +30,11 @@ export const collectAdminIdentityIds = (user, userDoc, claims) => {
   return [...ids]
 }
 
-export const useInboxBrowserAlerts = (userIdOrIds) => {
+export const useInboxBrowserAlerts = (userIdOrIds, profile = {}) => {
   const ids = asIdList(userIdOrIds)
+  const { user, userDoc } = profile
 
   useEffect(() => {
-    if (!ids.length) return undefined
-
     const unlock = () => {
       void armBrowserNotifications()
     }
@@ -47,7 +47,21 @@ export const useInboxBrowserAlerts = (userIdOrIds) => {
       document.removeEventListener('click', unlock)
       document.removeEventListener('keydown', unlock)
     }
-  }, [ids.join('|')])
+  }, [])
+
+  useEffect(() => {
+    if (!ids.length && !user?.uid) return undefined
+
+    return subscribeProjectTaskAlerts({
+      mode: 'admin',
+      identityIds: ids,
+      user,
+      userDoc,
+      onAlert: (payload) => {
+        void showForegroundBrowserNotification(payload)
+      },
+    })
+  }, [ids.join('|'), user?.uid, userDoc?.uid, userDoc?.email])
 
   useEffect(() => {
     if (!ids.length) return undefined

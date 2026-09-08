@@ -1,6 +1,8 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useNotificationStore } from './stores/notificationStore'
+import { useUserStore } from '../../stores/userStore'
+import { collectAdminIdentityIds } from '../projects/hooks/useInboxBrowserAlerts'
 import { getNotifications, markNotificationReadInDb, markAllNotificationsReadInDb } from './services/notificationService'
 import { Card } from '../../components/ui/Card'
 import { Badge } from '../../components/ui/Badge'
@@ -19,26 +21,30 @@ export const NotificationCenter = () => {
   const navigate = useNavigate()
   const { notifications, isOpen, setIsOpen, markAsRead, markAllAsRead, setNotifications } =
     useNotificationStore()
+  const { user, userDoc, claims } = useUserStore()
+  const identityIds = useMemo(
+    () => collectAdminIdentityIds(user, userDoc, claims),
+    [user, userDoc, claims]
+  )
+  const orgId = claims?.orgId || userDoc?.orgId || null
 
-  // Fetch real notifications from Firestore when panel opens
   useEffect(() => {
     if (!isOpen) return
     const fetchNotifications = async () => {
-      const data = await getNotifications()
+      const data = await getNotifications(identityIds, orgId)
       setNotifications(data)
     }
     fetchNotifications()
-  }, [isOpen, setNotifications])
+  }, [isOpen, setNotifications, identityIds.join('|'), orgId])
 
-  const handleMarkAsRead = async (notifId) => {
-    markAsRead(notifId)
-    await markNotificationReadInDb(notifId)
+  const handleMarkAsRead = async (notif) => {
+    markAsRead(notif.notificationId)
+    await markNotificationReadInDb(notif)
   }
 
   const handleMarkAllAsRead = async () => {
     markAllAsRead()
-    const unreadIds = notifications.filter((n) => !n.isRead).map((n) => n.notificationId)
-    await markAllNotificationsReadInDb(unreadIds)
+    await markAllNotificationsReadInDb(notifications.filter((n) => !n.isRead))
   }
 
   if (!isOpen) return null
@@ -96,9 +102,9 @@ export const NotificationCenter = () => {
           ) : (
             notifications.map((n) => (
               <div
-                key={n.notificationId}
+                key={`${n._source}:${n.notificationId}`}
                 onClick={() => {
-                  handleMarkAsRead(n.notificationId)
+                  handleMarkAsRead(n)
                   if (n.link) {
                     setIsOpen(false)
                     navigate(n.link)

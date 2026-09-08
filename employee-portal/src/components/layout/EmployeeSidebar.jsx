@@ -156,7 +156,7 @@ export const EmployeeSidebar = () => {
           {sidebarOpen && (
             <div className="flex flex-col leading-tight overflow-hidden">
               <span className="font-bold text-fg text-xs tracking-wide whitespace-nowrap">
-                BUSINESS OS
+                EMPLOYEE PORTAL
               </span>
               <span className="text-[10px] text-accent font-semibold tracking-wider mt-1 uppercase whitespace-nowrap">
                 EMPLOYEE MODE
