@@ -8,7 +8,12 @@ import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { useProjectStore } from './stores/projectStore'
-import { isUserOnProject, getProjectDisplayStatus, getProjectStartDate } from './services/projectService'
+import {
+  isUserOnProject,
+  matchesUserIdentity,
+  getProjectDisplayStatus,
+  getProjectStartDate,
+} from './services/projectService'
 import { useUserStore } from '../../stores/userStore'
 import {
   Plus,
@@ -89,6 +94,7 @@ export const ProjectList = () => {
   const [selectedClientId, setSelectedClientId] = useState('')
   const [description, setDescription] = useState('')
   const [estimatedDate, setEstimatedDate] = useState('')
+  const [createError, setCreateError] = useState('')
 
   // Client dropdown data
   const [clients, setClients] = useState([])
@@ -227,6 +233,14 @@ export const ProjectList = () => {
     return isUserOnProject(p, user, userDoc, tasks)
   }
 
+  // Membership decides who can see the project, so only its creator (or an
+  // admin) may change it - a member must not be able to invite others.
+  const canManageMembers = (p) => {
+    if (isAdmin) return true
+    if (!p) return false
+    return matchesUserIdentity(p.createdBy, p.createdByEmail, null, user, userDoc)
+  }
+
   const userVisibleProjects = projects.filter(isProjectVisibleToUser)
 
   const filtered = userVisibleProjects.filter((p) => {
@@ -256,12 +270,20 @@ export const ProjectList = () => {
     e.preventDefault()
     if (!projName.trim()) return
 
+    // Without a resolved id the project has no owner, so nobody (including the
+    // creator) would match it once the row is written.
+    if (!currentUserId) {
+      setCreateError('Your account is still loading. Please refresh and try again.')
+      return
+    }
+    setCreateError('')
+
     const effectiveClientName =
       clientName || (clients.find((c) => c.id === selectedClientId)?.name) || 'Internal Platform'
 
     const creatorMember = {
-      uid: currentUserId || `emp_${Date.now()}`,
-      id: currentUserId || `emp_${Date.now()}`,
+      uid: currentUserId,
+      id: currentUserId,
       email: currentUserEmail || '',
       name: currentDisplayName,
       role: userRole,
@@ -276,7 +298,9 @@ export const ProjectList = () => {
       estimatedDate: estimatedDate || null,
       startDate: estimatedDate || null,
       ownerName: currentDisplayName,
-      createdBy: currentUserId || null,
+      employeeId: currentUserId,
+      assignedEmployeeIds: [currentUserId],
+      createdBy: currentUserId,
       createdByEmail: currentUserEmail || null,
       createdByName: currentDisplayName,
       createdByRole: 'employee',
@@ -350,6 +374,10 @@ export const ProjectList = () => {
   const handleSaveMembers = async (e) => {
     e.preventDefault()
     if (!memberModalProj) return
+    if (!canManageMembers(memberModalProj)) {
+      setMemberModalProj(null)
+      return
+    }
 
     const pId = memberModalProj.projectId || memberModalProj.id
     const updatedMembersList = allEmployees
@@ -391,7 +419,14 @@ export const ProjectList = () => {
           title="Project Management"
           description="Manage active client deliverables, sprint velocity, task boards, and team access"
           actions={
-            <Button icon={Plus} variant="primary" onClick={() => setShowAddModal(true)}>
+            <Button
+              icon={Plus}
+              variant="primary"
+              onClick={() => {
+                setCreateError('')
+                setShowAddModal(true)
+              }}
+            >
               New Project
             </Button>
           }
@@ -503,7 +538,15 @@ export const ProjectList = () => {
           <p className="text-xs text-slate-500 max-w-sm mx-auto">
             You do not have access to any projects matching your filter. Create a new project or ask the creator to add you to their project card.
           </p>
-          <Button size="sm" icon={Plus} variant="primary" onClick={() => setShowAddModal(true)}>
+          <Button
+            size="sm"
+            icon={Plus}
+            variant="primary"
+            onClick={() => {
+              setCreateError('')
+              setShowAddModal(true)
+            }}
+          >
             Initialize New Project
           </Button>
         </Card>
@@ -621,17 +664,19 @@ export const ProjectList = () => {
                   </div>
 
                   {/* Add Employee Button on Project Card */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setMemberModalProj(proj)
-                    }}
-                    title="Add or manage employees in this project"
-                    className="flex items-center gap-1 px-2 py-1 bg-accent-soft hover:bg-accent-soft text-accent border border-accent/20 text-[10px] font-bold rounded-lg transition-colors"
-                  >
-                    <UserPlus className="w-3 h-3" /> Add Employee
-                  </button>
+                  {canManageMembers(proj) && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setMemberModalProj(proj)
+                      }}
+                      title="Add or manage employees in this project"
+                      className="flex items-center gap-1 px-2 py-1 bg-accent-soft hover:bg-accent-soft text-accent border border-accent/20 text-[10px] font-bold rounded-lg transition-colors"
+                    >
+                      <UserPlus className="w-3 h-3" /> Add Employee
+                    </button>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-between text-xs text-muted pt-2 border-t border-border">
@@ -832,6 +877,10 @@ export const ProjectList = () => {
                 onChange={(e) => setEstimatedDate(e.target.value)}
                 required
               />
+
+              {createError && (
+                <p className="text-xs font-semibold text-rose-500">{createError}</p>
+              )}
 
               <div className="flex gap-3 pt-2">
                 <Button type="button" variant="secondary" onClick={() => setShowAddModal(false)} className="w-1/3">

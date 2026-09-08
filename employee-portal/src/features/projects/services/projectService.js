@@ -79,23 +79,16 @@ function currentIdentityEmails(user, userDoc) {
   return emails
 }
 
-function currentIdentityNames(user, userDoc) {
-  const names = new Set()
-  for (const value of [userDoc?.displayName, user?.displayName, userDoc?.name, userDoc?.fullName]) {
-    if (!value || isGenericName(value)) continue
-    names.add(String(value).trim().toLowerCase())
-  }
-  return names
-}
-
 /**
- * Check whether a target identity (id, email, name) matches the current logged-in user.
- * ID, email, and name are OR'd so a mismatched assigneeId still matches on email.
+ * Check whether a target identity matches the current logged-in user.
+ * ID and email are OR'd so a mismatched assigneeId still matches on email.
+ * Display names are deliberately not matched: they collide across employees and
+ * default to placeholders like "Team Member", which leaked projects between
+ * unrelated accounts. targetName is kept in the signature for call-site clarity.
  */
 export const matchesUserIdentity = (targetId, targetEmail, targetName, user, userDoc) => {
   const ids = currentIdentityIds(user, userDoc)
   const emails = currentIdentityEmails(user, userDoc)
-  const names = currentIdentityNames(user, userDoc)
 
   const targetIds = []
   if (Array.isArray(targetId)) {
@@ -111,9 +104,6 @@ export const matchesUserIdentity = (targetId, targetEmail, targetName, user, use
 
   const email = String(targetEmail || '').trim().toLowerCase()
   if (email && emails.has(email)) return true
-
-  const name = String(targetName || '').trim().toLowerCase()
-  if (name && !isGenericName(targetName) && names.has(name)) return true
 
   return false
 }
@@ -185,22 +175,16 @@ export const isUserOnProject = (project, user, userDoc, tasks = []) => {
   })
   if (isMember) return true
 
-  // 4. Only fall back to ownerName matching if no UID-based creator / employeeId is set
-  if (!project.createdBy && !project.createdByEmail && !project.employeeId) {
-    if (matchesUserIdentity(null, null, project.ownerName, user, userDoc)) {
-      return true
-    }
-  }
-
-  // 5. Check if user is creator or assignee of any task in this project
+  // 4. Check if user is creator or assignee of any task in this project.
+  // Matched on projectId only - project names are not unique, so falling back
+  // to them linked unrelated employees' projects together.
   if (Array.isArray(tasks) && tasks.length > 0) {
-    const pId = project.projectId || project.id
-    const hasTaskInProject = tasks.some((t) => {
-      const isProjMatch =
-        (t.projectId && (t.projectId === pId || String(t.projectId) === String(pId))) ||
-        (t.projectName && project.name && String(t.projectName).toLowerCase() === String(project.name).toLowerCase())
-      return isProjMatch && isUserAssignedToTask(t, user, userDoc)
-    })
+    const pId = String(project.projectId || project.id || '')
+    const hasTaskInProject =
+      pId !== '' &&
+      tasks.some(
+        (t) => String(t.projectId || '') === pId && isUserAssignedToTask(t, user, userDoc)
+      )
     if (hasTaskInProject) return true
   }
 
@@ -226,12 +210,12 @@ export const isTaskVisibleToUser = (t, user, userDoc, claims, projects = [], tas
     return true
   }
 
-  // 2. Project member / creator / participant
-  if (Array.isArray(projects) && projects.length > 0) {
+  // 2. Project member / creator / participant. Resolved by id only, for the
+  // same reason as isUserOnProject step 4.
+  const taskProjectId = String(t.projectId || '')
+  if (taskProjectId !== '' && Array.isArray(projects) && projects.length > 0) {
     const project = projects.find(
-      (p) =>
-        (t.projectId && (p.projectId === t.projectId || p.id === t.projectId || String(p.projectId) === String(t.projectId))) ||
-        (t.projectName && p.name && String(p.name).toLowerCase() === String(t.projectName).toLowerCase())
+      (p) => String(p.projectId || '') === taskProjectId || String(p.id || '') === taskProjectId
     )
     if (project && isUserOnProject(project, user, userDoc, tasks)) {
       return true

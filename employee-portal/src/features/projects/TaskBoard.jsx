@@ -192,6 +192,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
 
   const [taskTitle, setTaskTitle] = useState('')
   const [taskDesc, setTaskDesc] = useState('')
+  const [createError, setCreateError] = useState('')
   const [projectId, setProjectId] = useState(defaultProjId)
   const [priority, setPriority] = useState('medium')
 
@@ -233,6 +234,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
     setProjectId(
       selectedProjectId && selectedProjectId !== 'all' ? selectedProjectId : fallbackId
     )
+    setCreateError('')
     setShowAddModal(true)
   }
 
@@ -275,6 +277,14 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
     e.preventDefault()
     if (!taskTitle.trim()) return
 
+    // Without a resolved id the task has no assignee, so it would be written as
+    // an unowned row that nobody matches.
+    if (!currentUserId) {
+      setCreateError('Your account is still loading. Please refresh and try again.')
+      return
+    }
+    setCreateError('')
+
     const targetProjId = projectId || defaultProjId
     const proj = projects.find((p) => p.projectId === targetProjId || p.id === targetProjId)
     const employeeName = userDoc?.displayName || user?.displayName || currentUserEmail || 'Employee'
@@ -285,11 +295,12 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
       projectId: targetProjId,
       projectName: proj?.name || 'Project Work',
       priority,
-      assigneeId: currentUserId || null,
+      assigneeId: currentUserId,
       assigneeEmail: currentUserEmail || null,
       assigneeName: employeeName,
+      employeeId: currentUserId,
       dueDate: new Date(Date.now() + 86400000 * 7).toISOString().split('T')[0],
-      createdBy: currentUserId || null,
+      createdBy: currentUserId,
       createdByEmail: currentUserEmail || null,
       createdByName: employeeName,
       createdByRole: userRole || 'employee',
@@ -678,6 +689,10 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
                 <Clock className="w-3.5 h-3.5 text-accent" />
                 Timer starts automatically when the task is created.
               </p>
+
+              {createError && (
+                <p className="text-xs font-semibold text-rose-500">{createError}</p>
+              )}
 
               <div className="flex gap-3 pt-2">
                 <Button type="button" variant="secondary" onClick={() => setShowAddModal(false)} className="w-1/3">
