@@ -1,5 +1,13 @@
 import { supabase } from './client.js'
 import { flattenPath, resolveCollection } from './pathMap.js'
+import {
+  ROW_SELECT,
+  jsonAccessor,
+  orderColumnForField,
+  classifyWheres,
+  serverLimitFor,
+  columnRealtimeFilter,
+} from './queryPushdown.js'
 
 const TS = '__ts'
 
@@ -216,65 +224,46 @@ function applyConstraints(rows, constraints) {
 }
 
 /**
- * `data->>a->>b` style accessor for a dotted logical field name.
- */
-function jsonAccessor(field) {
-  const parts = String(field).split('.')
-  const last = parts.pop()
-  return ['data', ...parts].join('->') + '->>' + last
-}
-
-/**
- * Timestamps are persisted as `{ "__ts": "<iso>" }` wrappers, so `data->>field`
- * yields the JSON text of the object rather than the instant. Comparing that
- * against an ISO string in SQL gives the wrong answer, so any constraint whose
- * value looks like a timestamp stays in the JS pass.
- */
-function isPushSafeValue(value) {
-  if (value == null) return false
-  if (typeof value === 'object') return false
-  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value)) return false
-  return true
-}
-
-/**
- * Narrow the server-side result set where it is provably non-lossy. Range
- * operators and orderBy are deliberately left to applyConstraints(), which
- * unwraps timestamps first; pushing them down would drop rows whose field is
- * object-encoded. applyConstraints() still runs over whatever comes back and
- * remains authoritative.
+ * Narrow the server-side result set. Equality/`in`/scalar ranges are pushed
+ * as JSON filters. orderBy uses timestamp-aware columns; limit is applied
+ * exactly when safe, otherwise as a small over-fetch buffer. applyConstraints()
+ * remains authoritative on the returned rows.
  */
 function applyPushdown(q, constraints) {
-  const wheres = constraints.filter((c) => c.kind === 'where')
+  const { pushedAll, pushed } = classifyWheres(constraints)
   const orders = constraints.filter((c) => c.kind === 'orderBy')
-  const lim = constraints.find((c) => c.kind === 'limit')
 
-  let pushedAll = true
-
-  for (const c of wheres) {
-    if (c.op === '==' && isPushSafeValue(c.value)) {
+  for (const c of pushed) {
+    if (c.op === '==') {
       q = q.eq(jsonAccessor(c.field), String(c.value))
       continue
     }
-    if (c.op === 'in' && Array.isArray(c.value) && c.value.every(isPushSafeValue)) {
+    if (c.op === 'in') {
       q = q.in(jsonAccessor(c.field), c.value.map(String))
       continue
     }
-    pushedAll = false
+    if (c.op === '>=' || c.op === '<=') {
+      const accessor = jsonAccessor(c.field)
+      q = c.op === '>=' ? q.gte(accessor, String(c.value)) : q.lte(accessor, String(c.value))
+    }
   }
 
-  // A server-side limit is only correct once every filter is server-side and
-  // no client-side sort will reshuffle which rows win.
-  if (lim && pushedAll && !orders.length) {
-    q = q.limit(lim.n)
+  for (const o of orders) {
+    q = q.order(orderColumnForField(o.field), {
+      ascending: String(o.dir || 'asc').toLowerCase() !== 'desc',
+      nullsFirst: false,
+    })
   }
+
+  const serverLimit = serverLimitFor(constraints, pushedAll)
+  if (serverLimit != null) q = q.limit(serverLimit)
 
   return q
 }
 
 async function fetchRows(loc, constraints = []) {
   if (!supabase) return []
-  let q = supabase.from(loc.table).select('*')
+  let q = supabase.from(loc.table).select(ROW_SELECT)
   if (loc.org_id) q = q.eq('org_id', loc.org_id)
   if (loc.user_id) q = q.eq('user_id', loc.user_id)
   if (loc.parent_id) q = q.eq('parent_id', loc.parent_id)
@@ -377,16 +366,29 @@ function scopeFields(loc, id, data) {
   }
 }
 
+async function findRowByStorageId(ref, id) {
+  const byId = await supabase.from(ref.table).select(ROW_SELECT).eq('id', id).maybeSingle()
+  if (byId.error) throw byId.error
+  if (byId.data && scopeMatch(byId.data, ref) && rowMatchesLogicalId(byId.data, ref, ref.id)) {
+    return byId.data
+  }
+  return null
+}
+
 async function findRow(ref) {
   if (!supabase) return null
+  const storageId = scopedStorageId(ref, ref.id)
+  const direct = await findRowByStorageId(ref, storageId)
+  if (direct) return direct
+  if (storageId !== ref.id) {
+    const logical = await findRowByStorageId(ref, ref.id)
+    if (logical) return logical
+  }
   if (ref.user_id) {
-    const { data, error } = await supabase.from(ref.table).select('*').eq('user_id', ref.user_id)
+    const { data, error } = await supabase.from(ref.table).select(ROW_SELECT).eq('user_id', ref.user_id)
     if (error) throw error
     return (data || []).find((row) => rowMatchesLogicalId(row, ref, ref.id)) || null
   }
-  const byId = await supabase.from(ref.table).select('*').eq('id', ref.id).maybeSingle()
-  if (byId.error) throw byId.error
-  if (byId.data && scopeMatch(byId.data, ref)) return byId.data
   return null
 }
 
@@ -407,12 +409,11 @@ export async function getDocs(q) {
 export async function setDoc(ref, data, options = {}) {
   if (!supabase) return
   const incoming = unwrapValue(data)
+  const existingRow = await findRow(ref)
   let payload = incoming
   if (options.merge) {
-    const existing = await getDoc(ref)
-    payload = { ...(existing.exists() ? unwrapValue(existing.data()) : {}), ...incoming }
+    payload = { ...(existingRow?.data || {}), ...incoming }
   }
-  const existingRow = await findRow(ref)
   const storageId = existingRow?.id || scopedStorageId(ref, ref.id)
   const row = { ...scopeFields(ref, storageId, payload), created_at: existingRow?.created_at || nowIso() }
   if (ref.table === 'profiles') {
@@ -434,8 +435,8 @@ export async function addDoc(colRef, data) {
 
 export async function updateDoc(ref, updates) {
   if (!supabase) return
-  const existingSnap = await getDoc(ref)
   const existingRow = await findRow(ref)
+  const existingSnap = existingRow ? rowToSnap(existingRow, ref) : emptySnap(ref)
   const base = existingSnap.exists() ? existingSnap.data() : {}
   const payload = applyPatch(base, updates)
   const storageId = existingRow?.id || scopedStorageId(ref, ref.id)
@@ -461,15 +462,27 @@ export async function deleteDoc(ref) {
  * about, so a change to one employee's row does not force every other
  * listener on the same table to refetch it in full.
  */
-function realtimeFilter(loc) {
-  if (loc.type === 'doc' && loc.id && !loc.user_id) return `id=eq.${loc.id}`
-  if (loc.user_id) return `user_id=eq.${loc.user_id}`
-  if (loc.parent_id) return `parent_id=eq.${loc.parent_id}`
-  if (loc.org_id) return `org_id=eq.${loc.org_id}`
-  return undefined
+function realtimeFilter(loc, constraints = []) {
+  return columnRealtimeFilter(loc, constraints)
 }
 
 let channelSeq = 0
+
+function mergeRealtimeRows(prevRows, payload) {
+  const type = String(payload?.eventType || '').toUpperCase()
+  const incoming = payload?.new && typeof payload.new === 'object' && Object.keys(payload.new).length
+    ? payload.new
+    : null
+  const outgoing = payload?.old && typeof payload.old === 'object' && Object.keys(payload.old).length
+    ? payload.old
+    : null
+  const id = incoming?.id || outgoing?.id
+  if (!id) return prevRows
+  const next = prevRows.filter((row) => row.id !== id)
+  if (type === 'DELETE' || (!incoming && outgoing)) return next
+  if (incoming) next.push(incoming)
+  return next
+}
 
 export function onSnapshot(refOrQuery, onNext, onError) {
   let cancelled = false
@@ -477,58 +490,59 @@ export function onSnapshot(refOrQuery, onNext, onError) {
   const isDoc = loc.type === 'doc'
   const constraints = loc._constraints || []
   let prevDocs
+  let prevRows = null
   let inFlight = false
-  let queued = false
+  let pending = []
 
-  const run = async () => {
-    try {
-      if (cancelled) return
-      if (isDoc) {
-        onNext(await getDoc(loc))
-        return
-      }
-      const snap = snapshotFromRows(
-        applyConstraints(await fetchRows(loc, constraints), constraints),
-        loc,
-        prevDocs
-      )
-      prevDocs = snap.docs
-      onNext(snap)
-    } catch (err) {
-      if (onError) onError(err)
-      else console.warn(err)
-    }
+  const publish = (rows) => {
+    prevRows = rows
+    const snap = snapshotFromRows(applyConstraints(rows, constraints), loc, prevDocs)
+    prevDocs = snap.docs
+    onNext(snap)
   }
 
-  // Collapse bursts of change events into a single trailing refetch.
-  const emit = async () => {
-    if (inFlight) {
-      queued = true
-      return
-    }
+  const runFull = async () => {
+    publish(await fetchRows(loc, constraints))
+  }
+
+  const emit = async (payload) => {
+    if (cancelled) return
+    if (payload) pending.push(payload)
+    if (inFlight) return
     inFlight = true
     try {
-      await run()
-      while (queued && !cancelled) {
-        queued = false
-        await run()
+      if (isDoc) {
+        onNext(await getDoc(loc))
+        pending = []
+        return
       }
+      if (prevRows == null) await runFull()
+      while (pending.length && !cancelled) {
+        const nextPayload = pending.shift()
+        publish(mergeRealtimeRows(prevRows, nextPayload).filter((row) => scopeMatch(row, loc)))
+      }
+    } catch (err) {
+      prevRows = null
+      pending = []
+      if (onError) onError(err)
+      else console.warn(err)
     } finally {
       inFlight = false
+      if (!cancelled && pending.length) void emit()
     }
   }
 
   emit()
   if (!supabase) return () => { cancelled = true }
 
-  const filter = realtimeFilter(loc)
+  const filter = realtimeFilter(loc, constraints)
   channelSeq += 1
   const channel = supabase
     .channel(`fs:${loc.table}:${filter || 'all'}:${channelSeq}`)
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: loc.table, ...(filter ? { filter } : {}) },
-      () => emit()
+      (payload) => emit(payload)
     )
     .subscribe()
 

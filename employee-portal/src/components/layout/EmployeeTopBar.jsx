@@ -1,12 +1,13 @@
 import React, { useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Bell, UserCheck, User, Search, Sun, Moon } from 'lucide-react'
+import { Bell, UserCheck, Search, Sun, Moon } from 'lucide-react'
 import haloLogo from '../../assets/halologo.png'
 import { useUserStore } from '../../stores/userStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useNotificationStore } from '../../features/notifications/stores/notificationStore'
 import { NotificationCenter } from '../../features/notifications/NotificationCenter'
 import { collectUserIdentityIds } from '../../features/projects/services/projectService'
+import { EmployeeAvatar } from '../../../../shared/ui/EmployeeAvatar.jsx'
 
 export const EmployeeTopBar = () => {
   const { user, userDoc } = useUserStore()
@@ -110,9 +111,12 @@ export const EmployeeTopBar = () => {
           to="/profile"
           className="flex items-center gap-3 pl-3 border-l border-border hover:opacity-80 transition-opacity cursor-pointer group"
         >
-          <div className="w-9 h-9 rounded-xl bg-accent-soft text-accent flex items-center justify-center font-medium text-xs group-hover:scale-105 transition-transform">
-            {displayName ? displayName.charAt(0).toUpperCase() : <User className="w-4 h-4" />}
-          </div>
+          <EmployeeAvatar
+            src={userDoc?.photoURL || userDoc?.avatar || user?.photoURL}
+            name={displayName}
+            fallback="E"
+            className="w-9 h-9 rounded-xl bg-accent-soft text-accent font-medium text-xs group-hover:scale-105 transition-transform"
+          />
           <div className="hidden sm:flex flex-col text-left">
             <span className="text-xs font-semibold text-fg truncate max-w-[120px]">
               {displayName}

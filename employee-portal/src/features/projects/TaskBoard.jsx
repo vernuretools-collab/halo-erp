@@ -10,7 +10,7 @@ import { useProjectStore } from './stores/projectStore'
 import { useTeamStore } from '../team/stores/teamStore'
 import { useUserStore } from '../../stores/userStore'
 import { getEmployees } from '../team/services/teamService'
-import { isTaskVisibleToUser, isUserOnProject, getTimerElapsedMs, formatElapsed } from './services/projectService'
+import { isTaskVisibleToUser, getTimerElapsedMs, formatElapsed, buildTaskVisibilityIndex } from './services/projectService'
 import { TaskListView } from './components/TaskListView'
 import { TaskCalendarView } from './components/TaskCalendarView'
 import {
@@ -223,11 +223,16 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
     (p) => p.projectId === selectedProjectId || p.id === selectedProjectId
   )
 
+  const visIndex = React.useMemo(
+    () => buildTaskVisibilityIndex(projects, tasks, user, userDoc, claims),
+    [projects, tasks, user, userDoc, claims]
+  )
+
   const visibleProjects = React.useMemo(() => {
-    return isAdmin
+    return visIndex.isAdmin
       ? projects
-      : projects.filter((p) => isUserOnProject(p, user, userDoc, tasks))
-  }, [isAdmin, projects, user, userDoc, tasks])
+      : projects.filter((p) => visIndex.visibleProjectIds.has(String(p.projectId || p.id || '')))
+  }, [visIndex, projects])
 
   const handleOpenAddModal = () => {
     const fallbackId = visibleProjects[0]?.projectId || visibleProjects[0]?.id || ''
@@ -239,7 +244,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
   }
 
   const filteredTasks = tasks.filter((t) => {
-    if (!isTaskVisibleToUser(t, user, userDoc, claims, projects, tasks)) return false
+    if (!isTaskVisibleToUser(t, user, userDoc, claims, projects, tasks, visIndex)) return false
 
     if (selectedProjectId && selectedProjectId !== 'all') {
       const isProjectMatch =
@@ -589,14 +594,36 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
                         </div>
 
                         <div
-                          className="pt-2 flex items-center justify-between text-[10px] text-muted"
+                          className="pt-2 flex items-center justify-between gap-2 text-[10px] text-muted"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <span>Status:</span>
+                          <span className="flex items-center gap-1.5 shrink-0">
+                            Status:
+                            {t.timerStatus === 'running' && t.status !== 'done' && (
+                              <button
+                                type="button"
+                                onClick={() => pauseTaskTimer(t.taskId)}
+                                className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-chrome text-muted hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-500/10 dark:hover:text-amber-400 transition-colors"
+                                title="Pause timer"
+                              >
+                                <Pause className="w-2.5 h-2.5" /> Pause
+                              </button>
+                            )}
+                            {t.timerStatus === 'paused' && t.status !== 'done' && (
+                              <button
+                                type="button"
+                                onClick={() => resumeTaskTimer(t.taskId)}
+                                className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-accent-soft text-accent hover:bg-accent-soft dark:hover:bg-accent-hover/20 transition-colors"
+                                title="Resume timer"
+                              >
+                                <Play className="w-2.5 h-2.5" /> Resume
+                              </button>
+                            )}
+                          </span>
                           <select
                             value={t.status}
                             onChange={(e) => updateTaskStatus(t.taskId, e.target.value)}
-                            className="bg-chrome border border-border text-[10px] text-fg rounded px-1.5 py-0.5 focus:outline-none"
+                            className="bg-chrome border border-border text-[10px] text-fg rounded px-1.5 py-0.5 focus:outline-none min-w-0"
                           >
                             {visibleStatuses.map((s) => (
                               <option key={s.id} value={s.id}>

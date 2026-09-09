@@ -5,16 +5,20 @@
  * login tokens from ~/.config/configstore/firebase-tools.json (ADC / gcloud optional).
  *
  * Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
- * Flags: --skip-firestore --skip-auth --storage --auth
+ * Flags: --skip-firestore --skip-auth --storage --auth --dry-run
  */
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { createClient } from '@supabase/supabase-js'
 import { resolveCollection } from '../../shared/supabase/pathMap.js'
+import { loadMigrateEnv } from './loadEnv.mjs'
 
 const require = createRequire(import.meta.url)
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+loadMigrateEnv(ROOT)
 
 const FIREBASE_CLI_OAUTH = {
   client_id: '563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com',
@@ -177,6 +181,68 @@ function initAdmin() {
   return admin
 }
 
+export { dumpAllDocs, groupedByTable, initAdmin, WALK_SUBCOLLECTIONS }
+
+export async function countTable(supabase, table) {
+  const { count, error } = await supabase.from(table).select('id', { count: 'exact', head: true })
+  if (error) return { count: null, error: error.message }
+  return { count: count ?? 0, error: null }
+}
+
+export async function countBucket(supabase, bucket) {
+  let total = 0
+  async function walk(prefix) {
+    const { data, error } = await supabase.storage.from(bucket).list(prefix, { limit: 1000 })
+    if (error) throw new Error(`${bucket}: ${error.message}`)
+    for (const item of data || []) {
+      if (item.id) total += 1
+      else if (item.name) await walk(prefix ? `${prefix}/${item.name}` : item.name)
+    }
+  }
+  try {
+    await walk('')
+    return { count: total, error: null }
+  } catch (err) {
+    return { count: null, error: err.message }
+  }
+}
+
+export async function printInventory(docs, supabase, extra = {}) {
+  const groups = groupedByTable(docs)
+  const firebaseByTable = [...groups.entries()].map(([table, records]) => [table, records.length])
+  firebaseByTable.sort((a, b) => a[0].localeCompare(b[0]))
+
+  console.log('\n=== Firestore -> table mapping ===')
+  console.log('table'.padEnd(28) + 'firebase'.padStart(10) + 'supabase'.padStart(10) + '  gap')
+  for (const [table, fbCount] of firebaseByTable) {
+    const sb = await countTable(supabase, table)
+    const sbCount = sb.error ? `err:${sb.error}` : String(sb.count)
+    const gap =
+      sb.error || sb.count == null ? '?' : fbCount > sb.count ? `-${fbCount - sb.count}` : fbCount < sb.count ? `+${sb.count - fbCount}` : 'ok'
+    console.log(table.padEnd(28) + String(fbCount).padStart(10) + String(sbCount).padStart(10) + `  ${gap}`)
+  }
+
+  const roots = extra.roots || []
+  if (roots.length) {
+    console.log('\n=== Firebase root collections ===')
+    for (const r of roots) console.log(`  ${r.id} docs=${r.size}`)
+  }
+
+  if (extra.missedSubs?.length) {
+    console.log('\n=== Subcollections on non-walked roots (would be missed) ===')
+    for (const line of extra.missedSubs) console.log(' ', line)
+  } else if (extra.missedSubs) {
+    console.log('\n=== Subcollections on non-walked roots === none found')
+  }
+
+  console.log('\n=== Storage ===')
+  if (extra.firebaseStorageCount != null) console.log(`  firebase objects: ${extra.firebaseStorageCount}`)
+  for (const bucket of ['employees', 'deliverables', 'payslips']) {
+    const sb = await countBucket(supabase, bucket)
+    console.log(`  supabase ${bucket}: ${sb.error ? sb.error : sb.count}`)
+  }
+}
+
 async function copyStorage(admin, supabase) {
   const bucket = admin.storage().bucket()
   const [files] = await bucket.getFiles({ prefix: '' })
@@ -194,14 +260,55 @@ async function copyStorage(admin, supabase) {
   }
 }
 
+export async function findMissedSubcollections(db) {
+  const missed = []
+  const roots = await db.listCollections()
+  const rootMeta = []
+  for (const col of roots) {
+    const snap = await col.get()
+    rootMeta.push({ id: col.id, size: snap.size })
+    if (WALK_SUBCOLLECTIONS.has(col.id)) continue
+    const sample = snap.docs.slice(0, 25)
+    for (const docSnap of sample) {
+      const subs = await docSnap.ref.listCollections()
+      for (const sub of subs) {
+        missed.push(`${col.id}/{${docSnap.id}}/${sub.id}`)
+      }
+    }
+  }
+  return { missed, roots: rootMeta }
+}
+
 async function main() {
-  const url = process.env.SUPABASE_URL
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !key) throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required')
+  if (url.includes('127.0.0.1') || url.includes('localhost')) {
+    console.warn('Warning: SUPABASE_URL looks local. Expected hosted project.')
+  }
 
+  const dryRun = process.argv.includes('--dry-run')
   const admin = initAdmin()
   const db = admin.firestore()
   const supabase = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } })
+
+  const extra = {}
+  try {
+    extra.firebaseStorageCount = (await admin.storage().bucket().getFiles({ prefix: '' }))[0].length
+  } catch (err) {
+    extra.firebaseStorageCount = `err: ${err.message}`
+  }
+
+  if (dryRun) {
+    const missed = await findMissedSubcollections(db)
+    extra.missedSubs = missed.missed
+    extra.roots = missed.roots
+    const docs = process.argv.includes('--skip-firestore') ? [] : await dumpAllDocs(db)
+    console.log(`firestore docs: ${docs.length} (dry-run, no writes)`)
+    await printInventory(docs, supabase, extra)
+    console.log('\nDry run complete. Live Firebase data was not modified.')
+    return
+  }
 
   if (!process.argv.includes('--skip-firestore')) {
     const docs = await dumpAllDocs(db)
@@ -228,7 +335,10 @@ async function main() {
   console.log('Migration pass complete. Live Firebase data was not modified.')
 }
 
-main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+const isDirect = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+if (isDirect) {
+  main().catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
+}

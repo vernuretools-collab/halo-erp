@@ -1,10 +1,7 @@
 import {
-  collection,
-  query,
-  where,
-  getDocs,
-} from 'firebase/firestore'
-import { db } from '../../../shared/services/firebaseService'
+  listWorkTimelineEntries,
+  mapTimelineRow,
+} from '../../../../../shared/supabase/listWorkTimelineEntries.js'
 
 const IS_MOCK = import.meta.env.VITE_FIREBASE_API_KEY === 'mock_api_key_dev'
 
@@ -53,14 +50,13 @@ export const fetchEmployeeTimelineEntries = async (uid, startDate, endDate) => {
   if (IS_MOCK) return []
 
   try {
-    const q = query(collection(db, 'workTimelineEntries'), where('uid', '==', uid))
-    const snap = await getDocs(q)
-    const entries = snap.docs.map((d) => ({ entryId: d.id, ...d.data() }))
+    const rows = await listWorkTimelineEntries([uid], startDate, endDate)
+    const entries = rows.map(mapTimelineRow)
     return entries
       .filter((e) => e.date >= startDate && e.date <= endDate)
       .sort((a, b) => {
         if (a.date !== b.date) return a.date.localeCompare(b.date)
-        return (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0)
+        return String(a.createdAt || '').localeCompare(String(b.createdAt || ''))
       })
   } catch (err) {
     console.error('[timelineService] fetchEmployeeTimelineEntries error:', err)

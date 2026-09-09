@@ -1,4 +1,4 @@
-import { collection, onSnapshot, getDocs, query, orderBy } from 'firebase/firestore'
+import { collection, onSnapshot, getDocs, query, orderBy, limit } from 'firebase/firestore'
 import { db } from '../../../shared/services/firebaseService'
 
 const announcementTimeMs = (value) => {
@@ -9,9 +9,14 @@ const announcementTimeMs = (value) => {
   return Number.isNaN(t) ? 0 : t
 }
 
-export const subscribeAnnouncements = (callback) => {
+export const subscribeAnnouncements = (callback, { limitCount } = {}) => {
+  const colRef = collection(db, 'announcements')
+  const q =
+    limitCount > 0
+      ? query(colRef, orderBy('createdAt', 'desc'), limit(limitCount))
+      : colRef
   return onSnapshot(
-    collection(db, 'announcements'),
+    q,
     (snapshot) => {
       const announcements = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
       announcements.sort((a, b) => announcementTimeMs(b.createdAt) - announcementTimeMs(a.createdAt))
@@ -22,7 +27,7 @@ export const subscribeAnnouncements = (callback) => {
 }
 
 export const subscribeAnnouncementCreates = (callback, onRemoved) => {
-  const q = query(collection(db, 'announcements'), orderBy('createdAt', 'desc'))
+  const q = query(collection(db, 'announcements'), orderBy('createdAt', 'desc'), limit(25))
   let initial = true
   return onSnapshot(q, (snapshot) => {
     if (initial) {

@@ -49,14 +49,6 @@ import {
   Loader2,
 } from 'lucide-react'
 
-// #region agent log
-const agentDbg = (hypothesisId, location, message, data) => {
-  const payload = JSON.stringify({ sessionId: '98b944', runId: 'pre-fix', hypothesisId, location, message, data, timestamp: Date.now() })
-  fetch('http://127.0.0.1:7493/ingest/c3ff692f-1cdd-437c-bb23-67bdbbc19c12', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '98b944' }, body: payload }).catch(() => {})
-  fetch('/__agent_debug_log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload }).catch(() => {})
-}
-// #endregion
-
 // Today's date in YYYY-MM-DD
 function todayStr() {
   const d = new Date()
@@ -298,9 +290,6 @@ export const AttendancePage = () => {
     }
     setSavingOffice(true)
     setOfficeError('')
-    // #region agent log
-    agentDbg('B', 'admin AttendancePage.jsx:persistOfficeLocation', 'admin saving office location', { runId: 'post-fix', lat, lng, radius, networkLat: extra.networkLat, networkLng: extra.networkLng, latType: typeof lat, lngType: typeof lng })
-    // #endregion
     await saveOfficeLocation({ lat, lng, radiusMeters: radius, label: 'Office', ...extra }, adminName)
     setOfficeLat(String(Number(lat.toFixed(6))))
     setOfficeLng(String(Number(lng.toFixed(6))))
@@ -392,22 +381,6 @@ export const AttendancePage = () => {
         networkLng = low.lng
       }
 
-      // #region agent log
-      agentDbg('C', 'admin AttendancePage.jsx:handleUseDeviceLocation', 'admin use current location GPS', {
-        runId: 'post-fix',
-        lat: pinLat,
-        lng: pinLng,
-        highLat: high.lat,
-        highLng: high.lng,
-        highAccuracy: high.accuracy,
-        lowLat: low?.lat,
-        lowLng: low?.lng,
-        networkLat,
-        networkLng,
-        distFromExisting,
-        radius,
-      })
-      // #endregion
       setOfficeLat(String(Number(pinLat.toFixed(6))))
       setOfficeLng(String(Number(pinLng.toFixed(6))))
       await persistOfficeLocation(pinLat, pinLng, officeRadius, { networkLat, networkLng })

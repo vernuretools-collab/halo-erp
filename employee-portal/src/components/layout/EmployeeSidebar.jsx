@@ -5,7 +5,6 @@ import {
   FolderKanban,
   Briefcase,
   Users,
-  CheckCircle2,
   Calendar,
   CalendarDays,
   ChevronLeft,
@@ -28,6 +27,7 @@ import haloLogo from '../../assets/halologo.png'
 import { useUIStore } from '../../stores/uiStore'
 import { useUserStore } from '../../stores/userStore'
 import { logoutUser } from '../../shared/services/authService'
+import { EmployeeAvatar } from '../../../../shared/ui/EmployeeAvatar.jsx'
 
 const NAV_GROUPS = [
   {
@@ -58,7 +58,6 @@ const NAV_GROUPS = [
     icon: Users,
     items: [
       { name: 'Team Directory', path: '/directory', icon: Users },
-      { name: 'Attendance', path: '/attendance', icon: CheckCircle2 },
       { name: 'Leave & PTO', path: '/team/leave', icon: Calendar },
     ],
   },
@@ -280,9 +279,12 @@ export const EmployeeSidebar = () => {
       <div className="p-3 border-t border-border space-y-2">
         {/* User badge */}
         <div className={`flex items-center gap-3 p-2 rounded-xl bg-surface border border-border ${!sidebarOpen && 'justify-center'}`}>
-          <div className="w-8 h-8 rounded-lg bg-accent-soft text-accent flex items-center justify-center font-bold text-xs shrink-0 border border-accent/30">
-            {displayName?.charAt(0)?.toUpperCase() || 'E'}
-          </div>
+          <EmployeeAvatar
+            src={userDoc?.photoURL || userDoc?.avatar || user?.photoURL}
+            name={displayName}
+            fallback="E"
+            className="w-8 h-8 rounded-lg bg-accent-soft text-accent font-bold text-xs shrink-0 border border-accent/30"
+          />
           {sidebarOpen && (
             <div className="flex flex-col min-w-0">
               <span className="text-xs font-semibold text-fg truncate">

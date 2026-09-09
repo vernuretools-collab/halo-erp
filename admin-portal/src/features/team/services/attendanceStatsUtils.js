@@ -26,7 +26,8 @@ export function timeStrToMinutes(timeStr) {
 }
 
 /**
- * Late minutes past expected start (default 10:30 AM). Returns 0 if on time (grace cutoff) or missing clock-in.
+ * Late minutes past expected start (default 10:30 AM). Returns 0 if on time
+ * (inclusive 10 min grace through 10:40) or missing clock-in.
  * @param {string|null} clockInTime
  * @param {number} [expectedStartMinutes]
  * @returns {number}
@@ -38,7 +39,7 @@ export function getLateMinutes(clockInTime, expectedStartMinutes = OFFICE_START_
     ? Number(expectedStartMinutes)
     : OFFICE_START_MINUTES
   const graceCutoff = start + LATE_GRACE_MINUTES
-  if (mins < graceCutoff) return 0
+  if (mins <= graceCutoff) return 0
   return mins - start
 }
 

@@ -1,35 +1,78 @@
-import React from 'react'
+import React, { lazy } from 'react'
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { AppShell, AppShellError } from './components/layout/AppShell'
 import { EmployeeLoginPage } from './features/auth/EmployeeLoginPage'
-import { EmployeeDashboard } from './features/dashboard/EmployeeDashboard'
-import { ProjectList } from './features/projects/ProjectList'
-import { TaskBoard } from './features/projects/TaskBoard'
-import {
-  ProjectSessionPage,
-  SessionTaskBoard,
-  SessionTimelinePage,
-  SessionDocumentsPage,
-  SessionNotesPage,
-  SessionIndexRedirect,
-} from './features/projects/ProjectSessionPage'
-import { EmployeeList } from './features/team/EmployeeList'
-import { AttendancePage } from './features/team/AttendancePage'
-import { LeaveManagement } from './features/team/LeaveManagement'
-import { EmployeeProfile } from './features/profile/EmployeeProfile'
-import { WellnessSettings } from './features/wellness/WellnessSettings'
-import { WorkTimelinePage } from './features/timeline/WorkTimelinePage'
-// New feature pages
-import { NotificationsPage } from './features/notifications/NotificationsPage'
-import { AnnouncementsPage } from './features/announcements/AnnouncementsPage'
-import { CompanyCalendarPage } from './features/calendar/CompanyCalendarPage'
-import { DocumentsPage } from './features/documents/DocumentsPage'
-import { ClientDocumentsPage } from './features/documents/ClientDocumentsPage'
-import { PayslipsPage } from './features/payslips/PayslipsPage'
-import { GoalsPage } from './features/goals/GoalsPage'
-import { HelpDeskPage } from './features/helpdesk/HelpDeskPage'
-import { ProjectNotesStandalone } from './features/projects/ProjectNotesStandalone'
-import { ProjectManagePage } from './features/projects/ProjectManagePage'
+
+const EmployeeDashboard = lazy(() =>
+  import('./features/dashboard/EmployeeDashboard').then((m) => ({ default: m.EmployeeDashboard }))
+)
+const ProjectList = lazy(() =>
+  import('./features/projects/ProjectList').then((m) => ({ default: m.ProjectList }))
+)
+const TaskBoard = lazy(() =>
+  import('./features/projects/TaskBoard').then((m) => ({ default: m.TaskBoard }))
+)
+const ProjectSessionPage = lazy(() =>
+  import('./features/projects/ProjectSessionPage').then((m) => ({ default: m.ProjectSessionPage }))
+)
+const SessionTaskBoard = lazy(() =>
+  import('./features/projects/ProjectSessionPage').then((m) => ({ default: m.SessionTaskBoard }))
+)
+const SessionTimelinePage = lazy(() =>
+  import('./features/projects/ProjectSessionPage').then((m) => ({ default: m.SessionTimelinePage }))
+)
+const SessionDocumentsPage = lazy(() =>
+  import('./features/projects/ProjectSessionPage').then((m) => ({ default: m.SessionDocumentsPage }))
+)
+const SessionNotesPage = lazy(() =>
+  import('./features/projects/ProjectSessionPage').then((m) => ({ default: m.SessionNotesPage }))
+)
+const SessionIndexRedirect = lazy(() =>
+  import('./features/projects/ProjectSessionPage').then((m) => ({ default: m.SessionIndexRedirect }))
+)
+const EmployeeList = lazy(() =>
+  import('./features/team/EmployeeList').then((m) => ({ default: m.EmployeeList }))
+)
+const LeaveManagement = lazy(() =>
+  import('./features/team/LeaveManagement').then((m) => ({ default: m.LeaveManagement }))
+)
+const EmployeeProfile = lazy(() =>
+  import('./features/profile/EmployeeProfile').then((m) => ({ default: m.EmployeeProfile }))
+)
+const WellnessSettings = lazy(() =>
+  import('./features/wellness/WellnessSettings').then((m) => ({ default: m.WellnessSettings }))
+)
+const WorkTimelinePage = lazy(() =>
+  import('./features/timeline/WorkTimelinePage').then((m) => ({ default: m.WorkTimelinePage }))
+)
+const NotificationsPage = lazy(() =>
+  import('./features/notifications/NotificationsPage').then((m) => ({ default: m.NotificationsPage }))
+)
+const AnnouncementsPage = lazy(() =>
+  import('./features/announcements/AnnouncementsPage').then((m) => ({ default: m.AnnouncementsPage }))
+)
+const CompanyCalendarPage = lazy(() =>
+  import('./features/calendar/CompanyCalendarPage').then((m) => ({ default: m.CompanyCalendarPage }))
+)
+const DocumentsPage = lazy(() =>
+  import('./features/documents/DocumentsPage').then((m) => ({ default: m.DocumentsPage }))
+)
+const ClientDocumentsPage = lazy(() =>
+  import('./features/documents/ClientDocumentsPage').then((m) => ({ default: m.ClientDocumentsPage }))
+)
+const PayslipsPage = lazy(() =>
+  import('./features/payslips/PayslipsPage').then((m) => ({ default: m.PayslipsPage }))
+)
+const GoalsPage = lazy(() => import('./features/goals/GoalsPage').then((m) => ({ default: m.GoalsPage })))
+const HelpDeskPage = lazy(() =>
+  import('./features/helpdesk/HelpDeskPage').then((m) => ({ default: m.HelpDeskPage }))
+)
+const ProjectNotesStandalone = lazy(() =>
+  import('./features/projects/ProjectNotesStandalone').then((m) => ({ default: m.ProjectNotesStandalone }))
+)
+const ProjectManagePage = lazy(() =>
+  import('./features/projects/ProjectManagePage').then((m) => ({ default: m.ProjectManagePage }))
+)
 
 export const router = createBrowserRouter([
   {
@@ -44,7 +87,6 @@ export const router = createBrowserRouter([
       { index: true, element: <Navigate to="/dashboard" replace /> },
       { path: 'dashboard', element: <EmployeeDashboard /> },
 
-      // Projects Sub-routes & Aliases
       { path: 'projects', element: <Navigate to="/projects/list" replace /> },
       { path: 'projects/list', element: <ProjectList /> },
       { path: 'projects/tasks', element: <TaskBoard /> },
@@ -64,25 +106,19 @@ export const router = createBrowserRouter([
       { path: 'client-documents', element: <ClientDocumentsPage /> },
       { path: 'project-notes', element: <ProjectNotesStandalone /> },
 
-      // Work Timeline (daily work diary)
       { path: 'timeline', element: <WorkTimelinePage /> },
 
-      // Team Sub-routes & Aliases
       { path: 'team', element: <Navigate to="/team/employees" replace /> },
       { path: 'team/employees', element: <EmployeeList /> },
-      { path: 'team/attendance', element: <AttendancePage /> },
+      { path: 'team/attendance', element: <Navigate to="/dashboard" replace /> },
       { path: 'team/leave', element: <LeaveManagement /> },
       { path: 'directory', element: <EmployeeList /> },
-      { path: 'attendance', element: <AttendancePage /> },
+      { path: 'attendance', element: <Navigate to="/dashboard" replace /> },
       { path: 'leave', element: <LeaveManagement /> },
 
-      // Wellness
       { path: 'wellness', element: <WellnessSettings /> },
-
-      // Profile
       { path: 'profile', element: <EmployeeProfile /> },
 
-      // ── NEW FEATURES ──────────────────────────────────────────────
       { path: 'notifications', element: <NotificationsPage /> },
       { path: 'announcements', element: <AnnouncementsPage /> },
       { path: 'calendar', element: <CompanyCalendarPage /> },

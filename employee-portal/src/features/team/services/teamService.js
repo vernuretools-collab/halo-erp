@@ -14,14 +14,6 @@ import {
 } from 'firebase/firestore'
 import { db } from '../../../shared/services/firebaseService'
 
-// #region agent log
-const agentDbg = (hypothesisId, location, message, data) => {
-  const payload = JSON.stringify({ sessionId: '98b944', runId: 'pre-fix', hypothesisId, location, message, data, timestamp: Date.now() })
-  fetch('http://127.0.0.1:7493/ingest/c3ff692f-1cdd-437c-bb23-67bdbbc19c12', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '98b944' }, body: payload }).catch(() => {})
-  fetch('/__agent_debug_log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload }).catch(() => {})
-}
-// #endregion
-
 // ─── Fetch all employees ──────────────────────────────────────────────────────
 export const getEmployees = async () => {
   const snap = await getDocs(collection(db, 'employees'))
@@ -274,22 +266,13 @@ export const getOfficeLocation = async () => {
   try {
     const snap = await getDoc(doc(db, 'companyPolicies', 'officeLocation'))
     if (!snap.exists()) {
-      // #region agent log
-      agentDbg('A', 'employee teamService.js:getOfficeLocation', 'officeLocation doc missing', { exists: false })
-      // #endregion
       return { ...DEFAULT_OFFICE_LOCATION }
     }
     const raw = snap.data() || {}
     const normalized = normalizeOfficeLocation(raw)
-    // #region agent log
-    agentDbg('B', 'employee teamService.js:getOfficeLocation', 'officeLocation raw vs normalized', { rawKeys: Object.keys(raw), rawLat: raw.lat, rawLng: raw.lng, rawNetworkLat: raw.networkLat, rawNetworkLng: raw.networkLng, rawRadius: raw.radiusMeters, normLat: normalized.lat, normLng: normalized.lng, normNetworkLat: normalized.networkLat, normNetworkLng: normalized.networkLng, normRadius: normalized.radiusMeters })
-    // #endregion
     return normalized
   } catch (err) {
     console.error('Error fetching office location:', err)
-    // #region agent log
-    agentDbg('A', 'employee teamService.js:getOfficeLocation', 'officeLocation fetch threw', { err: String(err?.message || err) })
-    // #endregion
     return { ...DEFAULT_OFFICE_LOCATION }
   }
 }

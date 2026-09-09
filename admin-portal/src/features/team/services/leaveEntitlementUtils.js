@@ -136,6 +136,8 @@ export const getPermissionHours = (leave) => {
   return hoursBetween(leave?.startTime, leave?.endTime)
 }
 
+export const leaveStatusKey = (leave) => String(leave?.status || '').toLowerCase()
+
 /** If approved Permission covers office start, expected arrival is the permission end (minutes from midnight). */
 export const getMorningPermissionExpectedStartMinutes = (
   leaveRequests,
@@ -148,7 +150,8 @@ export const getMorningPermissionExpectedStartMinutes = (
   let expected = fallback
   const list = Array.isArray(leaveRequests) ? leaveRequests : []
   list.forEach((leave) => {
-    if (leave?.status !== 'approved' && leave?.status !== 'pending') return
+    const status = leaveStatusKey(leave)
+    if (status !== 'approved' && status !== 'pending') return
     if (!isPermissionLeave(leave)) return
     if (!leaveMatchesEmployeeFilter(leave, employeeFilter)) return
     const date = leave.startDate || leave.endDate || ''
@@ -173,7 +176,8 @@ export const countUsedPermissionHours = (
   const list = Array.isArray(leaveRequests) ? leaveRequests : []
   const total = list.reduce((sum, leave) => {
     if (excludeLeaveId && (leave.leaveId === excludeLeaveId || leave.id === excludeLeaveId)) return sum
-    if (leave?.status !== 'approved' && leave?.status !== 'pending') return sum
+    const status = leaveStatusKey(leave)
+    if (status !== 'approved' && status !== 'pending') return sum
     if (!leaveMatchesEmployeeFilter(leave, employeeFilter)) return sum
     if (!isPermissionLeave(leave)) return sum
     const date = leave.startDate || leave.endDate || ''
@@ -228,7 +232,10 @@ const createdAtMs = (value) => {
   return Number.isNaN(t) ? 0 : t
 }
 
-const isActiveLeave = (leave) => leave?.status !== 'rejected' && leave?.status !== 'cancelled'
+const isActiveLeave = (leave) => {
+  const status = leaveStatusKey(leave)
+  return status !== 'rejected' && status !== 'cancelled'
+}
 
 export const countUsedPaidDays = (
   leaveRequests,
@@ -242,8 +249,9 @@ export const countUsedPaidDays = (
   return list.reduce((sum, leave) => {
     if (excludeLeaveId && (leave.leaveId === excludeLeaveId || leave.id === excludeLeaveId)) return sum
     if (!isActiveLeave(leave)) return sum
-    if (!includePending && leave.status !== 'approved') return sum
-    if (leave.status !== 'approved' && leave.status !== 'pending') return sum
+    const status = leaveStatusKey(leave)
+    if (!includePending && status !== 'approved') return sum
+    if (status !== 'approved' && status !== 'pending') return sum
     if (!leaveMatchesEmployeeFilter(leave, employeeFilter)) return sum
     if (getLeaveBucket(getRequestedLeaveType(leave)) !== bucket) return sum
     const days = expandLeaveWorkingDates(leave.startDate, leave.endDate || leave.startDate, holidays).filter(
@@ -294,7 +302,7 @@ export const classifyApprovedLeaveByDate = (leaveRequests, employeeFilter, limit
   const map = {}
   const list = (Array.isArray(leaveRequests) ? leaveRequests : []).filter(
     (leave) =>
-      leave.status === 'approved' && leaveMatchesEmployeeFilter(leave, employeeFilter)
+      leaveStatusKey(leave) === 'approved' && leaveMatchesEmployeeFilter(leave, employeeFilter)
   )
 
   const dayEntries = []

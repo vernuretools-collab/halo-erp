@@ -83,7 +83,8 @@ export const countUsedWfhDays = (leaveRequests, employeeFilter, policy, referenc
     .filter((l) => {
       const requested = l.requestedLeaveType || l.leaveType
       if (requested !== 'Work From Home' && l.leaveType !== 'Work From Home') return false
-      if (l.status === 'rejected' || l.status === 'cancelled') return false
+      const status = String(l.status || '').toLowerCase()
+      if (status === 'rejected' || status === 'cancelled') return false
       if (!l.startDate) return false
       if (!matchesEmployee(l, employeeFilter)) return false
 

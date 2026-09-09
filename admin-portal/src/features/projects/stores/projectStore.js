@@ -1,5 +1,15 @@
 import { create } from 'zustand'
-import { DEFAULT_TASK_STATUSES, deriveProjectStatusFromMetrics } from '../services/projectService'
+import { persist } from 'zustand/middleware'
+import {
+  DEFAULT_TASK_STATUSES,
+  deriveProjectStatusFromMetrics,
+  getProjects,
+  getTasks,
+  getTaskStatusesFromDb,
+} from '../services/projectService'
+
+const PROJECTS_TTL_MS = 45_000
+let projectsFetchInflight = null
 
 export const DEMO_PROJECTS = [
   {
@@ -143,20 +153,62 @@ export const DEMO_TASKS = [
   },
 ]
 
-export const useProjectStore = create((set) => ({
-  projects: [],
-  tasks: [],
-  statuses: DEFAULT_TASK_STATUSES,
-  selectedProjectId: null,
-  taskFilterStatus: 'all',
+export const useProjectStore = create(
+  persist(
+    (set, get) => ({
+      projects: [],
+      tasks: [],
+      statuses: DEFAULT_TASK_STATUSES,
+      selectedProjectId: null,
+      taskFilterStatus: 'all',
+      lastFetchedAt: 0,
 
-  setProjects: (projects) =>
-    set({ projects: projects || [] }),
-  setTasks: (tasks) =>
-    set({ tasks: tasks || [] }),
-  setStatuses: (statuses) => set({ statuses }),
-  setSelectedProjectId: (selectedProjectId) => set({ selectedProjectId }),
-  setTaskFilterStatus: (taskFilterStatus) => set({ taskFilterStatus }),
+      setProjects: (projects) =>
+        set({ projects: projects || [] }),
+      setTasks: (tasks) =>
+        set({ tasks: tasks || [] }),
+      setStatuses: (statuses) => set({ statuses }),
+      setSelectedProjectId: (selectedProjectId) => set({ selectedProjectId }),
+      setTaskFilterStatus: (taskFilterStatus) => set({ taskFilterStatus }),
+
+      fetchProjectsAndTasks: async () => {
+        if (projectsFetchInflight) return projectsFetchInflight
+        const cached = get()
+        const hasCache = (cached.projects?.length || 0) > 0 || (cached.tasks?.length || 0) > 0
+        if (
+          hasCache &&
+          cached.lastFetchedAt &&
+          Date.now() - cached.lastFetchedAt < PROJECTS_TTL_MS
+        ) {
+          return
+        }
+
+        projectsFetchInflight = (async () => {
+          try {
+            const [projectsData, tasksData, statusesData] = await Promise.all([
+              getProjects(),
+              getTasks(),
+              getTaskStatusesFromDb(),
+            ])
+            set({
+              projects: projectsData || [],
+              tasks: (tasksData || []).map((dbTask) => ({
+                ...dbTask,
+                subtasks: dbTask.subtasks || [],
+                status: dbTask.status || 'todo',
+              })),
+              statuses: statusesData && statusesData.length > 0 ? statusesData : DEFAULT_TASK_STATUSES,
+              lastFetchedAt: Date.now(),
+            })
+          } catch (err) {
+            console.error('Error fetching project store data from Firestore:', err)
+          } finally {
+            projectsFetchInflight = null
+          }
+        })()
+
+        return projectsFetchInflight
+      },
 
   addProject: (newProj) =>
     set((state) => ({
@@ -290,5 +342,15 @@ export const useProjectStore = create((set) => ({
     set((state) => ({
       tasks: state.tasks.filter((t) => t.taskId !== taskId),
     })),
-}))
+    }),
+    {
+      name: 'crm_admin_project_store',
+      partialize: (state) => ({
+        tasks: state.tasks,
+        projects: state.projects,
+        statuses: state.statuses,
+      }),
+    }
+  )
+)
 

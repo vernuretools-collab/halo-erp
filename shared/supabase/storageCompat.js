@@ -1,9 +1,10 @@
 import { supabase } from './client.js'
 
-const BUCKETS = ['employees', 'deliverables', 'payslips']
+const BUCKETS = ['employees', 'deliverables', 'payslips', 'avatars']
 
 // `employees` and `payslips` hold personal data and are private, so their
 // objects can only be reached through a short-lived signed URL.
+// `avatars` is public so directory cards can load a stable photo URL.
 const PRIVATE_BUCKETS = new Set(['employees', 'payslips'])
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60
@@ -37,7 +38,10 @@ export function uploadBytesResumable(storageRef, file) {
     try {
       if (!supabase) throw new Error('Supabase is not configured')
       listeners.progress?.({ bytesTransferred: 0, totalBytes: file.size || 1 })
-      const { error } = await supabase.storage.from(storageRef.bucket).upload(storageRef.path, file, { upsert: true })
+      const { error } = await supabase.storage.from(storageRef.bucket).upload(storageRef.path, file, {
+        upsert: true,
+        contentType: file.type || undefined,
+      })
       if (error) throw error
       task.snapshot.bytesTransferred = file.size || 1
       listeners.progress?.(task.snapshot)

@@ -6,11 +6,12 @@ import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { useUserStore } from '../../stores/userStore'
 import { db, auth } from '../../shared/services/firebaseService'
-import { setDoc, doc, getDoc, collection, query, where, getDocs, limit } from 'firebase/firestore'
+import { setDoc, doc, getDoc } from 'firebase/firestore'
 import { updatePassword, sendPasswordResetEmail, updateProfile } from 'firebase/auth'
+import { EmployeeAvatar } from '../../../../shared/ui/EmployeeAvatar.jsx'
+import { mergeEmployeeFields, uploadProfilePhoto, deleteProfilePhoto } from './services/profilePhotoService'
 import {
   User,
-  Building,
   Mail,
   Phone,
   Lock,
@@ -22,6 +23,9 @@ import {
   Layers,
   Award,
   Sparkles,
+  Camera,
+  Trash2,
+  Loader2,
 } from 'lucide-react'
 
 export const EmployeeProfile = () => {
@@ -39,11 +43,14 @@ export const EmployeeProfile = () => {
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
 
+  const [photoURL, setPhotoURL] = useState('')
   const [saving, setSaving] = useState(false)
+  const [photoSaving, setPhotoSaving] = useState(false)
   const [passwordSaving, setPasswordSaving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const hydratedUidRef = useRef(null)
+  const fileInputRef = useRef(null)
 
   useEffect(() => {
     if (!user?.uid) {
@@ -59,6 +66,7 @@ export const EmployeeProfile = () => {
       if (currentDoc) {
         setDisplayName(currentDoc.displayName || user?.displayName || '')
         setPhoneNumber(currentDoc.phoneNumber || '')
+        setPhotoURL(currentDoc.photoURL || currentDoc.avatar || user?.photoURL || '')
         setRoleName(currentDoc.roleName || currentDoc.role || 'Team Member')
         setDepartmentName(currentDoc.departmentName || currentDoc.department || 'Delivery & Operations')
         setSkills(currentDoc.skills || ['Productivity'])
@@ -67,6 +75,7 @@ export const EmployeeProfile = () => {
           : (storedQuote || currentDoc.quote || currentDoc.proverb || ''))
       } else {
         setDisplayName(user?.displayName || '')
+        setPhotoURL(user?.photoURL || '')
         setRoleName('Software Specialist')
         setDepartmentName('Engineering & Product')
         setSkills(['React', 'Productivity'])
@@ -127,17 +136,7 @@ export const EmployeeProfile = () => {
       if (import.meta.env.VITE_FIREBASE_API_KEY !== 'mock_api_key_dev') {
         await setDoc(doc(db, 'users', user.uid), updatedFields, { merge: true })
         const quoteFields = { quote: trimmedQuote, proverb: trimmedQuote, quoteUpdatedAt, updatedAt: quoteUpdatedAt }
-        const empRef = doc(db, 'employees', user.uid)
-        const empSnap = await getDoc(empRef)
-        if (empSnap.exists()) {
-          await setDoc(empRef, quoteFields, { merge: true })
-        } else if (user.email) {
-          const empQuery = query(collection(db, 'employees'), where('email', '==', user.email), limit(1))
-          const empByEmail = await getDocs(empQuery)
-          if (!empByEmail.empty) {
-            await setDoc(empByEmail.docs[0].ref, quoteFields, { merge: true })
-          }
-        }
+        await mergeEmployeeFields(user.uid, user.email, quoteFields)
         if (auth.currentUser) {
           try {
             await updateProfile(auth.currentUser, { displayName: trimmedName })
@@ -158,6 +157,69 @@ export const EmployeeProfile = () => {
       setError('Failed to update profile details.')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const persistPhotoFields = async (nextPhotoURL) => {
+    const updatedAt = new Date().toISOString()
+    const photoFields = {
+      photoURL: nextPhotoURL,
+      avatar: nextPhotoURL,
+      updatedAt,
+    }
+    if (import.meta.env.VITE_FIREBASE_API_KEY !== 'mock_api_key_dev') {
+      await setDoc(doc(db, 'users', user.uid), photoFields, { merge: true })
+      await mergeEmployeeFields(user.uid, user.email, photoFields)
+      if (auth.currentUser) {
+        try {
+          await updateProfile(auth.currentUser, { photoURL: nextPhotoURL || null })
+        } catch (pErr) {
+          console.warn('Firebase auth updateProfile warning:', pErr)
+        }
+      }
+    }
+    setPhotoURL(nextPhotoURL)
+    setUser(
+      { ...(user || {}), photoURL: nextPhotoURL || null },
+      { ...userDoc, ...photoFields },
+      claims
+    )
+  }
+
+  const handlePhotoSelected = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !user?.uid) return
+
+    setPhotoSaving(true)
+    setError('')
+    setSuccess('')
+    try {
+      const { photoURL: nextUrl } = await uploadProfilePhoto(user.uid, file)
+      await persistPhotoFields(nextUrl)
+      setSuccess('Profile photo updated.')
+    } catch (err) {
+      console.error(err)
+      setError(err.message || 'Failed to update profile photo.')
+    } finally {
+      setPhotoSaving(false)
+    }
+  }
+
+  const handleRemovePhoto = async () => {
+    if (!user?.uid) return
+    setPhotoSaving(true)
+    setError('')
+    setSuccess('')
+    try {
+      await deleteProfilePhoto(user.uid)
+      await persistPhotoFields('')
+      setSuccess('Profile photo removed.')
+    } catch (err) {
+      console.error(err)
+      setError(err.message || 'Failed to remove profile photo.')
+    } finally {
+      setPhotoSaving(false)
     }
   }
 
@@ -245,9 +307,41 @@ export const EmployeeProfile = () => {
         {/* Left Side: Summary Card */}
         <div className="md:col-span-1 space-y-6">
           <Card className="p-6 text-center space-y-4 border-border">
-            <div className="w-20 h-20 rounded-2xl bg-accent-soft text-accent font-bold text-3xl flex items-center justify-center border border-accent/20 dark:border-accent/30 mx-auto">
-              {displayName?.charAt(0) || 'E'}
+            <div className="relative w-20 h-20 mx-auto">
+              <EmployeeAvatar
+                src={photoURL}
+                name={displayName}
+                fallback="E"
+                className="w-20 h-20 rounded-2xl bg-accent-soft text-accent font-bold text-3xl border border-accent/20 dark:border-accent/30"
+              />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                className="hidden"
+                onChange={handlePhotoSelected}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={photoSaving}
+                title="Change profile photo"
+                className="absolute -bottom-1 -right-1 w-8 h-8 rounded-xl bg-accent text-white flex items-center justify-center border border-white dark:border-slate-900 shadow-sm hover:bg-accent-hover disabled:opacity-60 cursor-pointer"
+              >
+                {photoSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
+              </button>
             </div>
+            {photoURL && (
+              <button
+                type="button"
+                onClick={handleRemovePhoto}
+                disabled={photoSaving}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-500 hover:underline cursor-pointer disabled:opacity-60"
+              >
+                <Trash2 className="w-3 h-3" />
+                Remove photo
+              </button>
+            )}
             <div>
               <h3 className="font-bold text-fg">{displayName || 'Employee Representative'}</h3>
               <p className="text-xs text-muted flex items-center justify-center gap-1 mt-1 font-medium">

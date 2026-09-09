@@ -32,17 +32,15 @@ import {
   Pin,
 } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
-import { collectUserIdentityIds, isTaskVisibleToUser } from '../projects/services/projectService'
+import { collectUserIdentityIds, isTaskVisibleToUser, buildTaskVisibilityIndex } from '../projects/services/projectService'
 import { subscribeAnnouncements, pickDashboardAnnouncements } from '../announcements/services/announcementsService'
-import { db } from '../../shared/services/firebaseService'
-import { collection, onSnapshot } from 'firebase/firestore'
+import { subscribeLeaveRequestsForUids } from '../team/services/leaveRequestsLive'
 
 const quickLinks = [
   { name: 'Projects', path: '/projects/list', icon: FolderKanban, tile: 'bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400' },
   { name: 'Sprint Tasks', path: '/tasks', icon: Briefcase, tile: 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400' },
   { name: 'Work Timeline', path: '/timeline', icon: CalendarDays, tile: 'bg-accent-soft text-accent' },
   { name: 'Team Directory', path: '/directory', icon: Users, tile: 'bg-teal-50 dark:bg-teal-500/10 text-teal-600 dark:text-teal-400' },
-  { name: 'Attendance', path: '/attendance', icon: Calendar, tile: 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
   { name: 'Leave & PTO', path: '/team/leave', icon: Calendar, tile: 'bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400' },
   { name: 'My Goals', path: '/goals', icon: Target, tile: 'bg-accent-soft text-accent' },
 ]
@@ -50,7 +48,7 @@ const quickLinks = [
 const requestStyle = (leaveType = '') => {
   const t = leaveType.toLowerCase()
   if (t.includes('wfh') || t.includes('work from home')) {
-    return { icon: Home, tile: 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' }
+    return { icon: Home, tile: 'bg-[#06B6D4]/10 text-[#06B6D4]' }
   }
   if (t.includes('sick')) {
     return { icon: HeartPulse, tile: 'bg-accent-soft text-accent' }
@@ -68,8 +66,9 @@ const requestStyle = (leaveType = '') => {
 }
 
 const requestStatusVariant = (status) => {
-  if (status === 'approved') return 'success'
-  if (status === 'rejected' || status === 'cancelled') return 'danger'
+  const s = String(status || '').toLowerCase()
+  if (s === 'approved') return 'success'
+  if (s === 'rejected' || s === 'cancelled') return 'danger'
   return 'warning'
 }
 
@@ -126,27 +125,35 @@ export const EmployeeDashboard = () => {
   }, [])
 
   useEffect(() => {
-    const unsubscribe = subscribeAnnouncements((list) => {
-      setAnnouncements(pickDashboardAnnouncements(list, 3))
-      setLoadingWidgets(false)
-    })
+    const unsubscribe = subscribeAnnouncements(
+      (list) => {
+        setAnnouncements(pickDashboardAnnouncements(list, 3))
+        setLoadingWidgets(false)
+      },
+      { limitCount: 25 }
+    )
     return () => unsubscribe()
   }, [])
 
   useEffect(() => {
-    const unsub = onSnapshot(
-      collection(db, 'leaveRequests'),
-      (snap) => {
-        setLeaveRequests(snap.docs.map((d) => ({ ...d.data(), leaveId: d.id })))
-      },
+    return subscribeLeaveRequestsForUids(
+      identityIds,
+      setLeaveRequests,
       (err) => console.error('Error listening to leave requests:', err)
     )
-    return () => unsub()
-  }, [setLeaveRequests])
+  }, [identityIds, setLeaveRequests])
 
   const isBrightSun = currentHour >= 10 && currentHour < 17
 
-  const visibleTasks = tasks.filter((t) => isTaskVisibleToUser(t, user, userDoc, claims, projects, tasks))
+  const visIndex = useMemo(
+    () => buildTaskVisibilityIndex(projects, tasks, user, userDoc, claims),
+    [projects, tasks, user, userDoc, claims]
+  )
+
+  const visibleTasks = useMemo(
+    () => tasks.filter((t) => isTaskVisibleToUser(t, user, userDoc, claims, projects, tasks, visIndex)),
+    [tasks, user, userDoc, claims, projects, visIndex]
+  )
   const focusTasks = visibleTasks.filter((t) => t.status !== 'done' && t.status !== 'completed')
 
   const todayIso = new Date().toISOString().split('T')[0]

@@ -1,4 +1,4 @@
-import { collection, getDocs, onSnapshot } from './firestoreCompat.js'
+import { supabase } from './client.js'
 
 const GENERIC_NAMES = new Set(['employee', 'team member', 'unassigned', 'creator', 'user', 'admin', ''])
 
@@ -131,8 +131,29 @@ const humanizeStatus = (status) => {
   return raw.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+const rowData = (row) =>
+  row?.data && typeof row.data === 'object' ? row.data : {}
+
+const listenTable = (table, onPayload) => {
+  if (!supabase) return () => {}
+  const channel = supabase
+    .channel(`project-task-alerts:${table}:${Date.now()}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => {
+      try {
+        onPayload(payload)
+      } catch (err) {
+        console.warn(err)
+      }
+    })
+    .subscribe()
+  return () => {
+    supabase.removeChannel(channel)
+  }
+}
+
 /**
- * Live browser alerts from projects/tasks so they work even when inbox SQL is not applied.
+ * Live browser alerts from project/task changes. Uses realtime payloads only
+ * so login does not download the full tasks and projects tables a second time.
  */
 export const subscribeProjectTaskAlerts = ({ mode, identityIds = [], user, userDoc, onAlert }) => {
   const me = profileIdentityKeys(user, userDoc, identityIds)
@@ -141,159 +162,140 @@ export const subscribeProjectTaskAlerts = ({ mode, identityIds = [], user, userD
   const isAdmin = mode === 'admin'
   const taskStatusById = new Map()
   const projectKeysById = new Map()
-  let tasksPrimed = false
-  let projectsPrimed = false
 
   const emit = (payload) => {
     if (typeof onAlert === 'function') onAlert(payload)
   }
 
-  const applyTaskDocs = (docs) => {
-    if (!tasksPrimed) {
-      docs.forEach((docSnap) => {
-        const data = docSnap.data() || {}
-        taskStatusById.set(docSnap.id, data.status || '')
-      })
-      tasksPrimed = true
+  const applyTaskPayload = (payload) => {
+    const eventType = String(payload?.eventType || '').toUpperCase()
+    const nextRow = payload?.new
+    const prevRow = payload?.old
+    if (eventType === 'DELETE') {
+      const id = prevRow?.id || nextRow?.id
+      if (id) taskStatusById.delete(id)
       return
     }
+    if (!nextRow?.id) return
 
-    docs.forEach((docSnap) => {
-      const data = { id: docSnap.id, ...(docSnap.data() || {}) }
-      const prevStatus = taskStatusById.get(docSnap.id)
-      taskStatusById.set(docSnap.id, data.status || '')
-      if (prevStatus == null) return
-      if (String(prevStatus) === String(data.status || '')) return
-      if (String(data.statusChangedByRole || '').toLowerCase() !== 'employee') return
-      if (keysOverlap(me, collectActorKeys(data))) return
+    const data = { id: nextRow.id, ...rowData(nextRow) }
+    const prevStatus = rowData(prevRow).status ?? taskStatusById.get(nextRow.id)
+    taskStatusById.set(nextRow.id, data.status || '')
+    if (eventType === 'INSERT') return
+    if (prevStatus == null) return
+    if (String(prevStatus) === String(data.status || '')) return
+    if (String(data.statusChangedByRole || '').toLowerCase() !== 'employee') return
+    if (keysOverlap(me, collectActorKeys(data))) return
 
-      if (!isAdmin) {
-        const involved = collectTaskPersonKeys(data)
-        const projectId = data.projectId
-        if (projectId && projectKeysById.has(String(projectId))) {
-          projectKeysById.get(String(projectId)).forEach((key) => involved.add(key))
-        }
-        if (!keysOverlap(me, involved)) return
+    if (!isAdmin) {
+      const involved = collectTaskPersonKeys(data)
+      const projectId = data.projectId
+      if (projectId && projectKeysById.has(String(projectId))) {
+        projectKeysById.get(String(projectId)).forEach((key) => involved.add(key))
       }
+      if (!keysOverlap(me, involved)) return
+    }
 
-      const projectName = data.projectName || 'a project'
-      const taskName = data.title || data.name || 'a task'
-      const actorName = data.statusChangedByName || 'An employee'
-      emit({
-        notification: {
-          title: 'Task status updated',
-          body: `${actorName} moved "${taskName}" from ${humanizeStatus(prevStatus)} to ${humanizeStatus(data.status)} on "${projectName}"`,
-        },
-        data: {
-          type: 'task',
-          link: '/projects/tasks',
-          tag: `task-status-${docSnap.id}-${data.status || ''}`,
-          projectId: data.projectId,
-          taskId: docSnap.id,
-        },
-      })
+    const projectName = data.projectName || 'a project'
+    const taskName = data.title || data.name || 'a task'
+    const actorName = data.statusChangedByName || 'An employee'
+    emit({
+      notification: {
+        title: 'Task status updated',
+        body: `${actorName} moved "${taskName}" from ${humanizeStatus(prevStatus)} to ${humanizeStatus(data.status)} on "${projectName}"`,
+      },
+      data: {
+        type: 'task',
+        link: '/projects/tasks',
+        tag: `task-status-${nextRow.id}-${data.status || ''}`,
+        projectId: data.projectId,
+        taskId: nextRow.id,
+      },
     })
   }
 
-  const applyProjectDocs = (docs) => {
-    if (!projectsPrimed) {
-      docs.forEach((docSnap) => {
-        projectKeysById.set(docSnap.id, collectProjectPersonKeys(docSnap.data() || {}))
-      })
-      projectsPrimed = true
+  const applyProjectPayload = (payload) => {
+    const eventType = String(payload?.eventType || '').toUpperCase()
+    const nextRow = payload?.new
+    const prevRow = payload?.old
+    if (eventType === 'DELETE') {
+      const id = prevRow?.id || nextRow?.id
+      if (id) projectKeysById.delete(id)
+      return
+    }
+    if (!nextRow?.id) return
+
+    const data = { id: nextRow.id, ...rowData(nextRow) }
+    const nextKeys = collectProjectPersonKeys(data)
+    const prevKeys =
+      eventType === 'INSERT'
+        ? new Set()
+        : collectProjectPersonKeys(rowData(prevRow))
+    projectKeysById.set(nextRow.id, nextKeys)
+
+    const createdByEmployee = String(data.createdByRole || '').toLowerCase() === 'employee'
+    const isCreator = keysOverlap(me, collectActorKeys(data))
+    const projectName = data.name || 'a project'
+    const creatorName = data.createdByName || data.ownerName || 'An employee'
+
+    if (eventType === 'INSERT') {
+      if (isAdmin && createdByEmployee && !isCreator) {
+        emit({
+          notification: {
+            title: 'New project created',
+            body: `${creatorName} created "${projectName}"`,
+          },
+          data: {
+            type: 'project',
+            link: '/projects/list',
+            tag: `project-created-${nextRow.id}`,
+            projectId: nextRow.id,
+          },
+        })
+      }
+      if (!isAdmin && !isCreator && keysOverlap(me, nextKeys)) {
+        emit({
+          notification: {
+            title: 'Assigned to a project',
+            body: `You were assigned to "${projectName}"`,
+          },
+          data: {
+            type: 'project',
+            link: `/projects/${nextRow.id}/tasks`,
+            tag: `project-assigned-${nextRow.id}`,
+            projectId: nextRow.id,
+          },
+        })
+      }
       return
     }
 
-    docs.forEach((docSnap) => {
-      const data = { id: docSnap.id, ...(docSnap.data() || {}) }
-      const nextKeys = collectProjectPersonKeys(data)
-      const hadProject = projectKeysById.has(docSnap.id)
-      const prevKeys = projectKeysById.get(docSnap.id) || new Set()
-      projectKeysById.set(docSnap.id, nextKeys)
+    const addedKeys = new Set()
+    nextKeys.forEach((key) => {
+      if (!prevKeys.has(key)) addedKeys.add(key)
+    })
+    if (!addedKeys.size) return
+    if (isCreator) return
+    if (!keysOverlap(me, addedKeys)) return
 
-      const createdByEmployee = String(data.createdByRole || '').toLowerCase() === 'employee'
-      const isCreator = keysOverlap(me, collectActorKeys(data))
-      const projectName = data.name || 'a project'
-      const creatorName = data.createdByName || data.ownerName || 'An employee'
-
-      if (!hadProject) {
-        if (isAdmin && createdByEmployee && !isCreator) {
-          emit({
-            notification: {
-              title: 'New project created',
-              body: `${creatorName} created "${projectName}"`,
-            },
-            data: {
-              type: 'project',
-              link: '/projects/list',
-              tag: `project-created-${docSnap.id}`,
-              projectId: docSnap.id,
-            },
-          })
-        }
-        if (!isAdmin && !isCreator && keysOverlap(me, nextKeys)) {
-          emit({
-            notification: {
-              title: 'Assigned to a project',
-              body: `You were assigned to "${projectName}"`,
-            },
-            data: {
-              type: 'project',
-              link: `/projects/${docSnap.id}/tasks`,
-              tag: `project-assigned-${docSnap.id}`,
-              projectId: docSnap.id,
-            },
-          })
-        }
-        return
-      }
-
-      const addedKeys = new Set()
-      nextKeys.forEach((key) => {
-        if (!prevKeys.has(key)) addedKeys.add(key)
-      })
-      if (!addedKeys.size) return
-      if (isCreator) return
-      if (!keysOverlap(me, addedKeys)) return
-
-      emit({
-        notification: {
-          title: 'Assigned to a project',
-          body: `You were assigned to "${projectName}"`,
-        },
-        data: {
-          type: 'project',
-          link: isAdmin ? '/projects/list' : `/projects/${docSnap.id}/tasks`,
-          tag: `project-assigned-${docSnap.id}`,
-          projectId: docSnap.id,
-        },
-      })
+    emit({
+      notification: {
+        title: 'Assigned to a project',
+        body: `You were assigned to "${projectName}"`,
+      },
+      data: {
+        type: 'project',
+        link: isAdmin ? '/projects/list' : `/projects/${nextRow.id}/tasks`,
+        tag: `project-assigned-${nextRow.id}`,
+        projectId: nextRow.id,
+      },
     })
   }
 
-  const unsubTasks = onSnapshot(collection(null, 'tasks'), (snapshot) => {
-    applyTaskDocs(snapshot.docs)
-  })
-  const unsubProjects = onSnapshot(collection(null, 'projects'), (snapshot) => {
-    applyProjectDocs(snapshot.docs)
-  })
-
-  const poll = async () => {
-    try {
-      const [taskSnap, projectSnap] = await Promise.all([
-        getDocs(collection(null, 'tasks')),
-        getDocs(collection(null, 'projects')),
-      ])
-      applyTaskDocs(taskSnap.docs)
-      applyProjectDocs(projectSnap.docs)
-    } catch {
-      // ignore poll errors; live snapshot may still work
-    }
-  }
-  const pollId = setInterval(poll, 6000)
+  const unsubTasks = listenTable('tasks', applyTaskPayload)
+  const unsubProjects = listenTable('projects', applyProjectPayload)
 
   return () => {
-    clearInterval(pollId)
     unsubTasks()
     unsubProjects()
   }

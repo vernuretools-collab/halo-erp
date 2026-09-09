@@ -20,8 +20,10 @@ site_url = "http://localhost:3001"
 [functions.create-user]
 verify_jwt = true
 
+# JWT is checked inside the function. Gateway verify_jwt must be off so the
+# browser OPTIONS preflight (no Authorization header) can return 200 + CORS.
 [functions.ask-admin-assistant]
-verify_jwt = true
+verify_jwt = false
 
 [functions.send-workflow-email]
 verify_jwt = false

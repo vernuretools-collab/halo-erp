@@ -140,11 +140,21 @@ export async function sendPasswordResetEmail(_auth, email) {
 }
 
 export async function updateProfile(user, updates) {
-  const { error } = await supabase.auth.updateUser({
-    data: { displayName: updates.displayName, full_name: updates.displayName },
-  })
-  if (error) throw error
+  const data = {}
+  if (updates.displayName !== undefined) {
+    data.displayName = updates.displayName
+    data.full_name = updates.displayName
+  }
+  if (updates.photoURL !== undefined) {
+    data.photoURL = updates.photoURL
+    data.avatar_url = updates.photoURL
+  }
+  if (Object.keys(data).length) {
+    const { error } = await supabase.auth.updateUser({ data })
+    if (error) throw error
+  }
   if (updates.displayName) user.displayName = updates.displayName
+  if (updates.photoURL !== undefined) user.photoURL = updates.photoURL
 }
 
 export async function updatePassword(_user, newPassword) {

@@ -4,12 +4,13 @@ import {
   updateDoc,
   deleteDoc,
   doc,
-  query,
-  where,
-  getDocs,
   serverTimestamp,
 } from 'firebase/firestore'
 import { db } from '../../../shared/services/firebaseService'
+import {
+  listWorkTimelineEntries,
+  mapTimelineRow,
+} from '../../../../../shared/supabase/listWorkTimelineEntries.js'
 
 const IS_MOCK = import.meta.env.VITE_FIREBASE_API_KEY === 'mock_api_key_dev'
 
@@ -76,24 +77,13 @@ export const fetchTimelineEntries = async (uidOrIds, startDate, endDate) => {
   }
 
   try {
-    const q =
-      ids.length === 1
-        ? query(collection(db, 'workTimelineEntries'), where('uid', '==', ids[0]))
-        : query(collection(db, 'workTimelineEntries'), where('uid', 'in', ids))
-    const snap = await getDocs(q)
-    const entries = snap.docs.map((d) => {
-      const data = d.data()
-      return {
-        entryId: d.id,
-        ...data,
-        entryType: data.entryType === 'upskilling' ? 'upskilling' : 'work',
-      }
-    })
+    const rows = await listWorkTimelineEntries(ids, startDate, endDate)
+    const entries = rows.map(mapTimelineRow)
     return entries
       .filter((e) => e.date >= startDate && e.date <= endDate)
       .sort((a, b) => {
         if (a.date !== b.date) return a.date.localeCompare(b.date)
-        return (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0)
+        return String(a.createdAt || '').localeCompare(String(b.createdAt || ''))
       })
   } catch (err) {
     console.error('[timelineService] fetchTimelineEntries error:', err)

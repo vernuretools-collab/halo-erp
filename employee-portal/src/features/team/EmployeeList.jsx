@@ -15,7 +15,7 @@ import {
   createEmployee,
   deleteEmployeeFromDb,
 } from './services/teamService'
-import { getNameInitial } from './services/attendanceStatsUtils'
+import { EmployeeAvatar } from '../../../../shared/ui/EmployeeAvatar.jsx'
 import {
   Users,
   UserPlus,
@@ -212,17 +212,6 @@ export const EmployeeList = () => {
               <Users className="w-3.5 h-3.5" /> Employee Directory
             </NavLink>
             <NavLink
-              to="/attendance"
-              className={({ isActive }) =>
-                `flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${isActive
-                  ? 'bg-accent-soft text-accent border border-accent/20 dark:border-accent/30'
-                  : 'text-muted hover:text-slate-900 dark:hover:text-slate-200 hover:bg-chrome'
-                }`
-              }
-            >
-              <CheckCircle2 className="w-3.5 h-3.5" /> Attendance Tracker
-            </NavLink>
-            <NavLink
               to="/team/leave"
               className={({ isActive }) =>
                 `flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${isActive
@@ -308,9 +297,11 @@ export const EmployeeList = () => {
             <Card key={emp.uid || emp.id} hover className="space-y-3.5 border-border relative group">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-accent to-accent-hover text-white font-bold flex items-center justify-center text-sm shadow-md shadow-accent/20">
-                    {getNameInitial(emp.displayName || emp.email)}
-                  </div>
+                  <EmployeeAvatar
+                    src={emp.photoURL || emp.avatar}
+                    name={emp.displayName || emp.email}
+                    className="w-10 h-10 rounded-xl bg-gradient-to-tr from-accent to-accent-hover text-white font-bold text-sm shadow-md shadow-accent/20"
+                  />
                   <div>
                     <h4 className="font-bold text-fg text-sm group-hover:text-accent transition-colors">
                       {emp.displayName}

@@ -32,6 +32,8 @@ const applyMetricsToProjects = (projects = [], tasks = []) =>
     return applyProjectTaskMetrics(p, computeProjectMetrics(pId, tasks))
   })
 
+let projectsFetchInflight = null
+
 const DEMO_PROJECTS = [
   {
     projectId: 'proj_201',
@@ -138,6 +140,8 @@ export const useProjectStore = create(
       selectedProjectId: null,
       taskFilterStatus: 'all',
 
+      lastFetchedAt: 0,
+
       setProjects: (projects) => set({ projects: projects || [] }),
       setTasks: (tasks) => set({ tasks: tasks || [] }),
       setStatuses: (statuses) => set({ statuses }),
@@ -145,35 +149,54 @@ export const useProjectStore = create(
       setTaskFilterStatus: (taskFilterStatus) => set({ taskFilterStatus }),
 
       fetchProjectsAndTasks: async () => {
-        set({ loading: true })
-        try {
-          const [projectsData, tasksData, statusesData] = await Promise.all([
-            getProjectsFromDb(),
-            getTasksFromDb(),
-            getTaskStatusesFromDb(),
-          ])
+        if (projectsFetchInflight) return projectsFetchInflight
 
-          const mergedTasks = (tasksData || []).map((dbTask) => {
-            return {
-              ...dbTask,
-              subtasks: dbTask.subtasks || [],
-              status: dbTask.status || 'todo',
-            }
-          })
-
-          // Always derive card metrics from live tasks so counts/velocity stay accurate
-          const projectsWithMetrics = applyMetricsToProjects(projectsData || [], mergedTasks)
-
-          set({
-            projects: projectsWithMetrics,
-            tasks: mergedTasks,
-            statuses: statusesData && statusesData.length > 0 ? statusesData : DEFAULT_TASK_STATUSES,
-            loading: false,
-          })
-        } catch (err) {
-          console.error('Error fetching project store data from Firestore:', err)
-          set({ loading: false })
+        const cached = get()
+        const hasCache = (cached.projects?.length || 0) > 0 || (cached.tasks?.length || 0) > 0
+        if (
+          hasCache &&
+          cached.lastFetchedAt &&
+          Date.now() - cached.lastFetchedAt < 45_000
+        ) {
+          return
         }
+
+        if (!hasCache) set({ loading: true })
+
+        projectsFetchInflight = (async () => {
+          try {
+            const [projectsData, tasksData, statusesData] = await Promise.all([
+              getProjectsFromDb(),
+              getTasksFromDb(),
+              getTaskStatusesFromDb(),
+            ])
+
+            const mergedTasks = (tasksData || []).map((dbTask) => {
+              return {
+                ...dbTask,
+                subtasks: dbTask.subtasks || [],
+                status: dbTask.status || 'todo',
+              }
+            })
+
+            const projectsWithMetrics = applyMetricsToProjects(projectsData || [], mergedTasks)
+
+            set({
+              projects: projectsWithMetrics,
+              tasks: mergedTasks,
+              statuses: statusesData && statusesData.length > 0 ? statusesData : DEFAULT_TASK_STATUSES,
+              loading: false,
+              lastFetchedAt: Date.now(),
+            })
+          } catch (err) {
+            console.error('Error fetching project store data from Firestore:', err)
+            set({ loading: false })
+          } finally {
+            projectsFetchInflight = null
+          }
+        })()
+
+        return projectsFetchInflight
       },
 
       addCustomStatus: async (statusObj, currentUser = null) => {

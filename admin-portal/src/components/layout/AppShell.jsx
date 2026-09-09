@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, Suspense } from 'react'
 import { Navigate, Outlet } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
@@ -50,7 +50,9 @@ export const AppShell = () => {
       >
         <TopBar />
         <main className="flex-1 p-6 overflow-y-auto">
-          <Outlet />
+          <Suspense fallback={<p className="text-sm text-muted">Loading…</p>}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
       <AdminAssistantWidget />

@@ -6,17 +6,10 @@ import {
   countUsedWfhDays,
 } from './wfhPolicyUtils'
 import { getOfficeLocation } from './teamService'
+import { getRequestedLeaveType, leaveStatusKey } from './leaveEntitlementUtils'
 
 /** Set true to require office GPS / weekly WFH clock-in choice again. */
 export const LOCATION_GATE_ENABLED = true
-
-// #region agent log
-const agentDbg = (hypothesisId, location, message, data) => {
-  const payload = JSON.stringify({ sessionId: '98b944', runId: 'pre-fix', hypothesisId, location, message, data, timestamp: Date.now() })
-  fetch('http://127.0.0.1:7493/ingest/c3ff692f-1cdd-437c-bb23-67bdbbc19c12', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '98b944' }, body: payload }).catch(() => {})
-  fetch('/__agent_debug_log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload }).catch(() => {})
-}
-// #endregion
 
 const toDateKey = (date = new Date()) => {
   const y = date.getFullYear()
@@ -54,8 +47,8 @@ export const hasApprovedWfhToday = (leaveRequests, employeeFilter, dateStr) => {
   const list = Array.isArray(leaveRequests) ? leaveRequests : []
   return list.some(
     (l) =>
-      l.leaveType === 'Work From Home' &&
-      l.status === 'approved' &&
+      getRequestedLeaveType(l) === 'Work From Home' &&
+      leaveStatusKey(l) === 'approved' &&
       matchesEmployee(l, employeeFilter) &&
       dateInRange(day, l.startDate, l.endDate)
   )
@@ -200,9 +193,6 @@ export const getCurrentPositionCoords = (options = { enableHighAccuracy: true, t
       },
       (err) => {
         const message = geoErrorMessage(err)
-        // #region agent log
-        agentDbg('C', 'wfhAttendanceUtils.js:getCurrentPositionCoords', 'employee GPS error', { code: err?.code, message, highAccuracy: options.enableHighAccuracy === true })
-        // #endregion
         resolve({ ok: false, error: message })
       },
       options
@@ -270,9 +260,6 @@ export const prepareClockInGate = async ({ emp, leaveRequests, dateStr, employee
 
   const office = await getOfficeLocation()
   if (office.lat == null || office.lng == null) {
-    // #region agent log
-    agentDbg('A', 'wfhAttendanceUtils.js:prepareClockInGate', 'office lat/lng missing after fetch', { officeLat: office?.lat, officeLng: office?.lng, radius: office?.radiusMeters, latType: typeof office?.lat, lngType: typeof office?.lng })
-    // #endregion
     return {
       ok: false,
       requireOfficeLocation: true,
@@ -290,13 +277,7 @@ export const prepareClockInGate = async ({ emp, leaveRequests, dateStr, employee
   }
 
   const dist = nearestOfficeDistance(coords.lat, coords.lng, office)
-  const distIfSwapped = distanceMeters(coords.lng, coords.lat, office.lat, office.lng)
-  const radius = Math.max(50, Number(office.radiusMeters) || 200)
   const within = isWithinOfficeRadius(coords.lat, coords.lng, office, coords.accuracy)
-  const withinWithAccuracy = dist <= radius + (Number(coords.accuracy) || 0)
-  // #region agent log
-  agentDbg('C', 'wfhAttendanceUtils.js:prepareClockInGate', 'geofence comparison', { runId: 'post-fix', officeLat: office.lat, officeLng: office.lng, networkLat: office.networkLat, networkLng: office.networkLng, radius, userLat: coords.lat, userLng: coords.lng, accuracy: coords.accuracy, source: coords.source, dist, distIfSwapped, within, withinWithAccuracy })
-  // #endregion
 
   if (!within) {
     return {

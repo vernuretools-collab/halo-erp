@@ -12,7 +12,8 @@ import {
   attendanceStatusTooltip,
 } from '../../team/services/leaveEntitlementUtils'
 import { collectUserIdentityIds } from '../../projects/services/projectService'
-import { collection, doc, getDoc, getDocs, onSnapshot } from 'firebase/firestore'
+import { subscribeLeaveRequestsForUids } from '../../team/services/leaveRequestsLive'
+import { collection, doc, getDoc, getDocs } from 'firebase/firestore'
 import { db } from '../../../shared/services/firebaseService'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 
@@ -111,16 +112,12 @@ export const AttendanceCalendarWidget = () => {
 
   // Live leaveRequests — calendar overlays must clear when Admin deletes/rejects approval
   useEffect(() => {
-    const unsub = onSnapshot(
-      collection(db, 'leaveRequests'),
-      (snap) => {
-        // Prefer Firestore doc id so deletes always target the real document
-        setLeaveRequests(snap.docs.map((d) => ({ ...d.data(), leaveId: d.id })))
-      },
+    return subscribeLeaveRequestsForUids(
+      identityIds,
+      setLeaveRequests,
       (err) => console.error('Error listening to leave requests:', err)
     )
-    return () => unsub()
-  }, [])
+  }, [identityIds, setLeaveRequests])
 
   const approvedLeaveByDate = useMemo(() => {
     const emp = {

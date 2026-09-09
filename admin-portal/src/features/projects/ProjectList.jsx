@@ -8,7 +8,7 @@ import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { useProjectStore } from './stores/projectStore'
-import { getProjects, createProject, deleteProjectFromDb, updateProjectMembersInDb, updateProjectInDb, getProjectDisplayStatus, getProjectStartDate } from './services/projectService'
+import { createProject, deleteProjectFromDb, updateProjectMembersInDb, updateProjectInDb, getProjectDisplayStatus, getProjectStartDate } from './services/projectService'
 import {
   Plus,
   Search,
@@ -45,12 +45,12 @@ export const ProjectList = () => {
   const navigate = useNavigate()
   const {
     projects,
-    setProjects,
     addProject,
     updateProject,
     deleteProject,
     updateProjectMembers,
     setSelectedProjectId,
+    fetchProjectsAndTasks,
   } = useProjectStore()
 
   const [searchQuery, setSearchQuery] = useState('')
@@ -89,14 +89,15 @@ export const ProjectList = () => {
   const [selectedMemberIds, setSelectedMemberIds] = useState(new Set())
 
   useEffect(() => {
-    const fetchRealProjects = async () => {
-      setLoading(true)
-      const data = await getProjects()
-      setProjects(data || [])
-      setLoading(false)
+    let cancelled = false
+    setLoading(true)
+    fetchProjectsAndTasks().finally(() => {
+      if (!cancelled) setLoading(false)
+    })
+    return () => {
+      cancelled = true
     }
-    fetchRealProjects()
-  }, [setProjects])
+  }, [fetchProjectsAndTasks])
 
   // Fetch clients & employees when modal opens
   useEffect(() => {

@@ -191,29 +191,70 @@ export const isUserOnProject = (project, user, userDoc, tasks = []) => {
   return false
 }
 
-/**
- * Helper to check if a task should be visible to the current user.
- * Includes tasks directly assigned to/created by the user, OR tasks on projects where the user is a member/participant.
- */
-export const isTaskVisibleToUser = (t, user, userDoc, claims, projects = [], tasks = []) => {
-  if (!t) return false
+export const buildTaskVisibilityIndex = (projects = [], tasks = [], user, userDoc, claims) => {
   const rawRole = claims?.role || userDoc?.role || 'employee'
   const isAdmin =
     rawRole === 'admin' ||
     rawRole === 'owner' ||
     rawRole === 'superadmin'
 
+  const projectById = new Map()
+  for (const p of projects || []) {
+    const a = String(p.projectId || '')
+    const b = String(p.id || '')
+    if (a) projectById.set(a, p)
+    if (b) projectById.set(b, p)
+  }
+
+  const assignedProjectIds = new Set()
+  for (const t of tasks || []) {
+    if (t?.projectId && isUserAssignedToTask(t, user, userDoc)) {
+      assignedProjectIds.add(String(t.projectId))
+    }
+  }
+
+  const visibleProjectIds = new Set(assignedProjectIds)
+  if (!isAdmin) {
+    for (const p of projects || []) {
+      if (!isUserOnProject(p, user, userDoc, [])) continue
+      const a = String(p.projectId || '')
+      const b = String(p.id || '')
+      if (a) visibleProjectIds.add(a)
+      if (b) visibleProjectIds.add(b)
+    }
+  }
+
+  return { isAdmin, projectById, visibleProjectIds }
+}
+
+/**
+ * Helper to check if a task should be visible to the current user.
+ * Includes tasks directly assigned to/created by the user, OR tasks on projects where the user is a member/participant.
+ */
+export const isTaskVisibleToUser = (t, user, userDoc, claims, projects = [], tasks = [], index = null) => {
+  if (!t) return false
+  const vis = index || null
+  const rawRole = claims?.role || userDoc?.role || 'employee'
+  const isAdmin =
+    vis?.isAdmin ??
+    (rawRole === 'admin' ||
+      rawRole === 'owner' ||
+      rawRole === 'superadmin')
+
   if (isAdmin) return true
 
-  // 1. Direct task creator or assignee
   if (isUserAssignedToTask(t, user, userDoc)) {
     return true
   }
 
-  // 2. Project member / creator / participant. Resolved by id only, for the
-  // same reason as isUserOnProject step 4.
   const taskProjectId = String(t.projectId || '')
-  if (taskProjectId !== '' && Array.isArray(projects) && projects.length > 0) {
+  if (taskProjectId === '') return false
+
+  if (vis) {
+    return vis.visibleProjectIds.has(taskProjectId)
+  }
+
+  if (Array.isArray(projects) && projects.length > 0) {
     const project = projects.find(
       (p) => String(p.projectId || '') === taskProjectId || String(p.id || '') === taskProjectId
     )

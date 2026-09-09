@@ -26,15 +26,7 @@ import {
   Inbox,
   Check,
 } from 'lucide-react'
-import {
-  getMRR,
-  getCRMPipeline,
-  getProjectStats,
-  getTaskStats,
-  getHealthScore,
-  getRecentActivity,
-  getOrgStats,
-} from './services/dashboardService'
+import { loadDashboardData } from './services/dashboardService'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -257,7 +249,7 @@ export const FounderDashboard = () => {
   }, [])
 
   // Load dashboard metrics with date range
-  const loadData = useCallback(async (dateFilter) => {
+  const loadData = useCallback(async (dateFilter, { force } = {}) => {
     setLoading(true)
     try {
       const filter = dateFilter || {
@@ -265,21 +257,14 @@ export const FounderDashboard = () => {
         endDate: currentRange.endDate,
       }
 
-      const [revData, pipeData, projData, taskData, healthData, actData] = await Promise.all([
-        getMRR(filter),
-        getCRMPipeline(filter),
-        getProjectStats(filter),
-        getTaskStats(filter),
-        getHealthScore(filter),
-        getRecentActivity(filter),
-      ])
-
-      if (revData) setRevenue(revData)
-      if (pipeData) setPipeline(pipeData)
-      if (projData) setProjectStats(projData)
-      if (taskData) setTaskStats(taskData)
-      if (healthData) setHealth(healthData)
-      if (actData) setActivities(actData)
+      const bundle = await loadDashboardData(filter, { force })
+      if (bundle.revenue) setRevenue(bundle.revenue)
+      if (bundle.pipeline) setPipeline(bundle.pipeline)
+      if (bundle.projectStats) setProjectStats(bundle.projectStats)
+      if (bundle.taskStats) setTaskStats(bundle.taskStats)
+      if (bundle.health) setHealth(bundle.health)
+      if (bundle.activities) setActivities(bundle.activities)
+      if (bundle.orgStats) setOrgStats(bundle.orgStats)
     } catch (err) {
       console.error('Failed to load real dashboard metrics:', err)
     } finally {
@@ -287,22 +272,9 @@ export const FounderDashboard = () => {
     }
   }, [currentRange])
 
-  const loadOrgStats = useCallback(async () => {
-    try {
-      const orgData = await getOrgStats()
-      if (orgData) setOrgStats(orgData)
-    } catch (err) {
-      console.error('Failed to load org snapshot:', err)
-    }
-  }, [])
-
   useEffect(() => {
     loadData(currentRange)
-  }, [currentRange])
-
-  useEffect(() => {
-    loadOrgStats()
-  }, [loadOrgStats])
+  }, [currentRange, loadData])
 
   // Select Preset Handler
   const handleSelectPreset = (presetKey) => {
@@ -372,8 +344,7 @@ export const FounderDashboard = () => {
           {/* Refresh Data Button */}
           <button
             onClick={() => {
-              loadData(currentRange)
-              loadOrgStats()
+              loadData(currentRange, { force: true })
             }}
             disabled={loading}
             title="Refresh dashboard metrics"

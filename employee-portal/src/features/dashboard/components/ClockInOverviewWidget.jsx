@@ -11,8 +11,12 @@ import { formatTo12HourTime, computeLiveWorkedSeconds } from '../../team/service
 import { collectUserIdentityIds } from '../../projects/services/projectService'
 import { AttendanceCalendarWidget } from './AttendanceCalendarWidget'
 import { AttendanceMetricsBar } from '../../team/components/AttendanceMetricsBar'
-import { collection, onSnapshot } from 'firebase/firestore'
-import { db } from '../../../shared/services/firebaseService'
+import {
+  classifyApprovedLeaveByDate,
+  resolveLeaveLimits,
+  attendanceStatusChip,
+} from '../../team/services/leaveEntitlementUtils'
+import { subscribeLeaveRequestsForUids } from '../../team/services/leaveRequestsLive'
 import {
   LogIn,
   LogOut,
@@ -80,15 +84,12 @@ export const ClockInOverviewWidget = ({ children }) => {
   }, [setEmployees])
 
   useEffect(() => {
-    const unsub = onSnapshot(
-      collection(db, 'leaveRequests'),
-      (snap) => {
-        setLeaveRequests(snap.docs.map((d) => ({ ...d.data(), leaveId: d.id })))
-      },
+    return subscribeLeaveRequestsForUids(
+      identityIds,
+      setLeaveRequests,
       (err) => console.error('Error listening to leave requests:', err)
     )
-    return () => unsub()
-  }, [setLeaveRequests])
+  }, [identityIds, setLeaveRequests])
 
   const currentEmp =
     employees.find(
@@ -96,6 +97,28 @@ export const ClockInOverviewWidget = ({ children }) => {
         (activeUid && (e.uid === activeUid || e.employeeId === activeUid)) ||
         (user?.email && e.email?.toLowerCase() === user.email.toLowerCase())
     ) || userDoc || {}
+
+  const todayKey = useMemo(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }, [])
+
+  const overlayChip = useMemo(() => {
+    const map = classifyApprovedLeaveByDate(
+      leaveRequests,
+      {
+        employeeId: activeUid,
+        uid: activeUid,
+        employeeEmail: user?.email || userDoc?.email || currentEmp?.email,
+        employeeName: displayName,
+        identityIds,
+      },
+      resolveLeaveLimits(currentEmp),
+      null
+    )
+    const overlay = map[todayKey]
+    return overlay?.status ? attendanceStatusChip(overlay.status, overlay.leaveType) : null
+  }, [leaveRequests, activeUid, user, userDoc, currentEmp, displayName, identityIds, todayKey])
 
   const handleClockToggle = async () => {
     setClockError('')
@@ -245,20 +268,22 @@ export const ClockInOverviewWidget = ({ children }) => {
                   {currentTimeStr}
                 </span>
 
-                {clockedIn ? (
-                  isOnBreak ? (
+                {clockedIn && isOnBreak ? (
                     <Badge variant="warning" className="animate-pulse text-xs px-2.5 py-0.5 font-semibold">
                       On Break
                     </Badge>
-                  ) : (
+                  ) : overlayChip ? (
+                    <Badge variant="outline" className={`text-xs px-2.5 py-0.5 font-semibold ${overlayChip.badgeClass}`}>
+                      {overlayChip.label}
+                    </Badge>
+                  ) : clockedIn ? (
                     <Badge variant="success" className="flex items-center gap-1.5 text-xs px-2.5 py-0.5 font-semibold">
                       <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
                       Present
                     </Badge>
-                  )
-                ) : (
-                  <Badge variant="danger" className="text-xs px-2.5 py-0.5 font-semibold">Absent</Badge>
-                )}
+                  ) : (
+                    <Badge variant="danger" className="text-xs px-2.5 py-0.5 font-semibold">Absent</Badge>
+                  )}
               </div>
             </div>
 

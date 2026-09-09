@@ -20,13 +20,6 @@ const linkClass = ({ isActive }) =>
       : 'text-muted hover:text-fg hover:bg-slate-100 dark:hover:bg-slate-800'
   }`
 
-const wfhClass = ({ isActive }) =>
-  `flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
-    isActive
-      ? 'bg-emerald-50 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30'
-      : 'text-muted hover:text-fg hover:bg-slate-100 dark:hover:bg-slate-800'
-  }`
-
 /**
  * Shared Team module sub-navigation.
  */
@@ -59,7 +52,7 @@ export function TeamSubNav({ className = '' }) {
       <NavLink to="/team/documents" className={linkClass}>
         <FolderOpen className="w-3.5 h-3.5" /> Documents
       </NavLink>
-      <NavLink to="/team/wfh-policy" className={wfhClass}>
+      <NavLink to="/team/wfh-policy" className={linkClass}>
         <Home className="w-3.5 h-3.5" /> Leave & WFH Policy
       </NavLink>
       <NavLink to="/team/timeline" className={linkClass}>

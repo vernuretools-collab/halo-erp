@@ -7,6 +7,10 @@ import {
 } from 'firebase/firestore'
 import { db } from '../../../shared/services/firebaseService'
 
+const emptySnap = { docs: [], empty: true, size: 0 }
+
+const asSnap = (snap) => snap || emptySnap
+
 /**
  * Safely parse date from various Firestore representations
  */
@@ -54,320 +58,6 @@ export const formatActivityTime = (isoString) => {
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
-/**
- * Compute Total Revenue from paid invoices filtered by date range
- */
-export const getMRR = async (dateFilter = {}) => {
-  try {
-    const { startDate, endDate } = dateFilter
-    const snap = await getDocs(collection(db, 'invoices'))
-
-    let totalRevenue = 0
-    let paidCount = 0
-    let currentPeriodRev = 0
-    let priorPeriodRev = 0
-
-    // Compute previous period bounds if range is active
-    let priorStart = null
-    let priorEnd = null
-    if (startDate && endDate) {
-      const durationMs = endDate.getTime() - startDate.getTime()
-      priorEnd = new Date(startDate.getTime() - 1)
-      priorStart = new Date(priorEnd.getTime() - durationMs)
-    }
-
-    snap.docs.forEach((d) => {
-      const data = d.data()
-      const isPaid = (data.status || '').toLowerCase() === 'paid'
-      const amt = Number(data.amount) || Number(data.total) || 0
-      const createdDate = parseFirestoreDate(data.createdAt || data.date || data.issueDate)
-
-      if (isPaid) {
-        // If within selected range
-        if (isWithinDateRange(createdDate, startDate, endDate)) {
-          totalRevenue += amt
-          paidCount++
-          currentPeriodRev += amt
-        }
-
-        // If within prior period
-        if (priorStart && priorEnd && isWithinDateRange(createdDate, priorStart, priorEnd)) {
-          priorPeriodRev += amt
-        }
-      }
-    })
-
-    let changePercent = '0.0'
-    if (priorPeriodRev > 0) {
-      changePercent = (((currentPeriodRev - priorPeriodRev) / priorPeriodRev) * 100).toFixed(1)
-    } else if (currentPeriodRev > 0) {
-      changePercent = '100.0'
-    }
-
-    return {
-      mrr: totalRevenue,
-      paidCount,
-      changePercent,
-    }
-  } catch (err) {
-    console.error('Error fetching revenue from Firestore:', err)
-    return { mrr: 0, paidCount: 0, changePercent: '0.0' }
-  }
-}
-
-/**
- * Compute active CRM pipeline value and opportunity count filtered by date range
- */
-export const getCRMPipeline = async (dateFilter = {}) => {
-  try {
-    const { startDate, endDate } = dateFilter
-    const snap = await getDocs(collection(db, 'leads'))
-    let pipelineValue = 0
-    let activeCount = 0
-    const closedStages = ['closed_won', 'closed_lost', 'won', 'lost']
-
-    snap.docs.forEach((d) => {
-      const data = d.data()
-      const stage = (data.pipelineStageId || data.stage || '').toLowerCase()
-      const createdDate = parseFirestoreDate(data.createdAt || data.createdDate)
-
-      if (!closedStages.includes(stage)) {
-        if (isWithinDateRange(createdDate, startDate, endDate)) {
-          pipelineValue += Number(data.estimatedValue) || Number(data.value) || 0
-          activeCount++
-        }
-      }
-    })
-
-    return {
-      pipelineValue,
-      activeCount,
-      changePercent: activeCount > 0 ? '8.7' : '0.0',
-    }
-  } catch (err) {
-    console.error('Error fetching pipeline from Firestore:', err)
-    return { pipelineValue: 0, activeCount: 0, changePercent: '0.0' }
-  }
-}
-
-/**
- * Compute project overview stats and breakdown filtered by date range
- */
-export const getProjectStats = async (dateFilter = {}) => {
-  try {
-    const { startDate, endDate } = dateFilter
-    const snap = await getDocs(collection(db, 'projects'))
-    const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
-
-    let completed = 0
-    let inProgress = 0
-    let onHold = 0
-    let notStarted = 0
-    let total = 0
-
-    all.forEach((p) => {
-      const createdDate = parseFirestoreDate(p.createdAt || p.startDate)
-      if (!isWithinDateRange(createdDate, startDate, endDate)) return
-
-      total++
-      const st = (p.status || '').toLowerCase()
-      if (st === 'completed' || st === 'done') {
-        completed++
-      } else if (st === 'active' || st === 'in_progress') {
-        inProgress++
-      } else if (st === 'on_hold' || st === 'hold') {
-        onHold++
-      } else {
-        notStarted++
-      }
-    })
-
-    return {
-      total,
-      active: inProgress + notStarted,
-      completed,
-      inProgress,
-      onHold,
-      notStarted,
-      changePercent: total > 0 ? '14.3' : '0.0',
-    }
-  } catch (err) {
-    console.error('Error fetching project stats from Firestore:', err)
-    return {
-      total: 0,
-      active: 0,
-      completed: 0,
-      inProgress: 0,
-      onHold: 0,
-      notStarted: 0,
-      changePercent: '0.0',
-    }
-  }
-}
-
-/**
- * Compute task overview stats and breakdown filtered by date range
- */
-export const getTaskStats = async (dateFilter = {}) => {
-  try {
-    const { startDate, endDate } = dateFilter
-    const snap = await getDocs(collection(db, 'tasks'))
-    const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
-
-    let completed = 0
-    let inProgress = 0
-    let todo = 0
-    let overdue = 0
-    let total = 0
-    const now = new Date()
-
-    all.forEach((t) => {
-      const createdDate = parseFirestoreDate(t.createdAt || t.updatedAt)
-      if (!isWithinDateRange(createdDate, startDate, endDate)) return
-
-      total++
-      const st = (t.status || '').toLowerCase()
-      const dueDate = parseFirestoreDate(t.dueDate)
-      const isOverdue = dueDate && dueDate < now && st !== 'done' && st !== 'completed'
-
-      if (isOverdue) {
-        overdue++
-      } else if (st === 'done' || st === 'completed') {
-        completed++
-      } else if (st === 'in_progress') {
-        inProgress++
-      } else {
-        todo++
-      }
-    })
-
-    return {
-      total,
-      completed,
-      inProgress,
-      todo,
-      overdue,
-    }
-  } catch (err) {
-    console.error('Error fetching task stats from Firestore:', err)
-    return {
-      total: 0,
-      completed: 0,
-      inProgress: 0,
-      todo: 0,
-      overdue: 0,
-    }
-  }
-}
-
-/**
- * Fetch health score breakdown dynamically calculated from Firestore records in date range
- */
-export const getHealthScore = async (dateFilter = {}) => {
-  try {
-    const { startDate, endDate } = dateFilter
-
-    // 1. Check if an explicit snapshot exists in healthScores
-    const q = query(
-      collection(db, 'healthScores'),
-      orderBy('calculatedAt', 'desc'),
-      limit(1)
-    )
-    const snap = await getDocs(q).catch(() => ({ empty: true }))
-    if (!snap.empty && snap.docs?.length > 0) {
-      const d = snap.docs[0].data()
-      const calcDate = parseFirestoreDate(d.calculatedAt)
-      if (isWithinDateRange(calcDate, startDate, endDate)) {
-        return {
-          overall: Math.round(d.overall ?? d.overallScore ?? d.score ?? 87),
-          crm: Math.round(d.crm ?? d.breakdown?.crm?.score ?? 90),
-          finance: Math.round(d.finance ?? d.breakdown?.finance?.score ?? 85),
-          team: Math.round(d.team ?? d.breakdown?.team?.score ?? 80),
-          projects: Math.round(d.projects ?? d.breakdown?.projects?.score ?? 82),
-          changePercent: '5.4',
-        }
-      }
-    }
-
-    // 2. Compute dynamic health based on real operations data
-    const [leadSnap, invSnap, taskSnap, projSnap] = await Promise.all([
-      getDocs(collection(db, 'leads')).catch(() => ({ docs: [] })),
-      getDocs(collection(db, 'invoices')).catch(() => ({ docs: [] })),
-      getDocs(collection(db, 'tasks')).catch(() => ({ docs: [] })),
-      getDocs(collection(db, 'projects')).catch(() => ({ docs: [] })),
-    ])
-
-    // CRM Health
-    let totalLeads = 0
-    let activeLeads = 0
-    leadSnap.docs.forEach((d) => {
-      const createdDate = parseFirestoreDate(d.data().createdAt)
-      if (!isWithinDateRange(createdDate, startDate, endDate)) return
-      totalLeads++
-      const st = (d.data().pipelineStageId || d.data().stage || '').toLowerCase()
-      if (st !== 'closed_lost' && st !== 'lost') activeLeads++
-    })
-    const crmHealth = totalLeads > 0 ? Math.round((activeLeads / totalLeads) * 100) : 100
-
-    // Finance Health
-    let totalInvoices = 0
-    let paidInvoices = 0
-    invSnap.docs.forEach((d) => {
-      const createdDate = parseFirestoreDate(d.data().createdAt || d.data().date)
-      if (!isWithinDateRange(createdDate, startDate, endDate)) return
-      totalInvoices++
-      const st = (d.data().status || '').toLowerCase()
-      if (st === 'paid') paidInvoices++
-    })
-    const financeHealth = totalInvoices > 0 ? Math.round((paidInvoices / totalInvoices) * 100) : 100
-
-    // Project Health
-    let totalProjects = 0
-    let activeOrDoneProjects = 0
-    projSnap.docs.forEach((d) => {
-      const createdDate = parseFirestoreDate(d.data().createdAt)
-      if (!isWithinDateRange(createdDate, startDate, endDate)) return
-      totalProjects++
-      const st = (d.data().status || '').toLowerCase()
-      if (st === 'completed' || st === 'done' || st === 'active' || st === 'in_progress') activeOrDoneProjects++
-    })
-    const projectHealth = totalProjects > 0 ? Math.round((activeOrDoneProjects / totalProjects) * 100) : 100
-
-    // Team Health
-    let totalTasks = 0
-    let completedTasks = 0
-    taskSnap.docs.forEach((d) => {
-      const createdDate = parseFirestoreDate(d.data().createdAt)
-      if (!isWithinDateRange(createdDate, startDate, endDate)) return
-      totalTasks++
-      const st = (d.data().status || '').toLowerCase()
-      if (st === 'done' || st === 'completed') completedTasks++
-    })
-    const teamHealth = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 100
-
-    const overall = Math.round((crmHealth + financeHealth + projectHealth + teamHealth) / 4)
-
-    return {
-      overall: overall || 100,
-      crm: crmHealth || 100,
-      finance: financeHealth || 100,
-      team: teamHealth || 100,
-      projects: projectHealth || 100,
-      changePercent: '5.4',
-    }
-  } catch (err) {
-    console.error('Error computing health score from Firestore:', err)
-    return {
-      overall: 100,
-      crm: 100,
-      finance: 100,
-      team: 100,
-      projects: 100,
-      changePercent: '0.0',
-    }
-  }
-}
-
 const toLocalYmd = (val) => {
   if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}/.test(val)) return val.slice(0, 10)
   const d = val instanceof Date ? val : parseFirestoreDate(val)
@@ -390,7 +80,6 @@ const isActivelyInOffice = (log) =>
 
 const isAttendancePresent = (log) => {
   if (!log) return false
-  // Break is still a present workday — never treat it as absent
   if (log.isOnBreak === true) return true
   if (log.present === false) return false
   if (log.present === true || log.status === 'present' || log.onDuty === true) return true
@@ -402,238 +91,563 @@ const isAttendancePresent = (log) => {
   return false
 }
 
-/**
- * Daily org snapshot (not date-filterable): all-time employees/tickets, today's attendance/leaves
- */
-export const getOrgStats = async () => {
-  try {
-    const todayYmd = toLocalYmd(new Date())
-    const [empSnap, attSnap, leaveSnap, ticketSnap] = await Promise.all([
-      getDocs(collection(db, 'employees')).catch(() => ({ size: 0, docs: [] })),
-      getDocs(collection(db, 'attendanceLogs')).catch(() => ({ size: 0, docs: [] })),
-      getDocs(collection(db, 'leaveRequests')).catch(() => ({ size: 0, docs: [] })),
-      getDocs(collection(db, 'helpDeskTickets')).catch(() => ({ size: 0, docs: [] })),
-    ])
+const EMPTY_REVENUE = { mrr: 0, paidCount: 0, changePercent: '0.0' }
+const EMPTY_PIPELINE = { pipelineValue: 0, activeCount: 0, changePercent: '0.0' }
+const EMPTY_PROJECTS = {
+  total: 0,
+  active: 0,
+  completed: 0,
+  inProgress: 0,
+  onHold: 0,
+  notStarted: 0,
+  changePercent: '0.0',
+}
+const EMPTY_TASKS = { total: 0, completed: 0, inProgress: 0, todo: 0, overdue: 0 }
+const EMPTY_HEALTH = { overall: 100, crm: 100, finance: 100, team: 100, projects: 100, changePercent: '0.0' }
+const EMPTY_ORG = {
+  employees: { total: 0, growth: 'All time' },
+  attendance: { present: 0, total: 0, percent: '0.0' },
+  leaves: { approved: 0 },
+  tickets: { open: 0 },
+}
 
-    const totalEmployees = empSnap.docs ? empSnap.docs.length : 0
-    const employeeUids = new Set()
-    const employeeRecords = []
-    empSnap.docs?.forEach((d) => {
-      const emp = d.data()
-      employeeRecords.push({ ...emp, id: d.id })
-      ;[emp.uid, emp.employeeId, d.id].forEach((id) => {
-        const uid = String(id || '').trim()
-        if (uid) employeeUids.add(uid)
-      })
-    })
+export const computeMRR = (invoiceSnap, dateFilter = {}) => {
+  const { startDate, endDate } = dateFilter
+  let totalRevenue = 0
+  let paidCount = 0
+  let currentPeriodRev = 0
+  let priorPeriodRev = 0
+  let priorStart = null
+  let priorEnd = null
+  if (startDate && endDate) {
+    const durationMs = endDate.getTime() - startDate.getTime()
+    priorEnd = new Date(startDate.getTime() - 1)
+    priorStart = new Date(priorEnd.getTime() - durationMs)
+  }
 
-    const matchEmployeeIds = (data) => {
-      const ids = new Set()
-      ;[data?.uid, data?.employeeId, data?.id].forEach((id) => {
-        const uid = String(id || '').trim()
-        if (uid) ids.add(uid)
-      })
-      const email = String(data?.employeeEmail || data?.email || '').trim().toLowerCase()
-      employeeRecords.forEach((emp) => {
-        const empEmail = String(emp.email || '').trim().toLowerCase()
-        const empIds = [emp.uid, emp.employeeId, emp.id].map((id) => String(id || '').trim()).filter(Boolean)
-        const idHit = empIds.some((id) => ids.has(id))
-        const emailHit = Boolean(email && empEmail && email === empEmail)
-        if (!idHit && !emailHit) return
-        empIds.forEach((id) => ids.add(id))
-      })
-      return ids
+  asSnap(invoiceSnap).docs.forEach((d) => {
+    const data = d.data()
+    const isPaid = (data.status || '').toLowerCase() === 'paid'
+    const amt = Number(data.amount) || Number(data.total) || 0
+    const createdDate = parseFirestoreDate(data.createdAt || data.date || data.issueDate)
+
+    if (isPaid) {
+      if (isWithinDateRange(createdDate, startDate, endDate)) {
+        totalRevenue += amt
+        paidCount++
+        currentPeriodRev += amt
+      }
+      if (priorStart && priorEnd && isWithinDateRange(createdDate, priorStart, priorEnd)) {
+        priorPeriodRev += amt
+      }
     }
+  })
 
-    const onLeaveUids = new Set()
-    let approvedLeaves = 0
-    leaveSnap.docs?.forEach((d) => {
-      const data = d.data()
-      if (String(data.leaveType || '') === 'On Duty') return
-      if ((data.status || '').toLowerCase() !== 'approved') return
-      if (!leaveCoversDay(data, todayYmd)) return
-      approvedLeaves++
-      matchEmployeeIds(data).forEach((id) => onLeaveUids.add(id))
+  let changePercent = '0.0'
+  if (priorPeriodRev > 0) {
+    changePercent = (((currentPeriodRev - priorPeriodRev) / priorPeriodRev) * 100).toFixed(1)
+  } else if (currentPeriodRev > 0) {
+    changePercent = '100.0'
+  }
+
+  return { mrr: totalRevenue, paidCount, changePercent }
+}
+
+export const computeCRMPipeline = (leadSnap, dateFilter = {}) => {
+  const { startDate, endDate } = dateFilter
+  let pipelineValue = 0
+  let activeCount = 0
+  const closedStages = ['closed_won', 'closed_lost', 'won', 'lost']
+
+  asSnap(leadSnap).docs.forEach((d) => {
+    const data = d.data()
+    const stage = (data.pipelineStageId || data.stage || '').toLowerCase()
+    const createdDate = parseFirestoreDate(data.createdAt || data.createdDate)
+
+    if (!closedStages.includes(stage)) {
+      if (isWithinDateRange(createdDate, startDate, endDate)) {
+        pipelineValue += Number(data.estimatedValue) || Number(data.value) || 0
+        activeCount++
+      }
+    }
+  })
+
+  return {
+    pipelineValue,
+    activeCount,
+    changePercent: activeCount > 0 ? '8.7' : '0.0',
+  }
+}
+
+export const computeProjectStats = (projectSnap, dateFilter = {}) => {
+  const { startDate, endDate } = dateFilter
+  let completed = 0
+  let inProgress = 0
+  let onHold = 0
+  let notStarted = 0
+  let total = 0
+
+  asSnap(projectSnap).docs.forEach((d) => {
+    const p = d.data()
+    const createdDate = parseFirestoreDate(p.createdAt || p.startDate)
+    if (!isWithinDateRange(createdDate, startDate, endDate)) return
+
+    total++
+    const st = (p.status || '').toLowerCase()
+    if (st === 'completed' || st === 'done') completed++
+    else if (st === 'active' || st === 'in_progress') inProgress++
+    else if (st === 'on_hold' || st === 'hold') onHold++
+    else notStarted++
+  })
+
+  return {
+    total,
+    active: inProgress + notStarted,
+    completed,
+    inProgress,
+    onHold,
+    notStarted,
+    changePercent: total > 0 ? '14.3' : '0.0',
+  }
+}
+
+export const computeTaskStats = (taskSnap, dateFilter = {}) => {
+  const { startDate, endDate } = dateFilter
+  let completed = 0
+  let inProgress = 0
+  let todo = 0
+  let overdue = 0
+  let total = 0
+  const now = new Date()
+
+  asSnap(taskSnap).docs.forEach((d) => {
+    const t = d.data()
+    const createdDate = parseFirestoreDate(t.createdAt || t.updatedAt)
+    if (!isWithinDateRange(createdDate, startDate, endDate)) return
+
+    total++
+    const st = (t.status || '').toLowerCase()
+    const dueDate = parseFirestoreDate(t.dueDate)
+    const isOverdue = dueDate && dueDate < now && st !== 'done' && st !== 'completed'
+
+    if (isOverdue) overdue++
+    else if (st === 'done' || st === 'completed') completed++
+    else if (st === 'in_progress') inProgress++
+    else todo++
+  })
+
+  return { total, completed, inProgress, todo, overdue }
+}
+
+export const computeHealthScore = (snaps, dateFilter = {}) => {
+  const { startDate, endDate } = dateFilter
+  const healthSnap = asSnap(snaps.healthScores)
+  if (!healthSnap.empty && healthSnap.docs?.length > 0) {
+    const d = healthSnap.docs[0].data()
+    const calcDate = parseFirestoreDate(d.calculatedAt)
+    if (isWithinDateRange(calcDate, startDate, endDate)) {
+      return {
+        overall: Math.round(d.overall ?? d.overallScore ?? d.score ?? 87),
+        crm: Math.round(d.crm ?? d.breakdown?.crm?.score ?? 90),
+        finance: Math.round(d.finance ?? d.breakdown?.finance?.score ?? 85),
+        team: Math.round(d.team ?? d.breakdown?.team?.score ?? 80),
+        projects: Math.round(d.projects ?? d.breakdown?.projects?.score ?? 82),
+        changePercent: '5.4',
+      }
+    }
+  }
+
+  let totalLeads = 0
+  let activeLeads = 0
+  asSnap(snaps.leads).docs.forEach((d) => {
+    const createdDate = parseFirestoreDate(d.data().createdAt)
+    if (!isWithinDateRange(createdDate, startDate, endDate)) return
+    totalLeads++
+    const st = (d.data().pipelineStageId || d.data().stage || '').toLowerCase()
+    if (st !== 'closed_lost' && st !== 'lost') activeLeads++
+  })
+  const crmHealth = totalLeads > 0 ? Math.round((activeLeads / totalLeads) * 100) : 100
+
+  let totalInvoices = 0
+  let paidInvoices = 0
+  asSnap(snaps.invoices).docs.forEach((d) => {
+    const createdDate = parseFirestoreDate(d.data().createdAt || d.data().date)
+    if (!isWithinDateRange(createdDate, startDate, endDate)) return
+    totalInvoices++
+    const st = (d.data().status || '').toLowerCase()
+    if (st === 'paid') paidInvoices++
+  })
+  const financeHealth = totalInvoices > 0 ? Math.round((paidInvoices / totalInvoices) * 100) : 100
+
+  let totalProjects = 0
+  let activeOrDoneProjects = 0
+  asSnap(snaps.projects).docs.forEach((d) => {
+    const createdDate = parseFirestoreDate(d.data().createdAt)
+    if (!isWithinDateRange(createdDate, startDate, endDate)) return
+    totalProjects++
+    const st = (d.data().status || '').toLowerCase()
+    if (st === 'completed' || st === 'done' || st === 'active' || st === 'in_progress') activeOrDoneProjects++
+  })
+  const projectHealth = totalProjects > 0 ? Math.round((activeOrDoneProjects / totalProjects) * 100) : 100
+
+  let totalTasks = 0
+  let completedTasks = 0
+  asSnap(snaps.tasks).docs.forEach((d) => {
+    const createdDate = parseFirestoreDate(d.data().createdAt)
+    if (!isWithinDateRange(createdDate, startDate, endDate)) return
+    totalTasks++
+    const st = (d.data().status || '').toLowerCase()
+    if (st === 'done' || st === 'completed') completedTasks++
+  })
+  const teamHealth = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 100
+  const overall = Math.round((crmHealth + financeHealth + projectHealth + teamHealth) / 4)
+
+  return {
+    overall: overall || 100,
+    crm: crmHealth || 100,
+    finance: financeHealth || 100,
+    team: teamHealth || 100,
+    projects: projectHealth || 100,
+    changePercent: '5.4',
+  }
+}
+
+export const computeOrgStats = (snaps) => {
+  const todayYmd = toLocalYmd(new Date())
+  const empSnap = asSnap(snaps.employees)
+  const attSnap = asSnap(snaps.attendanceLogs)
+  const leaveSnap = asSnap(snaps.leaveRequests)
+  const ticketSnap = asSnap(snaps.helpDeskTickets)
+
+  const totalEmployees = empSnap.docs ? empSnap.docs.length : 0
+  const employeeUids = new Set()
+  const employeeRecords = []
+  empSnap.docs?.forEach((d) => {
+    const emp = d.data()
+    employeeRecords.push({ ...emp, id: d.id })
+    ;[emp.uid, emp.employeeId, d.id].forEach((id) => {
+      const uid = String(id || '').trim()
+      if (uid) employeeUids.add(uid)
     })
+  })
 
-    const presentUids = new Set()
-    attSnap.docs?.forEach((d) => {
-      const log = d.data()
-      const logYmd = toLocalYmd(log.date) || toLocalYmd(log.checkIn || log.timestamp || log.createdAt)
-      if (logYmd !== todayYmd) return
-      if (!isAttendancePresent(log)) return
-      const uid = String(log.uid || log.employeeId || '').trim()
-      if (!uid || !employeeUids.has(uid)) return
-      // Approved leave drops present only if they did not clock in / go on break today
-      if (onLeaveUids.has(uid) && !isActivelyInOffice(log)) return
-      presentUids.add(uid)
+  const matchEmployeeIds = (data) => {
+    const ids = new Set()
+    ;[data?.uid, data?.employeeId, data?.id].forEach((id) => {
+      const uid = String(id || '').trim()
+      if (uid) ids.add(uid)
     })
-    const presentCount = presentUids.size
-    const attendancePercent = totalEmployees > 0 ? ((presentCount / totalEmployees) * 100).toFixed(1) : '0.0'
-
-    let openTickets = 0
-    ticketSnap.docs?.forEach((d) => {
-      const data = d.data()
-      const isClient = !!(data.clientId || data.clientEmail || data.projectName || data.projectId)
-      if (!isClient) return
-      const st = (data.status || '').toLowerCase()
-      if (st === 'open' || st === 'in_progress' || st === 'pending') openTickets++
+    const email = String(data?.employeeEmail || data?.email || '').trim().toLowerCase()
+    employeeRecords.forEach((emp) => {
+      const empEmail = String(emp.email || '').trim().toLowerCase()
+      const empIds = [emp.uid, emp.employeeId, emp.id].map((id) => String(id || '').trim()).filter(Boolean)
+      const idHit = empIds.some((id) => ids.has(id))
+      const emailHit = Boolean(email && empEmail && email === empEmail)
+      if (!idHit && !emailHit) return
+      empIds.forEach((id) => ids.add(id))
     })
+    return ids
+  }
 
+  const onLeaveUids = new Set()
+  let approvedLeaves = 0
+  leaveSnap.docs?.forEach((d) => {
+    const data = d.data()
+    if (String(data.leaveType || '') === 'On Duty') return
+    if ((data.status || '').toLowerCase() !== 'approved') return
+    if (!leaveCoversDay(data, todayYmd)) return
+    approvedLeaves++
+    matchEmployeeIds(data).forEach((id) => onLeaveUids.add(id))
+  })
+
+  const presentUids = new Set()
+  attSnap.docs?.forEach((d) => {
+    const log = d.data()
+    const logYmd = toLocalYmd(log.date) || toLocalYmd(log.checkIn || log.timestamp || log.createdAt)
+    if (logYmd !== todayYmd) return
+    if (!isAttendancePresent(log)) return
+    const uid = String(log.uid || log.employeeId || '').trim()
+    if (!uid || !employeeUids.has(uid)) return
+    if (onLeaveUids.has(uid) && !isActivelyInOffice(log)) return
+    presentUids.add(uid)
+  })
+  const presentCount = presentUids.size
+  const attendancePercent = totalEmployees > 0 ? ((presentCount / totalEmployees) * 100).toFixed(1) : '0.0'
+
+  let openTickets = 0
+  ticketSnap.docs?.forEach((d) => {
+    const data = d.data()
+    const isClient = !!(data.clientId || data.clientEmail || data.projectName || data.projectId)
+    if (!isClient) return
+    const st = (data.status || '').toLowerCase()
+    if (st === 'open' || st === 'in_progress' || st === 'pending') openTickets++
+  })
+
+  return {
+    employees: { total: totalEmployees, growth: 'All time' },
+    attendance: {
+      present: presentCount,
+      total: totalEmployees,
+      percent: Math.min(Number(attendancePercent) || 0, 100).toFixed(1),
+    },
+    leaves: { approved: approvedLeaves },
+    tickets: { open: openTickets },
+  }
+}
+
+const newestDocs = (snap, n = 10) => {
+  const docs = [...(asSnap(snap).docs || [])]
+  docs.sort((a, b) => {
+    const da = parseFirestoreDate(a.data().updatedAt || a.data().createdAt)
+    const db = parseFirestoreDate(b.data().updatedAt || b.data().createdAt)
+    return (db?.getTime() || 0) - (da?.getTime() || 0)
+  })
+  return docs.slice(0, n)
+}
+
+export const computeRecentActivity = (snaps, dateFilter = {}) => {
+  const { startDate, endDate } = dateFilter
+  const activities = []
+
+  newestDocs(snaps.invoices).forEach((d) => {
+    const data = d.data()
+    const created = parseFirestoreDate(data.createdAt)
+    if (!isWithinDateRange(created, startDate, endDate)) return
+    const isPaid = (data.status || '').toLowerCase() === 'paid'
+    activities.push({
+      id: `inv_${d.id}`,
+      title: isPaid
+        ? `Payment of ₹${Number(data.amount || data.total || 0).toLocaleString('en-IN')} received`
+        : `Invoice #${data.invoiceNumber || d.id.slice(0, 8).toUpperCase()} generated`,
+      author: data.clientName ? `From ${data.clientName}` : 'By Finance Team',
+      type: isPaid ? 'payment' : 'invoice',
+      rawDate: created,
+      time: formatActivityTime(data.createdAt),
+    })
+  })
+
+  newestDocs(snaps.leads).forEach((d) => {
+    const data = d.data()
+    const created = parseFirestoreDate(data.createdAt)
+    if (!isWithinDateRange(created, startDate, endDate)) return
+    activities.push({
+      id: `lead_${d.id}`,
+      title: `Lead "${data.name || data.companyName || 'New Prospect'}" added`,
+      author: data.assignedToName ? `Assigned to ${data.assignedToName}` : 'By CRM Team',
+      type: 'employee',
+      rawDate: created,
+      time: formatActivityTime(data.createdAt),
+    })
+  })
+
+  newestDocs(snaps.projects).forEach((d) => {
+    const data = d.data()
+    const created = parseFirestoreDate(data.createdAt)
+    if (!isWithinDateRange(created, startDate, endDate)) return
+    const isComp = (data.status || '').toLowerCase() === 'completed'
+    activities.push({
+      id: `proj_${d.id}`,
+      title: isComp
+        ? `Project "${data.name || 'Untitled'}" completed`
+        : `Project "${data.name || 'Untitled'}" created`,
+      author: data.ownerName ? `By ${data.ownerName}` : (data.clientName ? `For ${data.clientName}` : 'By Operations Team'),
+      type: 'project',
+      rawDate: created,
+      time: formatActivityTime(data.createdAt),
+    })
+  })
+
+  newestDocs(snaps.tasks).forEach((d) => {
+    const data = d.data()
+    const date = parseFirestoreDate(data.updatedAt || data.createdAt)
+    if (!isWithinDateRange(date, startDate, endDate)) return
+    const isDone = (data.status || '').toLowerCase() === 'done' || (data.status || '').toLowerCase() === 'completed'
+    activities.push({
+      id: `task_${d.id}`,
+      title: isDone
+        ? `Task "${data.title || 'Task'}" completed`
+        : `Task "${data.title || 'Task'}" assigned`,
+      author: data.assigneeName ? `By ${data.assigneeName}` : (data.projectName ? `In ${data.projectName}` : 'By Team'),
+      type: 'task',
+      rawDate: date,
+      time: formatActivityTime(data.updatedAt || data.createdAt),
+    })
+  })
+
+  newestDocs(snaps.employees).forEach((d) => {
+    const data = d.data()
+    const created = parseFirestoreDate(data.createdAt)
+    if (!isWithinDateRange(created, startDate, endDate)) return
+    activities.push({
+      id: `emp_${d.id}`,
+      title: `New employee ${data.name || 'Team Member'} joined`,
+      author: data.role ? `${data.role} · HR Team` : 'By HR Team',
+      type: 'employee',
+      rawDate: created,
+      time: formatActivityTime(data.createdAt),
+    })
+  })
+
+  newestDocs(snaps.helpDeskTickets).forEach((d) => {
+    const data = d.data()
+    const isClient = !!(data.clientId || data.clientEmail || data.projectName || data.projectId)
+    if (!isClient) return
+    const created = parseFirestoreDate(data.createdAt)
+    if (!isWithinDateRange(created, startDate, endDate)) return
+    activities.push({
+      id: `ticket_${d.id}`,
+      title: `Client ticket "${data.subject || data.title || 'Support Request'}" submitted`,
+      author: data.clientName ? `By ${data.clientName}` : data.projectName ? `Project: ${data.projectName}` : 'By Client',
+      type: 'employee',
+      rawDate: created,
+      time: formatActivityTime(data.createdAt),
+    })
+  })
+
+  activities.sort((a, b) => {
+    const timeA = a.rawDate ? a.rawDate.getTime() : 0
+    const timeB = b.rawDate ? b.rawDate.getTime() : 0
+    return timeB - timeA
+  })
+
+  return activities.slice(0, 5)
+}
+
+let snapshotCache = { at: 0, snaps: null }
+const SNAPSHOT_TTL_MS = 30_000
+
+const fetchDashboardSnapshots = async (force = false) => {
+  if (!force && snapshotCache.snaps && Date.now() - snapshotCache.at < SNAPSHOT_TTL_MS) {
+    return snapshotCache.snaps
+  }
+
+  const [
+    invoices,
+    leads,
+    projects,
+    tasks,
+    employees,
+    helpDeskTickets,
+    attendanceLogs,
+    leaveRequests,
+    healthScores,
+  ] = await Promise.all([
+    getDocs(collection(db, 'invoices')).catch(() => emptySnap),
+    getDocs(collection(db, 'leads')).catch(() => emptySnap),
+    getDocs(collection(db, 'projects')).catch(() => emptySnap),
+    getDocs(collection(db, 'tasks')).catch(() => emptySnap),
+    getDocs(collection(db, 'employees')).catch(() => emptySnap),
+    getDocs(collection(db, 'helpDeskTickets')).catch(() => emptySnap),
+    getDocs(collection(db, 'attendanceLogs')).catch(() => emptySnap),
+    getDocs(collection(db, 'leaveRequests')).catch(() => emptySnap),
+    getDocs(query(collection(db, 'healthScores'), orderBy('calculatedAt', 'desc'), limit(1))).catch(() => emptySnap),
+  ])
+
+  const snaps = {
+    invoices,
+    leads,
+    projects,
+    tasks,
+    employees,
+    helpDeskTickets,
+    attendanceLogs,
+    leaveRequests,
+    healthScores,
+  }
+  snapshotCache = { at: Date.now(), snaps }
+  return snaps
+}
+
+export const loadDashboardData = async (dateFilter = {}, { force } = {}) => {
+  try {
+    const snaps = await fetchDashboardSnapshots(force)
     return {
-      employees: {
-        total: totalEmployees,
-        growth: 'All time',
-      },
-      attendance: {
-        present: presentCount,
-        total: totalEmployees,
-        percent: Math.min(Number(attendancePercent) || 0, 100).toFixed(1),
-      },
-      leaves: {
-        approved: approvedLeaves,
-      },
-      tickets: {
-        open: openTickets,
-      },
+      revenue: computeMRR(snaps.invoices, dateFilter),
+      pipeline: computeCRMPipeline(snaps.leads, dateFilter),
+      projectStats: computeProjectStats(snaps.projects, dateFilter),
+      taskStats: computeTaskStats(snaps.tasks, dateFilter),
+      health: computeHealthScore(snaps, dateFilter),
+      activities: computeRecentActivity(snaps, dateFilter),
+      orgStats: computeOrgStats(snaps),
     }
   } catch (err) {
-    console.error('Error fetching org stats from Firestore:', err)
+    console.error('Error loading dashboard data:', err)
     return {
-      employees: { total: 0, growth: 'All time' },
-      attendance: { present: 0, total: 0, percent: '0.0' },
-      leaves: { approved: 0 },
-      tickets: { open: 0 },
+      revenue: EMPTY_REVENUE,
+      pipeline: EMPTY_PIPELINE,
+      projectStats: EMPTY_PROJECTS,
+      taskStats: EMPTY_TASKS,
+      health: EMPTY_HEALTH,
+      activities: [],
+      orgStats: EMPTY_ORG,
     }
   }
 }
 
-/**
- * Build real unified recent activity feed filtered by date range
- */
+export const getMRR = async (dateFilter = {}) => {
+  try {
+    const snaps = await fetchDashboardSnapshots()
+    return computeMRR(snaps.invoices, dateFilter)
+  } catch (err) {
+    console.error('Error fetching revenue from Firestore:', err)
+    return EMPTY_REVENUE
+  }
+}
+
+export const getCRMPipeline = async (dateFilter = {}) => {
+  try {
+    const snaps = await fetchDashboardSnapshots()
+    return computeCRMPipeline(snaps.leads, dateFilter)
+  } catch (err) {
+    console.error('Error fetching pipeline from Firestore:', err)
+    return EMPTY_PIPELINE
+  }
+}
+
+export const getProjectStats = async (dateFilter = {}) => {
+  try {
+    const snaps = await fetchDashboardSnapshots()
+    return computeProjectStats(snaps.projects, dateFilter)
+  } catch (err) {
+    console.error('Error fetching project stats from Firestore:', err)
+    return EMPTY_PROJECTS
+  }
+}
+
+export const getTaskStats = async (dateFilter = {}) => {
+  try {
+    const snaps = await fetchDashboardSnapshots()
+    return computeTaskStats(snaps.tasks, dateFilter)
+  } catch (err) {
+    console.error('Error fetching task stats from Firestore:', err)
+    return EMPTY_TASKS
+  }
+}
+
+export const getHealthScore = async (dateFilter = {}) => {
+  try {
+    const snaps = await fetchDashboardSnapshots()
+    return computeHealthScore(snaps, dateFilter)
+  } catch (err) {
+    console.error('Error computing health score from Firestore:', err)
+    return EMPTY_HEALTH
+  }
+}
+
+export const getOrgStats = async () => {
+  try {
+    const snaps = await fetchDashboardSnapshots()
+    return computeOrgStats(snaps)
+  } catch (err) {
+    console.error('Error fetching org stats from Firestore:', err)
+    return EMPTY_ORG
+  }
+}
+
 export const getRecentActivity = async (dateFilter = {}) => {
   try {
-    const { startDate, endDate } = dateFilter
-    const [invoiceSnap, leadSnap, projectSnap, taskSnap, employeeSnap, ticketSnap] = await Promise.all([
-      getDocs(query(collection(db, 'invoices'), orderBy('createdAt', 'desc'), limit(10))).catch(() => ({ docs: [] })),
-      getDocs(query(collection(db, 'leads'), orderBy('createdAt', 'desc'), limit(10))).catch(() => ({ docs: [] })),
-      getDocs(query(collection(db, 'projects'), orderBy('createdAt', 'desc'), limit(10))).catch(() => ({ docs: [] })),
-      getDocs(query(collection(db, 'tasks'), orderBy('createdAt', 'desc'), limit(10))).catch(() => ({ docs: [] })),
-      getDocs(query(collection(db, 'employees'), orderBy('createdAt', 'desc'), limit(10))).catch(() => ({ docs: [] })),
-      getDocs(query(collection(db, 'helpDeskTickets'), orderBy('createdAt', 'desc'), limit(10))).catch(() => ({ docs: [] })),
-    ])
-
-    const activities = []
-
-    invoiceSnap.docs?.forEach((d) => {
-      const data = d.data()
-      const created = parseFirestoreDate(data.createdAt)
-      if (!isWithinDateRange(created, startDate, endDate)) return
-
-      const isPaid = (data.status || '').toLowerCase() === 'paid'
-      activities.push({
-        id: `inv_${d.id}`,
-        title: isPaid
-          ? `Payment of ₹${Number(data.amount || data.total || 0).toLocaleString('en-IN')} received`
-          : `Invoice #${data.invoiceNumber || d.id.slice(0, 8).toUpperCase()} generated`,
-        author: data.clientName ? `From ${data.clientName}` : 'By Finance Team',
-        type: isPaid ? 'payment' : 'invoice',
-        rawDate: created,
-        time: formatActivityTime(data.createdAt),
-      })
-    })
-
-    leadSnap.docs?.forEach((d) => {
-      const data = d.data()
-      const created = parseFirestoreDate(data.createdAt)
-      if (!isWithinDateRange(created, startDate, endDate)) return
-
-      activities.push({
-        id: `lead_${d.id}`,
-        title: `Lead "${data.name || data.companyName || 'New Prospect'}" added`,
-        author: data.assignedToName ? `Assigned to ${data.assignedToName}` : 'By CRM Team',
-        type: 'employee',
-        rawDate: created,
-        time: formatActivityTime(data.createdAt),
-      })
-    })
-
-    projectSnap.docs?.forEach((d) => {
-      const data = d.data()
-      const created = parseFirestoreDate(data.createdAt)
-      if (!isWithinDateRange(created, startDate, endDate)) return
-
-      const isComp = (data.status || '').toLowerCase() === 'completed'
-      activities.push({
-        id: `proj_${d.id}`,
-        title: isComp
-          ? `Project "${data.name || 'Untitled'}" completed`
-          : `Project "${data.name || 'Untitled'}" created`,
-        author: data.ownerName ? `By ${data.ownerName}` : (data.clientName ? `For ${data.clientName}` : 'By Operations Team'),
-        type: 'project',
-        rawDate: created,
-        time: formatActivityTime(data.createdAt),
-      })
-    })
-
-    taskSnap.docs?.forEach((d) => {
-      const data = d.data()
-      const date = parseFirestoreDate(data.updatedAt || data.createdAt)
-      if (!isWithinDateRange(date, startDate, endDate)) return
-
-      const isDone = (data.status || '').toLowerCase() === 'done' || (data.status || '').toLowerCase() === 'completed'
-      activities.push({
-        id: `task_${d.id}`,
-        title: isDone
-          ? `Task "${data.title || 'Task'}" completed`
-          : `Task "${data.title || 'Task'}" assigned`,
-        author: data.assigneeName ? `By ${data.assigneeName}` : (data.projectName ? `In ${data.projectName}` : 'By Team'),
-        type: 'task',
-        rawDate: date,
-        time: formatActivityTime(data.updatedAt || data.createdAt),
-      })
-    })
-
-    employeeSnap.docs?.forEach((d) => {
-      const data = d.data()
-      const created = parseFirestoreDate(data.createdAt)
-      if (!isWithinDateRange(created, startDate, endDate)) return
-
-      activities.push({
-        id: `emp_${d.id}`,
-        title: `New employee ${data.name || 'Team Member'} joined`,
-        author: data.role ? `${data.role} · HR Team` : 'By HR Team',
-        type: 'employee',
-        rawDate: created,
-        time: formatActivityTime(data.createdAt),
-      })
-    })
-
-    ticketSnap.docs?.forEach((d) => {
-      const data = d.data()
-      const isClient = !!(data.clientId || data.clientEmail || data.projectName || data.projectId)
-      if (!isClient) return
-      const created = parseFirestoreDate(data.createdAt)
-      if (!isWithinDateRange(created, startDate, endDate)) return
-
-      activities.push({
-        id: `ticket_${d.id}`,
-        title: `Client ticket "${data.subject || data.title || 'Support Request'}" submitted`,
-        author: data.clientName ? `By ${data.clientName}` : data.projectName ? `Project: ${data.projectName}` : 'By Client',
-        type: 'employee',
-        rawDate: created,
-        time: formatActivityTime(data.createdAt),
-      })
-    })
-
-    // Sort by timestamp descending
-    activities.sort((a, b) => {
-      const timeA = a.rawDate ? a.rawDate.getTime() : 0
-      const timeB = b.rawDate ? b.rawDate.getTime() : 0
-      return timeB - timeA
-    })
-
-    return activities.slice(0, 5)
+    const snaps = await fetchDashboardSnapshots()
+    return computeRecentActivity(snaps, dateFilter)
   } catch (err) {
     console.error('Error fetching real activity from Firestore:', err)
     return []

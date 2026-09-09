@@ -2,8 +2,9 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { Card } from '../../../components/ui/Card'
 import { useTeamStore, OFFICE_START_HOUR, OFFICE_START_MINUTE, LATE_GRACE_MINUTES } from '../stores/teamStore'
 import { formatTo12HourTime, computeLiveWorkedSeconds } from '../services/attendanceStatsUtils'
-import { getMorningPermissionExpectedStartMinutes } from '../services/leaveEntitlementUtils'
+import { getMorningPermissionExpectedStartMinutes, classifyApprovedLeaveByDate, resolveLeaveLimits, attendanceStatusChip } from '../services/leaveEntitlementUtils'
 import { useUserStore } from '../../../stores/userStore'
+import { collectUserIdentityIds } from '../../projects/services/projectService'
 import { UserCheck, LogIn, LogOut, Timer, AlertCircle } from 'lucide-react'
 
 export const AttendanceMetricsBar = () => {
@@ -19,7 +20,8 @@ export const AttendanceMetricsBar = () => {
     leaveRequests,
   } = useTeamStore()
   const { user, userDoc } = useUserStore()
-
+  const identityIds = useMemo(() => collectUserIdentityIds(user, userDoc), [user, userDoc])
+  const activeUid = identityIds[0] || userDoc?.uid || user?.uid
   const todayStr = useMemo(() => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -27,19 +29,36 @@ export const AttendanceMetricsBar = () => {
 
   const officeStartMinutes = OFFICE_START_HOUR * 60 + OFFICE_START_MINUTE
   const expectedStartMinutes = useMemo(() => {
-    const uid = userDoc?.uid || user?.uid
     return getMorningPermissionExpectedStartMinutes(
       leaveRequests,
       {
-        employeeId: uid,
-        uid,
+        employeeId: activeUid,
+        uid: activeUid,
         employeeEmail: userDoc?.email || user?.email || '',
         employeeName: userDoc?.displayName || user?.displayName || '',
+        identityIds,
       },
       todayStr,
       officeStartMinutes
     )
-  }, [leaveRequests, userDoc, user, todayStr, officeStartMinutes])
+  }, [leaveRequests, activeUid, userDoc, user, todayStr, officeStartMinutes, identityIds])
+
+  const overlayChip = useMemo(() => {
+    const map = classifyApprovedLeaveByDate(
+      leaveRequests,
+      {
+        employeeId: activeUid,
+        uid: activeUid,
+        employeeEmail: userDoc?.email || user?.email || '',
+        employeeName: userDoc?.displayName || user?.displayName || '',
+        identityIds,
+      },
+      resolveLeaveLimits(userDoc),
+      null
+    )
+    const overlay = map[todayStr]
+    return overlay?.status ? attendanceStatusChip(overlay.status, overlay.leaveType) : null
+  }, [leaveRequests, activeUid, userDoc, user, todayStr, identityIds])
 
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
 
@@ -116,7 +135,7 @@ export const AttendanceMetricsBar = () => {
     officeStart.setHours(Math.floor(expectedStartMinutes / 60), expectedStartMinutes % 60, 0, 0)
     const graceCutoff = new Date(officeStart.getTime() + LATE_GRACE_MINUTES * 60 * 1000)
 
-    if (clockInDate.getTime() < graceCutoff.getTime()) {
+    if (clockInDate.getTime() <= graceCutoff.getTime()) {
       return { text: 'On time', isLate: false }
     }
 
@@ -131,22 +150,26 @@ export const AttendanceMetricsBar = () => {
 
   const lateInfo = getLateByInfo()
 
-  // Status computation
   let statusText = 'Absent'
   let statusColor = 'text-rose-600 dark:text-rose-400'
-  let statusBg = 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200/50 dark:border-emerald-500/20'
+  let statusBg = 'bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-200/50 dark:border-rose-500/20'
 
-  if (clockedIn) {
-    if (isOnBreak) {
-      statusText = 'On Break'
-      statusColor = 'text-amber-600 dark:text-amber-400'
-    } else {
-      statusText = 'Present'
-      statusColor = 'text-emerald-600 dark:text-emerald-400'
-    }
+  if (clockedIn && isOnBreak) {
+    statusText = 'On Break'
+    statusColor = 'text-amber-600 dark:text-amber-400'
+    statusBg = 'bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-200/50 dark:border-amber-500/20'
+  } else if (overlayChip) {
+    statusText = overlayChip.label
+    statusColor = overlayChip.text
+    statusBg = overlayChip.iconBg
+  } else if (clockedIn) {
+    statusText = 'Present'
+    statusColor = 'text-emerald-600 dark:text-emerald-400'
+    statusBg = 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200/50 dark:border-emerald-500/20'
   } else if (accumulatedWorkSeconds > 0 || clockOutTime) {
     statusText = 'Off Duty'
     statusColor = 'text-amber-600 dark:text-amber-400'
+    statusBg = 'bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-200/50 dark:border-amber-500/20'
   }
 
   return (

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react'
+import React, { useEffect, useMemo, Suspense } from 'react'
 import { Navigate, Outlet, useRouteError } from 'react-router-dom'
 import { EmployeeSidebar } from './EmployeeSidebar'
 import { EmployeeTopBar } from './EmployeeTopBar'
@@ -82,7 +82,9 @@ export const AppShell = () => {
       >
         <EmployeeTopBar />
         <main className="flex-1 p-6 overflow-y-auto">
-          <Outlet />
+          <Suspense fallback={<p className="text-sm text-muted">Loading…</p>}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>

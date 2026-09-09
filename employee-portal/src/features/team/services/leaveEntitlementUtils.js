@@ -136,6 +136,8 @@ export const getPermissionHours = (leave) => {
   return hoursBetween(leave?.startTime, leave?.endTime)
 }
 
+export const leaveStatusKey = (leave) => String(leave?.status || '').toLowerCase()
+
 /** If approved Permission covers office start, expected arrival is the permission end (minutes from midnight). */
 export const getMorningPermissionExpectedStartMinutes = (
   leaveRequests,
@@ -148,7 +150,8 @@ export const getMorningPermissionExpectedStartMinutes = (
   let expected = fallback
   const list = Array.isArray(leaveRequests) ? leaveRequests : []
   list.forEach((leave) => {
-    if (leave?.status !== 'approved' && leave?.status !== 'pending') return
+    const status = leaveStatusKey(leave)
+    if (status !== 'approved' && status !== 'pending') return
     if (!isPermissionLeave(leave)) return
     if (!leaveMatchesEmployeeFilter(leave, employeeFilter)) return
     const date = leave.startDate || leave.endDate || ''
@@ -173,7 +176,8 @@ export const countUsedPermissionHours = (
   const list = Array.isArray(leaveRequests) ? leaveRequests : []
   const total = list.reduce((sum, leave) => {
     if (excludeLeaveId && (leave.leaveId === excludeLeaveId || leave.id === excludeLeaveId)) return sum
-    if (leave?.status !== 'approved' && leave?.status !== 'pending') return sum
+    const status = leaveStatusKey(leave)
+    if (status !== 'approved' && status !== 'pending') return sum
     if (!leaveMatchesEmployeeFilter(leave, employeeFilter)) return sum
     if (!isPermissionLeave(leave)) return sum
     const date = leave.startDate || leave.endDate || ''
@@ -233,7 +237,10 @@ const createdAtMs = (value) => {
   return Number.isNaN(t) ? 0 : t
 }
 
-const isActiveLeave = (leave) => leave?.status !== 'rejected' && leave?.status !== 'cancelled'
+const isActiveLeave = (leave) => {
+  const status = leaveStatusKey(leave)
+  return status !== 'rejected' && status !== 'cancelled'
+}
 
 export const countUsedPaidDays = (
   leaveRequests,
@@ -247,8 +254,9 @@ export const countUsedPaidDays = (
   return list.reduce((sum, leave) => {
     if (excludeLeaveId && (leave.leaveId === excludeLeaveId || leave.id === excludeLeaveId)) return sum
     if (!isActiveLeave(leave)) return sum
-    if (!includePending && leave.status !== 'approved') return sum
-    if (leave.status !== 'approved' && leave.status !== 'pending') return sum
+    const status = leaveStatusKey(leave)
+    if (!includePending && status !== 'approved') return sum
+    if (status !== 'approved' && status !== 'pending') return sum
     if (!leaveMatchesEmployeeFilter(leave, employeeFilter)) return sum
     if (getLeaveBucket(getRequestedLeaveType(leave)) !== bucket) return sum
     const days = expandLeaveWorkingDates(leave.startDate, leave.endDate || leave.startDate, holidays).filter(
@@ -303,7 +311,7 @@ export const classifyApprovedLeaveByDate = (leaveRequests, employeeFilter, limit
   const map = {}
   const list = (Array.isArray(leaveRequests) ? leaveRequests : []).filter(
     (leave) =>
-      leave.status === 'approved' && leaveMatchesEmployeeFilter(leave, employeeFilter)
+      leaveStatusKey(leave) === 'approved' && leaveMatchesEmployeeFilter(leave, employeeFilter)
   )
 
   const dayEntries = []
@@ -433,4 +441,50 @@ export const attendanceStatusTooltip = (status, leaveType, holidayName) => {
   if (status === 'emergency') return 'Emergency Leave'
   if (status === 'leave') return leaveType || 'Leave'
   return null
+}
+
+export const attendanceStatusChip = (status, leaveType) => {
+  const labelMap = {
+    wfh: 'WFH',
+    casual: 'Casual Leave',
+    sick: 'Sick Leave',
+    emergency: 'Emergency',
+    lop: 'LOP',
+    leave: leaveType || 'Leave',
+  }
+  const colorMap = {
+    wfh: {
+      text: 'text-[#06B6D4]',
+      iconBg: 'bg-[#06B6D4]/10 text-[#06B6D4] border border-[#06B6D4]/30',
+      badgeClass: 'bg-[#06B6D4]/15 text-[#06B6D4] border-[#06B6D4]/30',
+    },
+    casual: {
+      text: 'text-[#A855F7]',
+      iconBg: 'bg-[#A855F7]/10 text-[#A855F7] border border-[#A855F7]/30',
+      badgeClass: 'bg-[#A855F7]/15 text-[#A855F7] border-[#A855F7]/30',
+    },
+    sick: {
+      text: 'text-[#F97316]',
+      iconBg: 'bg-[#F97316]/10 text-[#F97316] border border-[#F97316]/30',
+      badgeClass: 'bg-[#F97316]/15 text-[#F97316] border-[#F97316]/30',
+    },
+    emergency: {
+      text: 'text-[#7F1D1D] dark:text-[#FECACA]',
+      iconBg: 'bg-[#7F1D1D]/10 text-[#7F1D1D] dark:text-[#FECACA] border border-[#7F1D1D]/30',
+      badgeClass: 'bg-[#7F1D1D]/15 text-[#7F1D1D] dark:text-[#FECACA] border-[#7F1D1D]/30',
+    },
+    lop: {
+      text: 'text-[#EC4899]',
+      iconBg: 'bg-[#EC4899]/10 text-[#EC4899] border border-[#EC4899]/30',
+      badgeClass: 'bg-[#EC4899]/15 text-[#EC4899] border-[#EC4899]/30',
+    },
+    leave: {
+      text: 'text-[#A855F7]',
+      iconBg: 'bg-[#A855F7]/10 text-[#A855F7] border border-[#A855F7]/30',
+      badgeClass: 'bg-[#A855F7]/15 text-[#A855F7] border-[#A855F7]/30',
+    },
+  }
+  const colors = colorMap[status]
+  if (!colors) return null
+  return { label: labelMap[status] || leaveType || status, ...colors }
 }

@@ -6,7 +6,7 @@ import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { useProjectStore } from './stores/projectStore'
-import { getProjects, getTasks, createTask, updateTaskStatusInDb, deleteTaskFromDb, getTaskStatusesFromDb } from './services/projectService'
+import { createTask, updateTaskStatusInDb, deleteTaskFromDb } from './services/projectService'
 import { getEmployees } from '../team/services/teamService'
 import { TaskListView } from './components/TaskListView'
 import { TaskCalendarView } from './components/TaskCalendarView'
@@ -127,14 +127,12 @@ export const TaskBoard = () => {
     tasks,
     projects,
     statuses,
-    setTasks,
-    setProjects,
-    setStatuses,
     addTask,
     updateTaskStatus,
     deleteTask,
     selectedProjectId,
-    setSelectedProjectId
+    setSelectedProjectId,
+    fetchProjectsAndTasks,
   } = useProjectStore()
 
   const [showAddModal, setShowAddModal] = useState(false)
@@ -199,22 +197,17 @@ export const TaskBoard = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [tasksData, projectsData, statusesData, employeesData] = await Promise.all([
-          getTasks(),
-          getProjects(),
-          getTaskStatusesFromDb(),
+        const [, employeesData] = await Promise.all([
+          fetchProjectsAndTasks(),
           getEmployees(),
         ])
-        if (tasksData && tasksData.length > 0) setTasks(tasksData)
-        if (projectsData && projectsData.length > 0) setProjects(projectsData)
-        if (statusesData && statusesData.length > 0) setStatuses(statusesData)
         if (employeesData) setEmployees(employeesData)
       } catch (err) {
         console.error('Error loading task board data:', err)
       }
     }
     fetchData()
-  }, [setTasks, setProjects, setStatuses])
+  }, [fetchProjectsAndTasks])
 
   // New task form state
   const currentProjId = selectedProjectId && selectedProjectId !== 'all'
