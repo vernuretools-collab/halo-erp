@@ -4,7 +4,11 @@ const ICON = '/halologo.png'
 const recentlyShown = new Set()
 const suppressedAnnouncementIds = new Set()
 
+const isElectronDesktop = () =>
+  typeof window !== 'undefined' && typeof window.desktop?.showNotification === 'function'
+
 export const ensureNotificationPermission = async () => {
+  if (isElectronDesktop()) return 'granted'
   if (!('Notification' in window)) return 'denied'
   if (Notification.permission === 'granted') return 'granted'
   if (Notification.permission === 'denied') return 'denied'
@@ -141,6 +145,15 @@ export const showForegroundBrowserNotification = async (payload) => {
 
   if (type !== 'wellness') playAnnouncementChime()
 
+  if (isElectronDesktop()) {
+    try {
+      await window.desktop.showNotification({ title, body, link, tag })
+    } catch {
+      // In-app bell still updates via inbox documents.
+    }
+    return
+  }
+
   const permission = await ensureNotificationPermission()
   if (permission !== 'granted') return
 
@@ -181,6 +194,7 @@ export const showForegroundAnnouncementNotification = (payload) =>
 
 export const armBrowserNotifications = async () => {
   unlockAnnouncementAudio()
+  if (isElectronDesktop()) return 'granted'
   const permission = await ensureNotificationPermission()
   await ensureNotificationServiceWorker()
   return permission

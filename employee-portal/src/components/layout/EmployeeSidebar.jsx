@@ -18,6 +18,7 @@ import {
   Receipt,
   IndianRupee,
   Target,
+  Share2,
   LifeBuoy,
   Building2,
   Send,
@@ -77,6 +78,7 @@ const NAV_GROUPS = [
     items: [
       { name: 'My Goals', path: '/goals', icon: Target },
       { name: 'Wellness', path: '/wellness', icon: Heart },
+      { name: 'Post Reminders', path: '/post-reminders', icon: Share2 },
       { name: 'My Profile', path: '/profile', icon: User },
     ],
   },

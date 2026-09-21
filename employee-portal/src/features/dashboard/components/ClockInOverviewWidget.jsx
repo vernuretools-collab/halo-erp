@@ -5,10 +5,9 @@ import { Badge } from '../../../components/ui/Badge'
 import { Button } from '../../../components/ui/Button'
 import { useTeamStore } from '../../team/stores/teamStore'
 import { useUserStore } from '../../../stores/userStore'
-import { getEmployees } from '../../team/services/teamService'
-import { prepareClockInGate, LOCATION_GATE_ENABLED } from '../../team/services/wfhAttendanceUtils'
+import { useAttendanceClockActions } from '../../team/hooks/useAttendanceClockActions'
+import { LOCATION_GATE_ENABLED } from '../../team/services/wfhAttendanceUtils'
 import { formatTo12HourTime, computeLiveWorkedSeconds } from '../../team/services/attendanceStatsUtils'
-import { collectUserIdentityIds } from '../../projects/services/projectService'
 import { AttendanceCalendarWidget } from './AttendanceCalendarWidget'
 import { AttendanceMetricsBar } from '../../team/components/AttendanceMetricsBar'
 import {
@@ -16,7 +15,6 @@ import {
   resolveLeaveLimits,
   attendanceStatusChip,
 } from '../../team/services/leaveEntitlementUtils'
-import { subscribeLeaveRequestsForUids } from '../../team/services/leaveRequestsLive'
 import {
   LogIn,
   LogOut,
@@ -34,21 +32,26 @@ import {
 
 export const ClockInOverviewWidget = ({ children }) => {
   const { user, userDoc } = useUserStore()
-  const identityIds = useMemo(() => collectUserIdentityIds(user, userDoc), [user, userDoc])
-  const activeUid = identityIds[0] || userDoc?.uid || user?.uid
-  const displayName = userDoc?.displayName || user?.displayName || 'Employee'
-  const departmentName = userDoc?.departmentName || ''
+  const {
+    activeUid,
+    displayName,
+    departmentName,
+    currentEmp,
+    identityIds,
+    clockedIn,
+    isOnBreak,
+    clockBusy,
+    clockError,
+    clockHint,
+    handleClockToggle,
+    handleBreakToggle,
+  } = useAttendanceClockActions()
 
   const {
-    employees,
-    setEmployees,
     leaveRequests,
-    setLeaveRequests,
-    clockedIn,
     clockInTime,
     clockInTimestamp,
     clockOutTime,
-    isOnBreak,
     breakStartTime,
     accumulatedBreakSeconds,
     accumulatedWorkSeconds,
@@ -56,47 +59,8 @@ export const ClockInOverviewWidget = ({ children }) => {
     isInExtraTime,
     extraTimeStart,
     accumulatedExtraSeconds,
-    loadUserAttendance,
-    toggleClockIn,
-    toggleBreak,
     toggleExtraTime,
   } = useTeamStore()
-
-  const [currentTimeStr, setCurrentTimeStr] = useState('')
-  const [elapsedSeconds, setElapsedSeconds] = useState(0)
-  const [elapsedExtraSec, setElapsedExtraSec] = useState(0)
-  const [showLogs, setShowLogs] = useState(false)
-  const [clockBusy, setClockBusy] = useState(false)
-  const [clockError, setClockError] = useState('')
-  const [clockHint, setClockHint] = useState('')
-
-  // Fetch today's attendance log for the active logged-in employee
-  useEffect(() => {
-    if (identityIds.length) {
-      loadUserAttendance(identityIds)
-    }
-  }, [identityIds, loadUserAttendance])
-
-  useEffect(() => {
-    getEmployees().then((list) => {
-      if (list?.length) setEmployees(list)
-    }).catch(() => {})
-  }, [setEmployees])
-
-  useEffect(() => {
-    return subscribeLeaveRequestsForUids(
-      identityIds,
-      setLeaveRequests,
-      (err) => console.error('Error listening to leave requests:', err)
-    )
-  }, [identityIds, setLeaveRequests])
-
-  const currentEmp =
-    employees.find(
-      (e) =>
-        (activeUid && (e.uid === activeUid || e.employeeId === activeUid)) ||
-        (user?.email && e.email?.toLowerCase() === user.email.toLowerCase())
-    ) || userDoc || {}
 
   const todayKey = useMemo(() => {
     const d = new Date()
@@ -120,55 +84,10 @@ export const ClockInOverviewWidget = ({ children }) => {
     return overlay?.status ? attendanceStatusChip(overlay.status, overlay.leaveType) : null
   }, [leaveRequests, activeUid, user, userDoc, currentEmp, displayName, identityIds, todayKey])
 
-  const handleClockToggle = async () => {
-    setClockError('')
-    setClockHint('')
-    const meta = { uid: activeUid, displayName, departmentName }
-
-    if (clockedIn) {
-      toggleClockIn(meta)
-      return
-    }
-
-    setClockBusy(true)
-    try {
-      const gate = await prepareClockInGate({
-        emp: currentEmp,
-        leaveRequests,
-        employeeFilter: {
-          employeeId: activeUid,
-          uid: activeUid,
-          employeeEmail: user?.email || userDoc?.email || currentEmp?.email,
-          employeeName: displayName,
-        },
-      })
-
-      if (!gate.ok) {
-        setClockError(gate.error || 'Unable to clock in.')
-        return
-      }
-
-      if (LOCATION_GATE_ENABLED && gate.wfhExempt) {
-        setClockHint(gate.reason || 'WFH — location not required')
-      }
-
-      const result = toggleClockIn(meta, {
-        requireOfficeLocation: gate.requireOfficeLocation,
-        locationVerified: gate.locationVerified,
-        wfhExempt: gate.wfhExempt,
-        coords: gate.coords,
-      })
-
-      if (result && result.success === false) {
-        setClockError(result.error || 'Unable to clock in.')
-      }
-    } catch (err) {
-      console.error('Clock-in gate error:', err)
-      setClockError('Unable to verify location. Try again.')
-    } finally {
-      setClockBusy(false)
-    }
-  }
+  const [currentTimeStr, setCurrentTimeStr] = useState('')
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const [elapsedExtraSec, setElapsedExtraSec] = useState(0)
+  const [showLogs, setShowLogs] = useState(false)
 
   // Live real-time ticker for extra work hours
   useEffect(() => {
@@ -408,7 +327,7 @@ export const ClockInOverviewWidget = ({ children }) => {
             {clockedIn && (
               <Button
                 variant={isOnBreak ? 'primary' : 'secondary'}
-                onClick={() => toggleBreak({ uid: activeUid, displayName, departmentName })}
+                onClick={handleBreakToggle}
                 title={isOnBreak ? 'Resume Work' : 'Take Break'}
                 className="py-2.5 px-3.5 rounded-xl"
               >

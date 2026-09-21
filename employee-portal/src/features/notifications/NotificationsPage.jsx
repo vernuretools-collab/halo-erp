@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, Check, DollarSign, HeartPulse, Info, Briefcase, CheckCircle2, Megaphone } from 'lucide-react'
+import { Bell, Check, DollarSign, HeartPulse, Info, Briefcase, CheckCircle2, Megaphone, Share2 } from 'lucide-react'
 import { useNotificationStore } from './stores/notificationStore'
 import { useUserStore } from '../../stores/userStore'
 import { collectUserIdentityIds } from '../../features/projects/services/projectService'
@@ -22,6 +22,8 @@ const getIconForType = (type) => {
       return <Briefcase className="w-5 h-5 text-accent" />
     case 'wellness':
       return <HeartPulse className="w-5 h-5 text-rose-500" />
+    case 'social_post':
+      return <Share2 className="w-5 h-5 text-sky-500" />
     case 'crm':
       return <CheckCircle2 className="w-5 h-5 text-accent" />
     case 'info':
@@ -43,6 +45,8 @@ const getBgForType = (type) => {
       return 'bg-accent-soft'
     case 'wellness':
       return 'bg-rose-50 dark:bg-rose-500/10'
+    case 'social_post':
+      return 'bg-sky-50 dark:bg-sky-500/10'
     case 'crm':
       return 'bg-accent-soft'
     case 'info':
@@ -58,6 +62,7 @@ const TABS = [
   { id: 'finance', label: 'Finance' },
   { id: 'project', label: 'Project' },
   { id: 'wellness', label: 'Wellness' },
+  { id: 'social_post', label: 'Posts' },
   { id: 'info', label: 'Info' }
 ]
 

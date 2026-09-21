@@ -13,6 +13,7 @@ import {
   Info,
   X,
   Heart,
+  Share2,
   ArrowRight,
   Megaphone,
 } from 'lucide-react'
@@ -40,6 +41,8 @@ export const NotificationCenter = () => {
         return <Briefcase className="w-4 h-4 text-accent" />
       case 'wellness':
         return <Heart className="w-4 h-4 text-rose-600 dark:text-rose-400" />
+      case 'social_post':
+        return <Share2 className="w-4 h-4 text-sky-600 dark:text-sky-400" />
       default:
         return <Info className="w-4 h-4 text-accent" />
     }

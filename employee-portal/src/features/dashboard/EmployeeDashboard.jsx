@@ -256,7 +256,7 @@ export const EmployeeDashboard = () => {
       </div>
 
       <ClockInOverviewWidget>
-        <Card className="p-5 border-border space-y-3 w-full h-full flex flex-col">
+          <Card className="p-5 border-border space-y-3 w-full h-full min-h-0 flex flex-col">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-200">My Tasks</h2>
             <NavLink to="/tasks" className="text-xs text-accent hover:underline font-medium flex items-center gap-1">

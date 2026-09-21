@@ -2,6 +2,7 @@ import React, { lazy } from 'react'
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { AppShell, AppShellError } from './components/layout/AppShell'
 import { EmployeeLoginPage } from './features/auth/EmployeeLoginPage'
+import { DesktopTimingLayout } from './features/desktop/DesktopTimingLayout'
 
 const EmployeeDashboard = lazy(() =>
   import('./features/dashboard/EmployeeDashboard').then((m) => ({ default: m.EmployeeDashboard }))
@@ -64,6 +65,9 @@ const PayslipsPage = lazy(() =>
   import('./features/payslips/PayslipsPage').then((m) => ({ default: m.PayslipsPage }))
 )
 const GoalsPage = lazy(() => import('./features/goals/GoalsPage').then((m) => ({ default: m.GoalsPage })))
+const SocialPostRemindersPage = lazy(() =>
+  import('./features/social-posts/SocialPostRemindersPage').then((m) => ({ default: m.SocialPostRemindersPage }))
+)
 const HelpDeskPage = lazy(() =>
   import('./features/helpdesk/HelpDeskPage').then((m) => ({ default: m.HelpDeskPage }))
 )
@@ -78,6 +82,10 @@ export const router = createBrowserRouter([
   {
     path: '/login',
     element: <EmployeeLoginPage />,
+  },
+  {
+    path: '/desktop-timing',
+    element: <DesktopTimingLayout />,
   },
   {
     path: '/',
@@ -117,6 +125,7 @@ export const router = createBrowserRouter([
       { path: 'leave', element: <LeaveManagement /> },
 
       { path: 'wellness', element: <WellnessSettings /> },
+      { path: 'post-reminders', element: <SocialPostRemindersPage /> },
       { path: 'profile', element: <EmployeeProfile /> },
 
       { path: 'notifications', element: <NotificationsPage /> },

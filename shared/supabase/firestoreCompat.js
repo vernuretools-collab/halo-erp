@@ -441,12 +441,13 @@ export async function updateDoc(ref, updates) {
   const payload = applyPatch(base, updates)
   const storageId = existingRow?.id || scopedStorageId(ref, ref.id)
   const row = scopeFields(ref, storageId, unwrapValue(payload))
-  if (existingRow) {
-    const { error } = await supabase.from(ref.table).update(row).eq('id', existingRow.id)
-    if (error) throw error
-  } else {
-    await setDoc(ref, payload)
+  if (!existingRow) {
+    const err = new Error('No document to update')
+    err.code = 'not-found'
+    throw err
   }
+  const { error } = await supabase.from(ref.table).update(row).eq('id', existingRow.id)
+  if (error) throw error
 }
 
 export async function deleteDoc(ref) {

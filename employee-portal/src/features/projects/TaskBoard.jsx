@@ -10,7 +10,7 @@ import { useProjectStore } from './stores/projectStore'
 import { useTeamStore } from '../team/stores/teamStore'
 import { useUserStore } from '../../stores/userStore'
 import { getEmployees } from '../team/services/teamService'
-import { isTaskVisibleToUser, getTimerElapsedMs, formatElapsed, buildTaskVisibilityIndex } from './services/projectService'
+import { isTaskVisibleToUser, getAttendanceGatedElapsedMs, formatElapsed, buildTaskVisibilityIndex, isEmployeeActivelyWorking } from './services/projectService'
 import { TaskListView } from './components/TaskListView'
 import { TaskCalendarView } from './components/TaskCalendarView'
 import {
@@ -72,7 +72,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
     selectedProjectId,
     setSelectedProjectId,
   } = useProjectStore()
-  const { employees, setEmployees } = useTeamStore()
+  const { employees, setEmployees, clockedIn, isOnBreak } = useTeamStore()
   const { user, userDoc, claims } = useUserStore()
 
   const currentUserId = userDoc?.uid || user?.uid
@@ -340,8 +340,11 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
 
   const formatTaskTimerLabel = (task) => {
     void nowTick
-    const elapsed = formatElapsed(getTimerElapsedMs(task))
-    if (task?.timerStatus === 'paused') return `Paused · ${elapsed}`
+    const attendance = { clockedIn, isOnBreak }
+    const elapsed = formatElapsed(getAttendanceGatedElapsedMs(task, attendance))
+    const offDutyRunning =
+      task?.timerStatus === 'running' && !isEmployeeActivelyWorking(attendance)
+    if (task?.timerStatus === 'paused' || offDutyRunning) return `Paused · ${elapsed}`
     if (task?.timerStatus === 'stopped') return elapsed
     if (task?.timerStatus === 'running') return elapsed
     return elapsed
@@ -613,8 +616,13 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
                               <button
                                 type="button"
                                 onClick={() => resumeTaskTimer(t.taskId)}
-                                className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-accent-soft text-accent hover:bg-accent-soft dark:hover:bg-accent-hover/20 transition-colors"
-                                title="Resume timer"
+                                disabled={!isEmployeeActivelyWorking({ clockedIn, isOnBreak })}
+                                className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-accent-soft text-accent hover:bg-accent-soft dark:hover:bg-accent-hover/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                title={
+                                  isEmployeeActivelyWorking({ clockedIn, isOnBreak })
+                                    ? 'Resume timer'
+                                    : 'Clock in to resume the timer'
+                                }
                               >
                                 <Play className="w-2.5 h-2.5" /> Resume
                               </button>
@@ -762,6 +770,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
                   <Clock className="w-3.5 h-3.5" />
                   {formatTaskTimerLabel(liveSelectedTask)}
                 </span>
+                <span className="text-[10px] text-muted">Runs only while clocked in</span>
               </div>
             </div>
 
@@ -802,6 +811,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
                     size="sm"
                     className="flex-1"
                     icon={Play}
+                    disabled={!isEmployeeActivelyWorking({ clockedIn, isOnBreak })}
                     onClick={() => resumeTaskTimer(liveSelectedTask.taskId)}
                   >
                     Resume Timer

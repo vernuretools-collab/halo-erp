@@ -23,14 +23,26 @@ import {
   deleteProjectFromDb,
   computeProjectMetrics,
   applyProjectTaskMetrics,
+  isEmployeeActivelyWorking,
+  isTaskTimerOwnedByUser,
   DEFAULT_TASK_STATUSES,
 } from '../services/projectService'
+import { useTeamStore } from '../../team/stores/teamStore'
 
-const applyMetricsToProjects = (projects = [], tasks = []) =>
-  (projects || []).map((p) => {
+const attendanceSnapshot = () => {
+  const { clockedIn, isOnBreak } = useTeamStore.getState()
+  return { clockedIn, isOnBreak }
+}
+
+const applyMetricsToProjects = (projects = [], tasks = []) => {
+  const attendance = attendanceSnapshot()
+  return (projects || []).map((p) => {
     const pId = p.projectId || p.id
-    return applyProjectTaskMetrics(p, computeProjectMetrics(pId, tasks))
+    return applyProjectTaskMetrics(p, computeProjectMetrics(pId, tasks, attendance))
   })
+}
+
+let attendanceTimerSyncChain = Promise.resolve()
 
 let projectsFetchInflight = null
 
@@ -294,7 +306,9 @@ export const useProjectStore = create(
 
       addTask: async (newTask) => {
         const taskId = `task_${Date.now()}`
-        const timer = startTimerFields()
+        const timer = startTimerFields(new Date().toISOString(), {
+          activelyWorking: isEmployeeActivelyWorking(attendanceSnapshot()),
+        })
         const payload = {
           taskId,
           status: 'todo',
@@ -314,7 +328,7 @@ export const useProjectStore = create(
         let projectStats = null
         set((state) => {
           const updatedTasks = [payload, ...state.tasks]
-          const metrics = computeProjectMetrics(newTask.projectId, updatedTasks)
+          const metrics = computeProjectMetrics(newTask.projectId, updatedTasks, attendanceSnapshot())
           projectStats = metrics
 
           const updatedProjects = state.projects.map((p) =>
@@ -362,7 +376,7 @@ export const useProjectStore = create(
           if (!targetTask) return { tasks: updatedTasks }
 
           targetProjectId = targetTask.projectId
-          const metrics = computeProjectMetrics(targetTask.projectId, updatedTasks)
+          const metrics = computeProjectMetrics(targetTask.projectId, updatedTasks, attendanceSnapshot())
           projectStats = metrics
 
           const updatedProjects = state.projects.map((p) =>
@@ -385,7 +399,7 @@ export const useProjectStore = create(
         const targetTask = get().tasks.find((t) => t.taskId === taskId)
         if (!targetTask || targetTask.timerStatus !== 'running') return
 
-        const patch = pauseTimerFields(targetTask)
+        const patch = pauseTimerFields(targetTask, new Date().toISOString(), { byAttendance: false })
         let projectStats = null
         const targetProjectId = targetTask.projectId || null
 
@@ -394,7 +408,7 @@ export const useProjectStore = create(
             t.taskId === taskId ? { ...t, ...patch } : t
           )
           if (!targetProjectId) return { tasks: updatedTasks }
-          const metrics = computeProjectMetrics(targetProjectId, updatedTasks)
+          const metrics = computeProjectMetrics(targetProjectId, updatedTasks, attendanceSnapshot())
           projectStats = metrics
           const updatedProjects = state.projects.map((p) =>
             p.projectId === targetProjectId || p.id === targetProjectId
@@ -414,6 +428,7 @@ export const useProjectStore = create(
         const targetTask = get().tasks.find((t) => t.taskId === taskId)
         if (!targetTask || targetTask.timerStatus !== 'paused') return
         if (targetTask.status === 'done') return
+        if (!isEmployeeActivelyWorking(attendanceSnapshot())) return
 
         const patch = resumeTimerFields(targetTask)
 
@@ -424,6 +439,119 @@ export const useProjectStore = create(
         }))
 
         await updateTaskTimerInDb(taskId, patch)
+      },
+
+      syncTaskTimersWithAttendance: async ({
+        clockedIn,
+        isOnBreak,
+        user,
+        userDoc,
+        freezeElapsed = false,
+      } = {}) => {
+        const job = attendanceTimerSyncChain.then(async () => {
+          const attendance = {
+            clockedIn: clockedIn ?? attendanceSnapshot().clockedIn,
+            isOnBreak: isOnBreak ?? attendanceSnapshot().isOnBreak,
+          }
+          const active = isEmployeeActivelyWorking(attendance)
+          const now = new Date().toISOString()
+          const persisted = []
+          const projectIds = new Set()
+
+          set((state) => {
+            const updatedTasks = state.tasks.map((t) => {
+              if (!isTaskTimerOwnedByUser(t, user, userDoc) || t.status === 'done') return t
+
+              let next = t
+              let parentChanged = false
+              let subtasksChanged = false
+
+              if (!active) {
+                if (t.timerStatus === 'running') {
+                  next = {
+                    ...t,
+                    ...pauseTimerFields(t, now, { byAttendance: true, freezeElapsed }),
+                  }
+                  parentChanged = true
+                }
+                const subtasks = (next.subtasks || []).map((st) => {
+                  if (st.isCompleted || st.timerStatus !== 'running') return st
+                  subtasksChanged = true
+                  return {
+                    ...st,
+                    ...pauseTimerFields(st, now, { byAttendance: true, freezeElapsed }),
+                  }
+                })
+                if (subtasksChanged) next = { ...next, subtasks }
+              } else {
+                if (t.timerStatus === 'paused' && t.timerPausedByAttendance) {
+                  next = { ...t, ...resumeTimerFields(t, now) }
+                  parentChanged = true
+                }
+                const subtasks = (next.subtasks || []).map((st) => {
+                  if (st.isCompleted || st.timerStatus !== 'paused' || !st.timerPausedByAttendance) {
+                    return st
+                  }
+                  subtasksChanged = true
+                  return { ...st, ...resumeTimerFields(st, now) }
+                })
+                if (subtasksChanged) next = { ...next, subtasks }
+              }
+
+              if (parentChanged || subtasksChanged) {
+                persisted.push({
+                  taskId: next.taskId,
+                  patch: parentChanged
+                    ? {
+                        timerStatus: next.timerStatus,
+                        timerAccumulatedMs: next.timerAccumulatedMs,
+                        timerStartedAt: next.timerStartedAt,
+                        timerStoppedAt: next.timerStoppedAt,
+                        loggedHours: next.loggedHours,
+                        timerPausedByAttendance: next.timerPausedByAttendance,
+                      }
+                    : null,
+                  subtasks: subtasksChanged ? next.subtasks : null,
+                  status: next.status,
+                })
+                if (next.projectId) projectIds.add(next.projectId)
+              }
+
+              return next
+            })
+
+            if (!persisted.length) return state
+
+            let updatedProjects = state.projects
+            const statsByProject = {}
+            for (const pId of projectIds) {
+              const metrics = computeProjectMetrics(pId, updatedTasks, attendance)
+              statsByProject[pId] = metrics
+              updatedProjects = updatedProjects.map((p) =>
+                p.projectId === pId || p.id === pId ? applyProjectTaskMetrics(p, metrics) : p
+              )
+            }
+
+            persisted._statsByProject = statsByProject
+            return { tasks: updatedTasks, projects: updatedProjects }
+          })
+
+          const statsByProject = persisted._statsByProject || {}
+          delete persisted._statsByProject
+
+          for (const item of persisted) {
+            if (item.patch) await updateTaskTimerInDb(item.taskId, item.patch)
+            if (item.subtasks) await updateTaskSubtasksInDb(item.taskId, item.subtasks, item.status)
+          }
+          for (const [pId, metrics] of Object.entries(statsByProject)) {
+            await updateProjectStatsInDb(pId, metrics)
+          }
+        })
+
+        attendanceTimerSyncChain = job.catch((err) => {
+          console.error('Error syncing task timers with attendance:', err)
+        })
+        return job
       },
 
       logHoursToTask: async (taskId, hours) => {
@@ -442,7 +570,7 @@ export const useProjectStore = create(
 
           if (!targetProjectId) return { tasks: updatedTasks }
 
-          const metrics = computeProjectMetrics(targetProjectId, updatedTasks)
+          const metrics = computeProjectMetrics(targetProjectId, updatedTasks, attendanceSnapshot())
           projectStats = metrics
           const updatedProjects = state.projects.map((p) =>
             p.projectId === targetProjectId || p.id === targetProjectId
@@ -468,7 +596,7 @@ export const useProjectStore = create(
           const updatedTasks = state.tasks.filter((t) => t.taskId !== taskId)
           if (!targetProjectId) return { tasks: updatedTasks }
 
-          const metrics = computeProjectMetrics(targetProjectId, updatedTasks)
+          const metrics = computeProjectMetrics(targetProjectId, updatedTasks, attendanceSnapshot())
           projectStats = metrics
           const updatedProjects = state.projects.map((p) =>
             p.projectId === targetProjectId || p.id === targetProjectId
@@ -489,7 +617,9 @@ export const useProjectStore = create(
       addSubtask: async (taskId, newSubtask) => {
         let updatedSubtasks = []
         let currentTaskStatus = 'todo'
-        const timer = startTimerFields()
+        const timer = startTimerFields(new Date().toISOString(), {
+          activelyWorking: isEmployeeActivelyWorking(attendanceSnapshot()),
+        })
 
         set((state) => ({
           tasks: state.tasks.map((t) => {
@@ -528,7 +658,7 @@ export const useProjectStore = create(
             currentTaskStatus = t.status
             updatedSubtasks = (t.subtasks || []).map((st) => {
               if (st.id !== subtaskId || st.timerStatus !== 'running') return st
-              return { ...st, ...pauseTimerFields(st) }
+              return { ...st, ...pauseTimerFields(st, new Date().toISOString(), { byAttendance: false }) }
             })
             return { ...t, subtasks: updatedSubtasks }
           }),
@@ -538,6 +668,7 @@ export const useProjectStore = create(
       },
 
       resumeSubtaskTimer: async (taskId, subtaskId) => {
+        if (!isEmployeeActivelyWorking(attendanceSnapshot())) return
         let updatedSubtasks = []
         let currentTaskStatus = 'todo'
 
@@ -572,14 +703,25 @@ export const useProjectStore = create(
               if (willComplete) {
                 return { ...st, isCompleted: true, ...stopTimerFields(st) }
               }
+              const reopenBase = {
+                ...st,
+                isCompleted: false,
+                timerStatus: 'paused',
+                timerAccumulatedMs: st.timerAccumulatedMs || 0,
+              }
+              if (!isEmployeeActivelyWorking(attendanceSnapshot())) {
+                return {
+                  ...reopenBase,
+                  ...pauseTimerFields(reopenBase, new Date().toISOString(), {
+                    byAttendance: true,
+                    freezeElapsed: true,
+                  }),
+                }
+              }
               return {
                 ...st,
                 isCompleted: false,
-                ...resumeTimerFields({
-                  ...st,
-                  timerStatus: 'paused',
-                  timerAccumulatedMs: st.timerAccumulatedMs || 0,
-                }),
+                ...resumeTimerFields(reopenBase),
               }
             })
 
@@ -603,7 +745,7 @@ export const useProjectStore = create(
 
           if (!targetProjectId) return { tasks: updatedTasks }
 
-          const metrics = computeProjectMetrics(targetProjectId, updatedTasks)
+          const metrics = computeProjectMetrics(targetProjectId, updatedTasks, attendanceSnapshot())
           projectStats = metrics
           const updatedProjects = state.projects.map((p) =>
             p.projectId === targetProjectId || p.id === targetProjectId

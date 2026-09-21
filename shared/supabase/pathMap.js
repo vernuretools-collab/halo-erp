@@ -89,6 +89,15 @@ export function resolveCollection(parts) {
   if (parts[0] === 'notifications' && parts[2] === 'items') {
     return { table: 'notification_items', org_id: null, user_id: parts[1], parent_id: null, collection_name: null }
   }
+  if (parts[0] === 'socialPostReminders' && parts[2] === 'items') {
+    return {
+      table: 'app_docs',
+      org_id: null,
+      user_id: parts[1],
+      parent_id: null,
+      collection_name: 'socialPostReminders',
+    }
+  }
 
   if (parts.length === 1 && ROOT_TABLES[parts[0]]) {
     const table = ROOT_TABLES[parts[0]]

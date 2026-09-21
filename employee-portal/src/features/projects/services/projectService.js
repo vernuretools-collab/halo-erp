@@ -131,6 +131,16 @@ export const isUserAssignedToTask = (t, user, userDoc) => {
   return Boolean(isCreator || isAssignee || isEmployeeId || isAssignedTo)
 }
 
+/** Tasks whose timer the current employee owns (assignee), not merely created. */
+export const isTaskTimerOwnedByUser = (t, user, userDoc) => {
+  if (!t) return false
+  const isAssignee = matchesUserIdentity(t.assigneeId, t.assigneeEmail, t.assigneeName, user, userDoc)
+  const isEmployeeId = matchesUserIdentity(t.employeeId, t.employeeEmail || t.assigneeEmail, t.employeeName, user, userDoc)
+  const assigned = assignedToIdentity(t.assignedTo)
+  const isAssignedTo = matchesUserIdentity(assigned.id, assigned.email, assigned.name, user, userDoc)
+  return Boolean(isAssignee || isEmployeeId || isAssignedTo)
+}
+
 /**
  * Check whether the current user is creator/owner/member of a project OR assigned to any task in that project
  */
@@ -269,13 +279,16 @@ export const isTaskVisibleToUser = (t, user, userDoc, claims, projects = [], tas
 /**
  * Derive project card metrics from the live task list
  */
-export const computeProjectMetrics = (projectId, tasks = []) => {
+export const computeProjectMetrics = (projectId, tasks = [], attendance = null) => {
   const projTasks = (tasks || []).filter(
     (t) => t.projectId === projectId || t.projectId === String(projectId)
   )
   const totalTaskCount = projTasks.length
   const completedTaskCount = projTasks.filter((t) => t.status === 'done').length
-  const totalHoursLogged = projTasks.reduce((sum, t) => sum + (Number(t.loggedHours) || 0), 0)
+  const totalHoursLogged = projTasks.reduce((sum, t) => {
+    const elapsedMs = getAttendanceGatedElapsedMs(t, attendance)
+    return sum + msToLoggedHours(elapsedMs)
+  }, 0)
   const completionPercent =
     totalTaskCount > 0 ? Math.round((completedTaskCount / totalTaskCount) * 100) : 0
 
@@ -668,12 +681,29 @@ export const deleteProcessStep = async (projectId, stepId) => {
 
 
 // ─── Timer helpers ─────────────────────────────────────────────────────────────
-export const startTimerFields = (now = new Date().toISOString()) => ({
-  timerStatus: 'running',
-  timerAccumulatedMs: 0,
-  timerStartedAt: now,
-  timerStoppedAt: null,
-})
+export const isEmployeeActivelyWorking = (attendance) =>
+  Boolean(attendance?.clockedIn) && !attendance?.isOnBreak
+
+export const startTimerFields = (now = new Date().toISOString(), options = {}) => {
+  const activelyWorking = options.activelyWorking !== false
+  if (!activelyWorking) {
+    return {
+      timerStatus: 'paused',
+      timerAccumulatedMs: 0,
+      timerStartedAt: null,
+      timerStoppedAt: null,
+      timerPausedByAttendance: true,
+      loggedHours: 0,
+    }
+  }
+  return {
+    timerStatus: 'running',
+    timerAccumulatedMs: 0,
+    timerStartedAt: now,
+    timerStoppedAt: null,
+    timerPausedByAttendance: false,
+  }
+}
 
 export const getTimerElapsedMs = (entity, nowMs = Date.now()) => {
   if (!entity) return 0
@@ -685,6 +715,14 @@ export const getTimerElapsedMs = (entity, nowMs = Date.now()) => {
     }
   }
   return Math.max(0, accumulated)
+}
+
+export const getAttendanceGatedElapsedMs = (entity, attendance, nowMs = Date.now()) => {
+  if (!entity) return 0
+  if (entity.timerStatus === 'running' && attendance && !isEmployeeActivelyWorking(attendance)) {
+    return Math.max(0, Number(entity.timerAccumulatedMs) || 0)
+  }
+  return getTimerElapsedMs(entity, nowMs)
 }
 
 export const formatElapsed = (ms) => {
@@ -700,14 +738,17 @@ export const formatElapsed = (ms) => {
 
 export const msToLoggedHours = (ms) => Math.round((Math.max(0, Number(ms) || 0) / 3600000) * 100) / 100
 
-export const pauseTimerFields = (entity, now = new Date().toISOString()) => {
-  const elapsed = getTimerElapsedMs(entity, new Date(now).getTime())
+export const pauseTimerFields = (entity, now = new Date().toISOString(), options = {}) => {
+  const elapsed = options.freezeElapsed
+    ? Math.max(0, Number(entity?.timerAccumulatedMs) || 0)
+    : getTimerElapsedMs(entity, new Date(now).getTime())
   return {
     timerStatus: 'paused',
     timerAccumulatedMs: elapsed,
     timerStartedAt: null,
     timerStoppedAt: null,
     loggedHours: msToLoggedHours(elapsed),
+    timerPausedByAttendance: options.byAttendance === true,
   }
 }
 
@@ -718,6 +759,7 @@ export const resumeTimerFields = (entity, now = new Date().toISOString()) => {
     timerAccumulatedMs: Number(entity?.timerAccumulatedMs) || 0,
     timerStartedAt: now,
     timerStoppedAt: null,
+    timerPausedByAttendance: false,
   }
 }
 
@@ -730,6 +772,7 @@ export const stopTimerFields = (entity, now = new Date().toISOString()) => {
       timerStartedAt: null,
       timerStoppedAt: entity.timerStoppedAt || now,
       loggedHours: msToLoggedHours(elapsed),
+      timerPausedByAttendance: false,
     }
   }
   const elapsed = getTimerElapsedMs(entity, new Date(now).getTime())
@@ -739,6 +782,7 @@ export const stopTimerFields = (entity, now = new Date().toISOString()) => {
     timerStartedAt: null,
     timerStoppedAt: now,
     loggedHours: msToLoggedHours(elapsed),
+    timerPausedByAttendance: false,
   }
 }
 
@@ -757,8 +801,12 @@ export const createTaskInDb = async (taskData) => {
       loggedHours: Number(taskData.loggedHours) || 0,
       timerStatus: taskData.timerStatus || timerDefaults.timerStatus,
       timerAccumulatedMs: Number(taskData.timerAccumulatedMs) || 0,
-      timerStartedAt: taskData.timerStartedAt || timerDefaults.timerStartedAt,
+      timerStartedAt:
+        (taskData.timerStatus || timerDefaults.timerStatus) === 'running'
+          ? taskData.timerStartedAt || timerDefaults.timerStartedAt
+          : taskData.timerStartedAt || null,
       timerStoppedAt: taskData.timerStoppedAt || null,
+      timerPausedByAttendance: Boolean(taskData.timerPausedByAttendance),
       createdAt: serverTimestamp(),
     }
     await setDoc(doc(db, 'tasks', taskId), payload)
@@ -809,7 +857,8 @@ export const updateTaskTimerInDb = async (taskId, timerFields) => {
       updatedAt: serverTimestamp(),
     })
   } catch (err) {
-    console.error('Error updating task timer in Firestore:', err)
+    if (err?.code === 'not-found') return
+    console.error('Error updating task timer:', err?.message || err)
   }
 }
 

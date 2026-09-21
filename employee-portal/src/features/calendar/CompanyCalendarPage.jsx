@@ -94,7 +94,7 @@ export const CompanyCalendarPage = () => {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Company Calendar" description="View company holidays, events, and meetings." />
+      <PageHeader title="Company Calendar" description="View company holidays, events, meetings, and approved team leave." />
 
       <div className="flex flex-col lg:flex-row gap-6">
         <Card className="flex-1 p-6">
@@ -110,6 +110,21 @@ export const CompanyCalendarPage = () => {
                 <ChevronRight className="w-5 h-5" />
               </button>
             </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4 mb-4 text-xs text-muted">
+            <span className="inline-flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${EVENT_COLORS.holiday}`} />
+              Holiday
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${EVENT_COLORS.leave}`} />
+              Approved leave
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${EVENT_COLORS.meeting}`} />
+              Event
+            </span>
           </div>
 
           {loading ? (

@@ -1,16 +1,57 @@
 import { collection, onSnapshot, getDocs, query, orderBy, limit, where } from 'firebase/firestore';
 import { db } from '../../../shared/services/firebaseService';
+import {
+  expandLeaveDateRange,
+  formatHoursAsHrsMins,
+  getPermissionHours,
+  isPermissionLeave,
+  leaveStatusKey,
+} from '../../team/services/leaveEntitlementUtils';
+
+const mapApprovedLeavesToEvents = (docs) => {
+  const events = [];
+  docs.forEach((docSnap) => {
+    const data = { ...docSnap.data(), leaveId: docSnap.id };
+    if (leaveStatusKey(data) !== 'approved') return;
+
+    const startDate = data.startDate || data.endDate;
+    if (!startDate) return;
+
+    const employeeName = data.employeeName || 'Employee';
+    const leaveType = data.leaveType || data.requestedLeaveType || 'Leave';
+    const permission = isPermissionLeave(data);
+    const hoursLabel = permission ? formatHoursAsHrsMins(getPermissionHours(data)) : '';
+    const timeRange = permission && data.startTime && data.endTime
+      ? `${data.startTime}–${data.endTime} (${hoursLabel})`
+      : permission
+        ? hoursLabel
+        : '';
+
+    expandLeaveDateRange(startDate, data.endDate || startDate).forEach((date) => {
+      events.push({
+        id: `${data.leaveId || docSnap.id}-${date}`,
+        date,
+        type: 'leave',
+        title: `${employeeName} — ${leaveType}`,
+        description: timeRange || undefined,
+        allDay: !permission,
+      });
+    });
+  });
+  return events;
+};
 
 /**
- * Subscribe to both companyCalendar events AND companyHolidays (admin-marked)
+ * Subscribe to companyCalendar, companyHolidays, and approved leaveRequests.
  * Merges them into a single events array for the calendar.
  */
 export const subscribeCalendarEvents = (callback) => {
   let calendarEvents = [];
   let holidayEvents = [];
+  let leaveEvents = [];
 
   const mergeAndCallback = () => {
-    callback([...holidayEvents, ...calendarEvents]);
+    callback([...holidayEvents, ...calendarEvents, ...leaveEvents]);
   };
 
   // Listen to companyCalendar (general events: meetings, sprints, anniversaries, etc.)
@@ -45,9 +86,18 @@ export const subscribeCalendarEvents = (callback) => {
     mergeAndCallback();
   });
 
+  const unsubLeave = onSnapshot(collection(db, 'leaveRequests'), (snapshot) => {
+    leaveEvents = mapApprovedLeavesToEvents(snapshot.docs);
+    mergeAndCallback();
+  }, () => {
+    leaveEvents = [];
+    mergeAndCallback();
+  });
+
   return () => {
     unsubCalendar();
     unsubHolidays();
+    unsubLeave();
   };
 };
 
@@ -93,6 +143,15 @@ export const getUpcomingEvents = async (count = 5) => {
         description: data.description || `Marked by ${data.createdBy || 'Admin'}`,
         allDay: true,
       });
+    });
+  } catch {
+    // Collection may not exist yet
+  }
+
+  try {
+    const leaveSnap = await getDocs(collection(db, 'leaveRequests'));
+    mapApprovedLeavesToEvents(leaveSnap.docs).forEach((event) => {
+      if (event.date >= today) results.push(event);
     });
   } catch {
     // Collection may not exist yet

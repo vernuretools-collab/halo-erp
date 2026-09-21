@@ -8,11 +8,14 @@ import { auth } from '../../shared/services/firebaseService'
 import { getUserDoc, fetchCustomClaims } from '../../shared/services/authService'
 import { useLiveAuthSession } from '../../../../shared/supabase/useLiveAuthSession.js'
 import { useWellnessNotifications } from '../../features/wellness/hooks/useWellnessNotifications'
+import { useSocialPostReminders } from '../../features/social-posts/hooks/useSocialPostReminders'
 import { useAutoClockOutAfterWorkday } from '../../features/team/hooks/useAutoClockOutAfterWorkday'
 import { useAnnouncementBrowserAlerts } from '../../features/announcements/hooks/useAnnouncementBrowserAlerts'
 import { usePayslipBrowserAlerts } from '../../features/payslips/hooks/usePayslipBrowserAlerts'
 import { useProjectBrowserAlerts } from '../../features/projects/hooks/useProjectBrowserAlerts'
 import { collectUserIdentityIds } from '../../features/projects/services/projectService'
+import { DesktopAttendanceBridge } from '../../features/team/components/DesktopAttendanceBridge'
+import { useAttendanceLinkedTaskTimers } from '../../features/projects/hooks/useAttendanceLinkedTaskTimers'
 
 export const AppShell = () => {
   const { sidebarOpen } = useUIStore()
@@ -58,7 +61,9 @@ export const AppShell = () => {
   }, [user?.uid])
 
   useWellnessNotifications()
+  useSocialPostReminders()
   useAutoClockOutAfterWorkday()
+  useAttendanceLinkedTaskTimers()
 
   if (!sessionReady) {
     return (
@@ -74,6 +79,7 @@ export const AppShell = () => {
 
   return (
     <div className="min-h-screen bg-canvas text-fg flex flex-col transition-colors">
+      <DesktopAttendanceBridge />
       <EmployeeSidebar />
       <div
         className={`flex-1 flex flex-col transition-all duration-300 ${

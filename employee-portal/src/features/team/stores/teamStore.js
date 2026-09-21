@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { upsertAttendanceLog, getTodayAttendanceLog, getUserMonthlyAttendance } from '../services/attendanceService'
+import { attachTeamStoreCrossWindowSync } from '../services/desktopAttendanceSync'
 import { computeRealAttendanceStats, formatTo12HourTime, canonicalTimeFromDate, toEpochMs, timestampFromClockInTime, timeStrToMinutes, resolveEmployeeDisplayName } from '../services/attendanceStatsUtils'
 import { useUserStore } from '../../../stores/userStore'
 
@@ -906,4 +907,6 @@ export const useTeamStore = create(
     }
   )
 )
+
+attachTeamStoreCrossWindowSync(useTeamStore)
 

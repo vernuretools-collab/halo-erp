@@ -8,11 +8,11 @@ import {
   Headphones,
   User,
   LogOut,
-  Building2,
   ChevronLeft,
   ChevronRight,
   CreditCard,
 } from 'lucide-react'
+import haloLogo from '../../assets/halologo.png'
 import { useUIStore } from '../../stores/uiStore'
 import { useUserStore } from '../../stores/userStore'
 
@@ -46,8 +46,12 @@ export const ClientSidebar = () => {
       {/* Brand Header */}
       <div className="h-20 flex items-center justify-between px-5 border-b border-border">
         <div className="flex items-center gap-3 overflow-hidden">
-          <div className="w-10 h-10 rounded-xl bg-accent-soft border border-accent/20 text-accent flex items-center justify-center shrink-0 shadow-sm">
-            <Building2 className="w-5 h-5" />
+          <div className="w-11 h-11 bg-white p-1 rounded-full border border-slate-200 dark:border-white/30 shadow-sm flex items-center justify-center shrink-0">
+            <img
+              src={haloLogo}
+              alt="The Halo Effect Consulting"
+              className="w-full h-full object-contain rounded-full"
+            />
           </div>
           {sidebarOpen && (
             <div className="flex flex-col leading-tight min-w-0">

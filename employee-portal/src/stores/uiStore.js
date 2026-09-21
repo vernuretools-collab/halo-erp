@@ -16,6 +16,11 @@ const applyTheme = (theme) => {
     root.classList.remove('dark')
   }
   localStorage.setItem('app-theme', theme)
+  try {
+    window.desktop?.setTheme?.(theme)
+  } catch {
+    /* ignore */
+  }
 }
 
 const initialTheme = getInitialTheme()
@@ -38,4 +43,14 @@ export const useUIStore = create((set, get) => ({
     set({ theme: nextTheme })
   },
 }))
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key !== 'app-theme' || !event.newValue) return
+    const nextTheme = event.newValue === 'dark' ? 'dark' : 'light'
+    const { theme, setTheme } = useUIStore.getState()
+    if (theme === nextTheme) return
+    setTheme(nextTheme)
+  })
+}
 

@@ -3,7 +3,8 @@ import { Badge } from '../../../components/ui/Badge'
 import { Button } from '../../../components/ui/Button'
 import { useProjectStore } from '../stores/projectStore'
 import { useUserStore } from '../../../stores/userStore'
-import { getTimerElapsedMs, formatElapsed } from '../services/projectService'
+import { useTeamStore } from '../../team/stores/teamStore'
+import { getAttendanceGatedElapsedMs, formatElapsed, isEmployeeActivelyWorking } from '../services/projectService'
 import {
   Plus,
   Trash2,
@@ -44,6 +45,8 @@ export const SubtaskStepper = ({ taskId, subtasks = [], compact = false }) => {
     resumeSubtaskTimer,
   } = useProjectStore()
   const { user, userDoc } = useUserStore()
+  const clockedIn = useTeamStore((s) => s.clockedIn)
+  const isOnBreak = useTeamStore((s) => s.isOnBreak)
 
   const [showAddForm, setShowAddForm] = useState(false)
   const [newTitle, setNewTitle] = useState('')
@@ -69,8 +72,11 @@ export const SubtaskStepper = ({ taskId, subtasks = [], compact = false }) => {
 
   const formatSubtaskTimer = (st) => {
     void nowTick
-    const elapsed = formatElapsed(getTimerElapsedMs(st))
-    if (st?.timerStatus === 'paused') return `Paused · ${elapsed}`
+    const attendance = { clockedIn, isOnBreak }
+    const elapsed = formatElapsed(getAttendanceGatedElapsedMs(st, attendance))
+    const offDutyRunning =
+      st?.timerStatus === 'running' && !isEmployeeActivelyWorking(attendance)
+    if (st?.timerStatus === 'paused' || offDutyRunning) return `Paused · ${elapsed}`
     return elapsed
   }
 
@@ -459,8 +465,13 @@ export const SubtaskStepper = ({ taskId, subtasks = [], compact = false }) => {
                           <button
                             type="button"
                             onClick={() => resumeSubtaskTimer(taskId, st.id)}
-                            className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-accent-soft text-accent hover:bg-accent-soft dark:hover:bg-accent-hover/20 transition-colors"
-                            title="Resume timer"
+                            disabled={!isEmployeeActivelyWorking({ clockedIn, isOnBreak })}
+                            className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-accent-soft text-accent hover:bg-accent-soft dark:hover:bg-accent-hover/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={
+                              isEmployeeActivelyWorking({ clockedIn, isOnBreak })
+                                ? 'Resume timer'
+                                : 'Clock in to resume the timer'
+                            }
                           >
                             <Play className="w-2.5 h-2.5" /> Resume
                           </button>

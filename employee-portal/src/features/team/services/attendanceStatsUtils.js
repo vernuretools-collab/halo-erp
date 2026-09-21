@@ -104,6 +104,27 @@ export function computeLiveWorkedSeconds({
   return Math.max(0, Number(accumulatedWorkSeconds) || 0)
 }
 
+export function computeLiveBreakSeconds({
+  accumulatedBreakSeconds = 0,
+  isOnBreak = false,
+  breakStartTime = null,
+} = {}) {
+  let breakSec = Number(accumulatedBreakSeconds) || 0
+  const breakStartMs = toEpochMs(breakStartTime)
+  if (isOnBreak && breakStartMs) {
+    breakSec += Math.max(0, Math.floor((Date.now() - breakStartMs) / 1000))
+  }
+  return Math.max(0, breakSec)
+}
+
+export function formatSecondsToHms(totalSec) {
+  const sec = Math.max(0, Math.floor(Number(totalSec) || 0))
+  const hrs = Math.floor(sec / 3600)
+  const mins = Math.floor((sec % 3600) / 60)
+  const seconds = sec % 60
+  return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+
 /**
  * Computes REAL attendance averages for an employee based on their attendance log records.
  *
