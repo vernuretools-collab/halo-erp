@@ -89,3 +89,83 @@ export async function buildAssistantSnapshot() {
     ),
   }
 }
+
+function hasWord(haystack, word) {
+  if (!word || word.length < 4) return false
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`, 'i').test(haystack)
+}
+
+function personLabels(person) {
+  return [person?.displayName, person?.name, person?.email]
+    .filter(Boolean)
+    .map((value) => String(value).toLowerCase())
+}
+
+export function matchEmployees(employees, message) {
+  const q = String(message || '').toLowerCase()
+  return (employees || []).filter((employee) =>
+    personLabels(employee).some((label) => {
+      if (hasWord(q, label)) return true
+      const local = label.split('@')[0]
+      if (hasWord(q, local)) return true
+      return label.split(/[\s._@-]+/).some((part) => hasWord(q, part))
+    })
+  )
+}
+
+function samePerson(row, people) {
+  const ids = new Set(
+    people.flatMap((person) => [person.uid, person.employeeId].filter(Boolean).map(String))
+  )
+  const rowIds = [row?.uid, row?.employeeId, row?.ownerId].filter(Boolean).map(String)
+  if (rowIds.some((id) => ids.has(id))) return true
+  const rowNames = [row?.employeeName, row?.displayName, row?.name, row?.ownerName, row?.employeeEmail]
+    .filter(Boolean)
+    .map((value) => String(value).toLowerCase())
+  return people.some((person) =>
+    personLabels(person).some((label) => rowNames.some((rowName) => rowName === label || rowName.includes(label)))
+  )
+}
+
+/** Keep only the records the question needs so the model request stays small. */
+export function focusSnapshot(snapshot, message) {
+  if (!snapshot) return snapshot
+  const q = String(message || '').toLowerCase()
+  const people = matchEmployees(snapshot.employees, message)
+  const wantsLeads = /lead|pipeline|deal/.test(q)
+  const wantsInvoices = /invoice|unpaid|payment|due/.test(q)
+  const wantsProjects = /project|assigned|member/.test(q)
+  const focusedPeople = people.length ? people : (snapshot.employees || []).slice(0, 30)
+
+  const timeline = (snapshot.timelineEntries || []).filter((row) =>
+    people.length ? samePerson(row, people) : true
+  )
+  const attendance = (snapshot.attendanceLogs || []).filter((row) =>
+    people.length ? samePerson(row, people) : true
+  )
+  const leave = (snapshot.leaveRequests || []).filter((row) =>
+    people.length ? samePerson(row, people) : true
+  )
+  const projects = (snapshot.projects || []).filter((project) => {
+    if (!people.length) return wantsProjects || /project/.test(q)
+    return (
+      samePerson(project, people) ||
+      (project.members || []).some((member) => samePerson(member, people))
+    )
+  })
+
+  return {
+    month: snapshot.month,
+    employees: focusedPeople.slice(0, people.length ? people.length : 30),
+    attendanceLogs: attendance.slice(0, 120),
+    leaveRequests: leave.slice(0, 80),
+    timelineEntries: timeline.slice(0, 80).map((row) => ({
+      ...row,
+      description: String(row.description || '').slice(0, 240),
+    })),
+    projects: (people.length || wantsProjects ? projects : []).slice(0, 20),
+    leads: wantsLeads ? (snapshot.leads || []).slice(0, 30) : [],
+    invoices: wantsInvoices ? (snapshot.invoices || []).slice(0, 30) : [],
+  }
+}

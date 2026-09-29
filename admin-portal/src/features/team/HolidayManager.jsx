@@ -7,6 +7,7 @@ import {
   subscribeToCompanyHolidays,
   createCompanyHoliday,
   deleteCompanyHoliday,
+  updateCompanyHoliday,
 } from './services/teamService'
 import { TeamSubNav } from './components/TeamSubNav'
 import {
@@ -17,6 +18,7 @@ import {
   PartyPopper,
   Plus,
   Calendar,
+  Pencil,
 } from 'lucide-react'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -46,9 +48,11 @@ export const HolidayManager = () => {
   // Holidays from Firestore
   const [holidays, setHolidays] = useState([])
 
-  // Modal state
+  // Modal state — editingId set means an existing holiday is being updated
   const [pendingDate, setPendingDate] = useState(null) // "YYYY-MM-DD" of clicked date
   const [holidayName, setHolidayName] = useState('')
+  const [editingId, setEditingId] = useState(null)
+  const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
 
   // Real-time subscription to /companyHolidays
@@ -86,25 +90,67 @@ export const HolidayManager = () => {
   const handlePrevMonth = () => setViewDate(new Date(viewYear, viewMonth - 1, 1))
   const handleNextMonth = () => setViewDate(new Date(viewYear, viewMonth + 1, 1))
 
+  const closeModal = () => {
+    setPendingDate(null)
+    setHolidayName('')
+    setEditingId(null)
+    setFormError('')
+  }
+
+  const openCreate = (dateKey) => {
+    setEditingId(null)
+    setPendingDate(dateKey)
+    setHolidayName('')
+    setFormError('')
+  }
+
+  const openEdit = (holiday) => {
+    if (!holiday) return
+    setEditingId(holiday.holidayId)
+    setPendingDate(holiday.date)
+    setHolidayName(holiday.name || '')
+    setFormError('')
+  }
+
   const handleDayClick = (cell) => {
     if (!cell.isCurrentMonth) return
     const key = formatDateKey(viewYear, viewMonth, cell.day)
-    if (holidayMap[key]) return // Already a holiday — handled via delete button in list
-    setPendingDate(key)
-    setHolidayName('')
+    const existing = holidayMap[key]
+    if (existing) openEdit(existing)
+    else openCreate(key)
   }
+
+  const dateTakenByOther = (dateKey, ignoreId) =>
+    holidays.some((h) => h.date === dateKey && h.holidayId !== ignoreId)
 
   const handleSaveHoliday = async () => {
     if (!pendingDate || !holidayName.trim()) return
+    if (dateTakenByOther(pendingDate, editingId)) {
+      setFormError('That date already has a holiday. Pick another date or edit the existing one.')
+      return
+    }
     setSaving(true)
-    await createCompanyHoliday(pendingDate, holidayName.trim(), adminName)
-    setSaving(false)
-    setPendingDate(null)
-    setHolidayName('')
+    setFormError('')
+    try {
+      if (editingId) {
+        await updateCompanyHoliday(editingId, {
+          date: pendingDate,
+          name: holidayName.trim(),
+        })
+      } else {
+        await createCompanyHoliday(pendingDate, holidayName.trim(), adminName)
+      }
+      closeModal()
+    } catch {
+      setFormError('Could not save this holiday. Try again.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleDeleteHoliday = async (holidayId) => {
     await deleteCompanyHoliday(holidayId)
+    if (editingId === holidayId) closeModal()
   }
 
   return (
@@ -151,7 +197,7 @@ export const HolidayManager = () => {
 
           {/* Helper tip */}
           <p className="text-[10px] text-muted -mt-1">
-            Click any date to mark it as a public holiday. Sundays are shown dimmed as weekly offs.
+            Click a date to mark a public holiday. Click a marked date to edit its name or date. Sundays are shown dimmed as weekly offs.
           </p>
 
           {/* Week-day headers */}
@@ -189,13 +235,13 @@ export const HolidayManager = () => {
                 <button
                   key={idx}
                   onClick={() => handleDayClick(cell)}
-                  title={isHoliday ? holidayMap[dateKey].name : isSunday ? 'Sunday (Weekly Off)' : 'Click to mark as holiday'}
+                  title={isHoliday ? `Edit ${holidayMap[dateKey].name}` : isSunday ? 'Sunday (Weekly Off)' : 'Click to mark as holiday'}
                   className={`
                     h-9 w-full flex flex-col items-center justify-center rounded-xl text-[11px] font-semibold transition-all select-none relative group
                     ${isHoliday
-                      ? 'bg-amber-400/20 border border-amber-400/50 text-amber-600 dark:text-amber-400 cursor-default shadow-sm'
+                      ? 'bg-amber-400/20 border border-amber-400/50 text-amber-600 dark:text-amber-400 cursor-pointer shadow-sm hover:bg-amber-400/30'
                       : isSunday
-                      ? 'text-slate-400 dark:text-slate-600 cursor-default bg-canvas/30'
+                      ? 'text-slate-400 dark:text-slate-600 cursor-pointer bg-canvas/30 hover:bg-amber-50 dark:hover:bg-amber-950/30'
                       : isToday
                       ? 'bg-accent text-white font-bold shadow-md shadow-accent/30 cursor-pointer hover:bg-accent'
                       : 'text-fg hover:bg-amber-50 dark:hover:bg-amber-950/30 hover:text-amber-600 dark:hover:text-amber-400 cursor-pointer border border-transparent hover:border-amber-300/50'
@@ -275,13 +321,22 @@ export const HolidayManager = () => {
                         )}
                       </div>
                     </div>
-                    <button
-                      onClick={() => handleDeleteHoliday(h.holidayId)}
-                      className="p-1.5 rounded-lg text-rose-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
-                      title="Remove holiday"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100">
+                      <button
+                        onClick={() => openEdit(h)}
+                        className="p-1.5 rounded-lg text-amber-500 hover:text-amber-600 hover:bg-amber-100 dark:hover:bg-amber-500/15 transition-colors"
+                        title="Edit holiday"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteHoliday(h.holidayId)}
+                        className="p-1.5 rounded-lg text-rose-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition-colors"
+                        title="Remove holiday"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 ))}
             </div>
@@ -300,32 +355,51 @@ export const HolidayManager = () => {
                   <PartyPopper className="w-4 h-4 text-amber-500" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-fg">Add Public Holiday</h3>
+                  <h3 className="text-sm font-bold text-fg">{editingId ? 'Edit Public Holiday' : 'Add Public Holiday'}</h3>
                   <p className="text-[10px] text-slate-400">{formatDisplayDate(pendingDate)}</p>
                 </div>
               </div>
               <button
-                onClick={() => setPendingDate(null)}
+                onClick={closeModal}
                 className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Name input */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-fg">
-                Holiday Name <span className="text-rose-500">*</span>
-              </label>
-              <input
-                type="text"
-                autoFocus
-                placeholder="e.g. Diwali, Republic Day, Christmas…"
-                value={holidayName}
-                onChange={(e) => setHolidayName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSaveHoliday()}
-                className="w-full bg-canvas border border-border text-fg text-sm rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all placeholder:text-muted"
-              />
+            {/* Date + name */}
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-fg">
+                  Date <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={pendingDate || ''}
+                  onChange={(e) => {
+                    setPendingDate(e.target.value)
+                    setFormError('')
+                  }}
+                  className="w-full bg-canvas border border-border text-fg text-sm rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-fg">
+                  Holiday Name <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="e.g. Diwali, Republic Day, Christmas…"
+                  value={holidayName}
+                  onChange={(e) => setHolidayName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSaveHoliday()}
+                  className="w-full bg-canvas border border-border text-fg text-sm rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all placeholder:text-muted"
+                />
+              </div>
+              {formError && (
+                <p className="text-[11px] text-rose-500">{formError}</p>
+              )}
             </div>
 
             {/* Info note */}
@@ -340,7 +414,7 @@ export const HolidayManager = () => {
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => setPendingDate(null)}
+                onClick={closeModal}
                 className="flex-1 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 text-muted hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
               >
                 Cancel
@@ -348,11 +422,11 @@ export const HolidayManager = () => {
               <button
                 type="button"
                 onClick={handleSaveHoliday}
-                disabled={!holidayName.trim() || saving}
+                disabled={!holidayName.trim() || !pendingDate || saving}
                 className="flex-1 py-2.5 text-xs font-semibold rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors flex items-center justify-center gap-1.5 shadow-sm shadow-amber-500/30"
               >
-                <Plus className="w-3.5 h-3.5" />
-                {saving ? 'Saving…' : 'Mark Holiday'}
+                {editingId ? <Pencil className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                {saving ? 'Saving…' : editingId ? 'Save Changes' : 'Mark Holiday'}
               </button>
             </div>
           </div>

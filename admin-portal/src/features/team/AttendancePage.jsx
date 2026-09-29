@@ -80,10 +80,10 @@ function secToHrsStr(totalSec) {
 
 /**
  * Logged-in seconds from clock-in → clock-out (uncapped).
- * If still "In office" on today, uses now. Past days without clock-out return 0
- * so the caller can fall back to stored seconds.
+ * Includes break and lunch. If still "In office" on today, uses now.
+ * Past days without clock-out return 0 so the caller can fall back to stored seconds.
  */
-function computeRegularSecondsFromTimes(clockInStr, clockOutStr, dateStr, breakSec = 0, clockInTimestamp = null) {
+function computeRegularSecondsFromTimes(clockInStr, clockOutStr, dateStr, _breakSec = 0, clockInTimestamp = null) {
   let inMins = timeStrToMinutes(clockInStr)
   if (inMins === null && clockInTimestamp) {
     const d = new Date(Number(clockInTimestamp))
@@ -109,7 +109,7 @@ function computeRegularSecondsFromTimes(clockInStr, clockOutStr, dateStr, breakS
   }
 
   if (outMins === null || outMins <= inMins) return 0
-  return Math.max(0, (outMins - inMins) * 60 - (breakSec || 0))
+  return Math.max(0, (outMins - inMins) * 60)
 }
 
 /** Build a Date timestamp for YYYY-MM-DD + time string like "09:30 AM" */

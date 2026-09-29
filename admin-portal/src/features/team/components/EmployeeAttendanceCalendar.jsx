@@ -24,6 +24,7 @@ export function EmployeeAttendanceCalendar({
   employee = null,
   month,
   accountStartDate = null,
+  onDayClick = null,
 }) {
   const [viewMonth, setViewMonth] = useState(month)
   const [logsByDate, setLogsByDate] = useState({})
@@ -246,9 +247,18 @@ export function EmployeeAttendanceCalendar({
           const leaveOverlay = approvedLeaveByDate[dateKey]
 
           return (
-            <div
+            <button
               key={cell.key}
-              className="flex flex-col items-center justify-center w-full rounded"
+              type="button"
+              disabled={!cell.isCurrentMonth || !onDayClick}
+              onClick={() => {
+                if (!cell.isCurrentMonth || !onDayClick) return
+                onDayClick(dateKey)
+              }}
+              className={`flex flex-col items-center justify-center w-full rounded disabled:opacity-100 disabled:cursor-default ${
+                cell.isCurrentMonth && onDayClick ? 'cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800' : ''
+              }`}
+              title={cell.isCurrentMonth && onDayClick ? 'Set or change leave for this day' : undefined}
             >
               <div
                 className={`rounded-full flex items-center justify-center font-semibold leading-none ${
@@ -285,7 +295,7 @@ export function EmployeeAttendanceCalendar({
                   </>
                 )}
               </div>
-            </div>
+            </button>
           )
         })}
       </div>

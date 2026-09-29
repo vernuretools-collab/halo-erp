@@ -14,6 +14,7 @@ import {
   onSnapshot,
 } from 'firebase/firestore'
 import { db } from '../../../shared/services/firebaseService'
+import { useUserStore } from '../../../stores/userStore'
 
 export const DEFAULT_TASK_STATUSES = [
   { id: 'todo', name: 'To Do', color: 'blue' },
@@ -497,13 +498,49 @@ export const createTask = async (taskData) => {
 /**
  * Update task status in Firestore
  */
+const statusLabel = (statusId) => {
+  const known = {
+    todo: 'To Do',
+    in_progress: 'In Progress',
+    in_review: 'In Review',
+    done: 'Done',
+  }
+  if (!statusId) return 'None'
+  if (known[statusId]) return known[statusId]
+  return String(statusId)
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
 export const updateTaskStatusInDb = async (taskId, newStatus) => {
   try {
     if (!taskId) return
-    await updateDoc(doc(db, 'tasks', taskId), {
+    const ref = doc(db, 'tasks', taskId)
+    const snap = await getDoc(ref)
+    const current = snap.exists() ? snap.data() : {}
+    const payload = {
       status: newStatus,
       updatedAt: new Date().toISOString(),
-    })
+    }
+    if (current.status && current.status !== newStatus) {
+      const { user, userDoc } = useUserStore.getState()
+      const activity = Array.isArray(current.activity) ? current.activity : []
+      payload.activity = [
+        ...activity,
+        {
+          id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          createdAt: new Date().toISOString(),
+          kind: 'history',
+          field: 'status',
+          action: 'changed the Status',
+          actorId: user?.uid || userDoc?.uid || userDoc?.id || null,
+          actorName: userDoc?.displayName || user?.displayName || userDoc?.name || 'Admin',
+          fromLabel: statusLabel(current.status),
+          toLabel: statusLabel(newStatus),
+        },
+      ].slice(-300)
+    }
+    await updateDoc(ref, payload)
   } catch (err) {
     console.error('Error updating task status in Firestore:', err)
   }

@@ -20,7 +20,20 @@ import {
   leaveDatesInMonth,
   monthlyReportDocId,
 } from './monthlyReportEngine'
-import { applyLopConversion, resolveLeaveLimits } from './leaveEntitlementUtils'
+import {
+  applyLopConversion,
+  countUsedPermissionHours,
+  expandLeaveWorkingDates,
+  formatHoursAsHrsMins,
+  hoursBetween,
+  isLeaveCountableWorkingDate,
+  isPermissionLeave,
+  leaveMatchesEmployeeFilter,
+  PERMISSION_LEAVE_TYPE,
+  resolveLeaveLimits,
+  resolvePermissionHours,
+  toHolidayDateSet,
+} from './leaveEntitlementUtils'
 
 function collectEmployeeIdentityIds(rowId, data = {}) {
   const ids = []
@@ -405,21 +418,307 @@ const clearOnDutyAttendanceForLeave = async (leaveData) => {
   }
 }
 
+const shiftYmd = (dateStr, deltaDays) => {
+  const cursor = new Date(`${dateStr}T00:00:00`)
+  cursor.setDate(cursor.getDate() + deltaDays)
+  const y = cursor.getFullYear()
+  const m = String(cursor.getMonth() + 1).padStart(2, '0')
+  const d = String(cursor.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+const leaveRange = (leave) => {
+  const start = String(leave?.startDate || '').slice(0, 10)
+  const end = String(leave?.endDate || leave?.startDate || '').slice(0, 10)
+  return { start, end }
+}
+
+const isActiveLeaveStatus = (leave) => {
+  const status = String(leave?.status || '').toLowerCase()
+  return status !== 'rejected' && status !== 'cancelled'
+}
+
+const isOnDutyLeave = (leave) =>
+  leave?.leaveType === 'On Duty' || leave?.requestedLeaveType === 'On Duty'
+
+const rangeDayCount = (leave, start, end, holidays) => {
+  if (isPermissionLeave(leave)) return 0
+  return expandLeaveWorkingDates(start, end, holidays).length
+}
+
+const cloneLeaveFields = (leave) => {
+  const out = {
+    employeeName: leave.employeeName || '',
+    employeeId: leave.employeeId || '',
+    employeeEmail: leave.employeeEmail || '',
+    leaveType: leave.leaveType,
+    requestedLeaveType: leave.requestedLeaveType || leave.leaveType,
+    convertedToLop: Boolean(leave.convertedToLop),
+    reason: leave.reason || '',
+    status: leave.status || 'approved',
+    autoApproved: leave.autoApproved === true,
+    reviewedBy: leave.reviewedBy || 'Admin',
+  }
+  if (leave.startTime) out.startTime = leave.startTime
+  if (leave.endTime) out.endTime = leave.endTime
+  if (leave.hours != null && leave.hours !== '') out.hours = leave.hours
+  return out
+}
+
+const newLeaveId = () => `leave_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+
 /**
- * Hide a leave request from the admin Leave Management list only.
- * Keeps the Firestore document so employee leave list and calendar marks stay unchanged.
+ * Drop one date from a leave request. A single-day request is deleted.
+ * A longer range is split so the other dates stay.
  */
-export const deleteLeaveRequestFromDb = async (leaveId) => {
-  try {
-    if (!leaveId) return
+const excludeDateFromLeave = async (leave, date, holidays) => {
+  const leaveId = leave?.leaveId || leave?.id
+  const { start, end } = leaveRange(leave)
+  if (!leaveId || !start || date < start || date > end) return
+
+  if (isOnDutyLeave(leave)) {
+    await clearOnDutyAttendanceForLeave({ ...leave, leaveId, startDate: start, endDate: end })
+  }
+
+  const beforeEnd = shiftYmd(date, -1)
+  const afterStart = shiftYmd(date, 1)
+  const hasBefore = start <= beforeEnd
+  const hasAfter = afterStart <= end
+
+  if (!hasBefore && !hasAfter) {
+    await deleteDoc(doc(db, 'leaveRequests', leaveId))
+    return
+  }
+
+  const base = cloneLeaveFields(leave)
+  if (hasBefore) {
+    const days = rangeDayCount(leave, start, beforeEnd, holidays)
     await updateDoc(doc(db, 'leaveRequests', leaveId), {
-      hiddenFromAdmin: true,
+      startDate: start,
+      endDate: beforeEnd,
+      days,
       updatedAt: serverTimestamp(),
     })
+    if (isOnDutyLeave(leave)) {
+      await markOnDutyAttendance({
+        ...base,
+        leaveId,
+        leaveType: 'On Duty',
+        startDate: start,
+        endDate: beforeEnd,
+      })
+    }
+  }
+
+  if (hasAfter) {
+    const days = rangeDayCount(leave, afterStart, end, holidays)
+    if (!hasBefore) {
+      await updateDoc(doc(db, 'leaveRequests', leaveId), {
+        startDate: afterStart,
+        endDate: end,
+        days,
+        updatedAt: serverTimestamp(),
+      })
+      if (isOnDutyLeave(leave)) {
+        await markOnDutyAttendance({
+          ...base,
+          leaveId,
+          leaveType: 'On Duty',
+          startDate: afterStart,
+          endDate: end,
+        })
+      }
+      return
+    }
+
+    const splitId = newLeaveId()
+    await setDoc(doc(db, 'leaveRequests', splitId), {
+      ...base,
+      leaveId: splitId,
+      startDate: afterStart,
+      endDate: end,
+      days,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+    if (isOnDutyLeave(leave)) {
+      await markOnDutyAttendance({
+        ...base,
+        leaveId: splitId,
+        leaveType: 'On Duty',
+        startDate: afterStart,
+        endDate: end,
+      })
+    }
+  }
+}
+
+const employeeLeaveFilter = (employee) => {
+  const uid = employee?.uid || employee?.employeeId || employee?.id || ''
+  return {
+    employeeId: uid,
+    uid,
+    employeeEmail: employee?.email || '',
+    employeeName: employee?.displayName || employee?.name || '',
+  }
+}
+
+const coveringLeavesForDate = (leaveRequests, employee, date) => {
+  const filter = employeeLeaveFilter(employee)
+  return (leaveRequests || []).filter((leave) => {
+    if (!isActiveLeaveStatus(leave)) return false
+    if (!leaveMatchesEmployeeFilter(leave, filter)) return false
+    const { start, end } = leaveRange(leave)
+    return Boolean(start) && date >= start && date <= end
+  })
+}
+
+/**
+ * Permanently delete a leave request from the database.
+ * Clears On Duty attendance marks written for that request.
+ */
+export const deleteLeaveRequestFromDb = async (leaveId) => {
+  if (!leaveId) return
+  const ref = doc(db, 'leaveRequests', leaveId)
+  try {
+    const snap = await getDoc(ref)
+    if (snap.exists()) {
+      const leaveData = { leaveId, ...snap.data() }
+      await clearOnDutyAttendanceForLeave(leaveData)
+    }
+    await deleteDoc(ref)
   } catch (err) {
-    console.error('Error hiding leave request from admin view:', err)
+    console.error('Error deleting leave request from database:', err)
     throw err
   }
+}
+
+/**
+ * Set, change, or clear one calendar day of leave for one employee.
+ * Past dates are allowed. A multi-day request that covers the date is split
+ * so only that day changes. Empty leaveType removes leave on that date.
+ */
+export const assignEmployeeDayLeave = async ({
+  employee,
+  date,
+  leaveType = '',
+  reason = '',
+  startTime = '',
+  endTime = '',
+  reviewedBy = 'Admin',
+} = {}) => {
+  const day = String(date || '').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error('Choose a valid date.')
+  const uid = employee?.uid || employee?.employeeId || employee?.id || ''
+  if (!uid && !employee?.email) throw new Error('Select an employee first.')
+
+  const holidays = await getCompanyHolidays()
+  const all = await getLeaveRequests()
+  const filter = employeeLeaveFilter(employee)
+  const covering = coveringLeavesForDate(all, employee, day)
+  const clearing = !String(leaveType || '').trim()
+
+  if (clearing) {
+    for (const leave of covering) {
+      await excludeDateFromLeave(leave, day, holidays)
+    }
+    return { cleared: true, date: day }
+  }
+
+  if (!isLeaveCountableWorkingDate(day, toHolidayDateSet(holidays))) {
+    throw new Error('That date is a Sunday or a company holiday. Pick a working day.')
+  }
+
+  const permission = leaveType === PERMISSION_LEAVE_TYPE
+  const targets = covering.filter((leave) => isPermissionLeave(leave) === permission)
+  const exact = targets.find((leave) => {
+    const { start, end } = leaveRange(leave)
+    return start === day && end === day
+  })
+
+  let permissionHours = 0
+  if (permission) {
+    if (!startTime || !endTime) {
+      throw new Error('Please select a start time and end time for Permission.')
+    }
+    permissionHours = hoursBetween(startTime, endTime)
+    if (permissionHours <= 0) throw new Error('End time must be after start time.')
+    const used = countUsedPermissionHours(all, filter, day.slice(0, 7), {
+      excludeLeaveId: exact?.leaveId || exact?.id,
+    })
+    const limit = resolvePermissionHours(employee)
+    const remaining = Math.max(0, Math.round((limit - used) * 100) / 100)
+    if (permissionHours > remaining + 1e-9) {
+      throw new Error(
+        remaining <= 0
+          ? `No Permission hours remaining this month (${formatHoursAsHrsMins(limit)}).`
+          : `This request is ${formatHoursAsHrsMins(permissionHours)}. Only ${formatHoursAsHrsMins(remaining)} remaining this month.`
+      )
+    }
+  }
+
+  for (const leave of targets) {
+    const id = leave.leaveId || leave.id
+    if (exact && id === (exact.leaveId || exact.id)) continue
+    await excludeDateFromLeave(leave, day, holidays)
+  }
+
+  const daysCount = permission ? 0 : expandLeaveWorkingDates(day, day, holidays).length || 1
+  const conversion = permission
+    ? {
+        leaveType: PERMISSION_LEAVE_TYPE,
+        requestedLeaveType: PERMISSION_LEAVE_TYPE,
+        convertedToLop: false,
+      }
+    : applyLopConversion({
+        requestedType: leaveType,
+        startDate: day,
+        endDate: day,
+        days: daysCount,
+        leaveRequests: all,
+        employeeFilter: filter,
+        limits: resolveLeaveLimits(employee),
+        excludeLeaveId: exact?.leaveId || exact?.id,
+        holidays,
+      })
+
+  const payload = {
+    employeeName: employee?.displayName || employee?.name || filter.employeeName || '',
+    employeeId: uid,
+    employeeEmail: employee?.email || '',
+    leaveType: conversion.leaveType,
+    requestedLeaveType: conversion.requestedLeaveType,
+    convertedToLop: conversion.convertedToLop,
+    startDate: day,
+    endDate: day,
+    days: daysCount,
+    reason: reason || `${leaveType} set by admin`,
+    status: 'approved',
+    autoApproved: true,
+    reviewedBy: reviewedBy || 'Admin',
+    updatedAt: serverTimestamp(),
+    startTime: permission ? startTime : null,
+    endTime: permission ? endTime : null,
+    hours: permission ? permissionHours : null,
+  }
+
+  if (exact) {
+    const leaveId = exact.leaveId || exact.id
+    if (isOnDutyLeave(exact) && payload.leaveType !== 'On Duty') {
+      await clearOnDutyAttendanceForLeave({ ...exact, leaveId, startDate: day, endDate: day })
+    }
+    await updateDoc(doc(db, 'leaveRequests', leaveId), payload)
+    if (payload.leaveType === 'On Duty') {
+      await markOnDutyAttendance({ ...payload, leaveId, leaveType: 'On Duty' })
+    }
+    return { leaveId, ...payload, updatedAt: new Date().toISOString() }
+  }
+
+  const created = await createLeaveRequest(payload)
+  if (created.leaveType === 'On Duty') {
+    await markOnDutyAttendance(created)
+  }
+  return created
 }
 
 /**
@@ -569,6 +868,25 @@ export const deleteCompanyHoliday = async (holidayId) => {
     await deleteDoc(doc(db, 'companyHolidays', holidayId))
   } catch (err) {
     console.error('Error deleting company holiday from Firestore:', err)
+  }
+}
+
+/**
+ * Update a company holiday's name and/or date.
+ * @param {string} holidayId
+ * @param {{ date?: string, name?: string }} patch
+ */
+export const updateCompanyHoliday = async (holidayId, { date, name } = {}) => {
+  try {
+    if (!holidayId) return
+    const patch = { updatedAt: serverTimestamp() }
+    if (date) patch.date = date
+    if (name != null) patch.name = String(name).trim() || 'Holiday'
+    await updateDoc(doc(db, 'companyHolidays', holidayId), patch)
+    return { holidayId, ...patch }
+  } catch (err) {
+    console.error('Error updating company holiday in Firestore:', err)
+    throw err
   }
 }
 
@@ -748,10 +1066,34 @@ export const saveOfficeLocation = async ({ lat, lng, radiusMeters, label, networ
 }
 
 /**
- * Fetch attendance logs whose date falls within a calendar month (YYYY-MM).
+ * Fetch daily idle rows whose date falls within a calendar month (YYYY-MM).
  * @param {string} month
  * @returns {Promise<object[]>}
  */
+export const getWorkIdleForMonth = async (month) => {
+  const { start, end } = getMonthDateBounds(month)
+  try {
+    const q = query(
+      collection(db, 'workIdleDays'),
+      where('date', '>=', start),
+      where('date', '<=', end)
+    )
+    const snap = await getDocs(q)
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+  } catch (err) {
+    console.error('Error fetching work idle for month:', err)
+    try {
+      const snap = await getDocs(collection(db, 'workIdleDays'))
+      return snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((row) => row.date && row.date >= start && row.date <= end)
+    } catch (fallbackErr) {
+      console.error('Fallback work idle month fetch failed:', fallbackErr)
+      return []
+    }
+  }
+}
+
 export const getAttendanceLogsForMonth = async (month) => {
   const { start, end } = getMonthDateBounds(month)
   try {
@@ -900,7 +1242,7 @@ export const generateEmployeeMonthlyReport = async (
   const uid = employee?.uid || employee?.employeeId || employee?.id
   if (!uid || !month) throw new Error('generateEmployeeMonthlyReport requires employee uid and month')
 
-  const [attendanceLogs, leaveRequests, timelineEntries, holidays] = await Promise.all([
+  const [attendanceLogs, leaveRequests, timelineEntries, holidays, idleDays] = await Promise.all([
     preloaded?.attendanceLogs
       ? Promise.resolve(preloaded.attendanceLogs.filter((l) => !l.uid || String(l.uid) === String(uid)))
       : getAttendanceLogsForMonth(month).then((logs) =>
@@ -915,6 +1257,7 @@ export const generateEmployeeMonthlyReport = async (
         )
       : getTimelineEntriesForMonth(month, uid),
     preloaded?.holidays ? Promise.resolve(preloaded.holidays) : getCompanyHolidays(),
+    preloaded?.idleDays ? Promise.resolve(preloaded.idleDays) : getWorkIdleForMonth(month),
   ])
 
   const report = buildEmployeeMonthlyReport({
@@ -924,6 +1267,7 @@ export const generateEmployeeMonthlyReport = async (
     leaveRequests,
     timelineEntries,
     holidays,
+    idleDays,
     generatedBy,
   })
 
@@ -945,14 +1289,15 @@ export const generateAllEmployeesMonthlyReports = async (month, generatedBy = 'A
     return []
   }
 
-  const [attendanceLogs, leaveRequests, timelineEntries, holidays] = await Promise.all([
+  const [attendanceLogs, leaveRequests, timelineEntries, holidays, idleDays] = await Promise.all([
     getAttendanceLogsForMonth(month),
     getLeaveRequestsForMonth(month),
     getTimelineEntriesForMonth(month),
     getCompanyHolidays(),
+    getWorkIdleForMonth(month),
   ])
 
-  const preloaded = { attendanceLogs, leaveRequests, timelineEntries, holidays }
+  const preloaded = { attendanceLogs, leaveRequests, timelineEntries, holidays, idleDays }
   const results = []
   for (const emp of employees || []) {
     try {

@@ -195,9 +195,24 @@ export function leaveDatesInMonth(leave, month, holidays = []) {
  * @param {Array} params.leaveRequests
  * @param {Array} params.timelineEntries
  * @param {Array} [params.holidays]
+ * @param {Array} [params.idleDays]
  * @param {string} [params.generatedBy]
  * @returns {object}
  */
+function employeeIdentityKeys(employee) {
+  return new Set(
+    [employee?.uid, employee?.employeeId, employee?.id, employee?.authId, employee?.auth_id, employee?.userId]
+      .filter((value) => value != null && value !== '')
+      .map(String)
+  )
+}
+
+function idleRowMatches(row, keys) {
+  return [row?.uid, row?.userId, row?.employeeId, row?.authId, row?.auth_id].some(
+    (value) => value != null && value !== '' && keys.has(String(value))
+  )
+}
+
 export function buildEmployeeMonthlyReport({
   employee,
   month,
@@ -205,6 +220,7 @@ export function buildEmployeeMonthlyReport({
   leaveRequests = [],
   timelineEntries = [],
   holidays = [],
+  idleDays = [],
   generatedBy = 'Admin',
 }) {
   const uid = employee?.uid || employee?.employeeId || employee?.id || ''
@@ -262,6 +278,16 @@ export function buildEmployeeMonthlyReport({
   let onTimeDays = 0
   let totalRegularSeconds = 0
   let totalExtraSeconds = 0
+
+  const identityKeys = employeeIdentityKeys(employee)
+  const idleByDate = {}
+  ;(idleDays || []).forEach((row) => {
+    if (!row?.date || row.date < start || row.date > end) return
+    if (!idleRowMatches(row, identityKeys)) return
+    const sec = Math.max(0, Math.round(Number(row.idleSeconds) || 0))
+    idleByDate[row.date] = (idleByDate[row.date] || 0) + sec
+  })
+  const totalIdleSeconds = Object.values(idleByDate).reduce((sum, sec) => sum + sec, 0)
 
   const today = new Date()
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
@@ -341,6 +367,7 @@ export function buildEmployeeMonthlyReport({
       clockOutTime: clockOutTime ? formatTo12HourTime(clockOutTime) : null,
       regularSeconds,
       extraSeconds,
+      idleSeconds: idleByDate[date] || 0,
       leaveType,
       timelineHours: timelineByDate[date] || 0,
       onDuty,
@@ -423,6 +450,8 @@ export function buildEmployeeMonthlyReport({
       attendancePercentage,
       totalRegularHoursLabel: formatSecondsToHrsMins(totalRegularSeconds),
       totalExtraHoursLabel: formatSecondsToHrsMins(totalExtraSeconds),
+      totalIdleSeconds,
+      totalIdleHoursLabel: formatSecondsToHrsMins(totalIdleSeconds),
     },
     leave: {
       approvedDays,
@@ -480,6 +509,7 @@ export function monthlyReportToCsv(report) {
   lines.push(`Avg Check-Out,${csvEscape(a.avgCheckOut)}`)
   lines.push(`Total Regular Hours,${csvEscape(a.totalRegularHoursLabel)}`)
   lines.push(`Total Extra Hours,${csvEscape(a.totalExtraHoursLabel)}`)
+  lines.push(`Idle Time,${csvEscape(a.totalIdleHoursLabel || formatSecondsToHrsMins(a.totalIdleSeconds))}`)
   lines.push(`Leave Approved Days,${report.leave?.approvedDays ?? ''}`)
   lines.push(`LOP Unpaid Days,${report.leave?.lopDays ?? report.leave?.unpaidLeaveDays ?? ''}`)
   lines.push(`Unpaid Days (LOP + Absent),${report.leave?.unpaidDays ?? ''}`)
@@ -487,7 +517,7 @@ export function monthlyReportToCsv(report) {
   lines.push(`Timeline Hours,${report.timeline?.totalHours ?? ''}`)
   lines.push('')
   lines.push(
-    'Date,Present,Late,Late Minutes,Clock In,Clock Out,Regular Seconds,Extra Seconds,Leave Type,Timeline Hours'
+    'Date,Present,Late,Late Minutes,Clock In,Clock Out,Regular Seconds,Extra Seconds,Idle Seconds,Leave Type,Timeline Hours'
   )
   ;(report.daily || []).forEach((row) => {
     lines.push(
@@ -500,6 +530,7 @@ export function monthlyReportToCsv(report) {
         csvEscape(row.clockOutTime || ''),
         row.regularSeconds ?? 0,
         row.extraSeconds ?? 0,
+        row.idleSeconds ?? 0,
         csvEscape(row.leaveType || ''),
         row.timelineHours ?? 0,
       ].join(',')

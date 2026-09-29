@@ -3,23 +3,36 @@ import { useSearchParams } from 'react-router-dom'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
+import { Modal } from '../../components/ui/Modal'
 import { Badge } from '../../components/ui/Badge'
 import { NativePickerInput } from '../../components/ui/Input'
 import { useTeamStore } from './stores/teamStore'
 import { useUserStore } from '../../stores/userStore'
 import { TeamSubNav } from './components/TeamSubNav'
 import { EmployeeAttendanceCalendar } from './components/EmployeeAttendanceCalendar'
+import { DayLeaveModal } from './components/DayLeaveModal'
 import {
   getEmployees,
   getMonthlyReport,
   listMonthlyReports,
   generateEmployeeMonthlyReport,
   generateAllEmployeesMonthlyReports,
+  getAttendanceLogsForMonth,
+  getLeaveRequestsForMonth,
+  getTimelineEntriesForMonth,
+  getCompanyHolidays,
+  getWorkIdleForMonth,
 } from './services/teamService'
 import {
+  buildEmployeeMonthlyReport,
   currentMonthStr,
   monthlyReportToCsv,
 } from './services/monthlyReportEngine'
+import {
+  buildOverallMonthlyWorkbook,
+  overallReportFilename,
+  saveBlob,
+} from './services/monthlyReportExports'
 import { formatSecondsToHrsMins, formatTo12HourTime } from './services/attendanceStatsUtils'
 import {
   RefreshCw,
@@ -31,6 +44,7 @@ import {
   CheckCircle2,
   Loader2,
   FileText,
+  FileSpreadsheet,
 } from 'lucide-react'
 
 function downloadCsv(filename, csvText) {
@@ -41,6 +55,12 @@ function downloadCsv(filename, csvText) {
   a.download = filename
   a.click()
   URL.revokeObjectURL(url)
+}
+
+function idleTimeLabel(seconds, label) {
+  if (label) return label
+  if (seconds == null) return '—'
+  return formatSecondsToHrsMins(seconds)
 }
 
 function StatCard({ label, value, sub, icon: Icon, accent = 'indigo' }) {
@@ -84,8 +104,12 @@ export function EmployeeMonthlyReportPage() {
   const [loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [generatingAll, setGeneratingAll] = useState(false)
+  const [exporting, setExporting] = useState('')
+  const [reportMonthOpen, setReportMonthOpen] = useState(false)
+  const [exportMonth, setExportMonth] = useState(month)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [dayEditDate, setDayEditDate] = useState('')
 
   useEffect(() => {
     getEmployees().then((emps) => {
@@ -171,6 +195,15 @@ export function EmployeeMonthlyReportPage() {
     loadStored()
   }, [loadStored])
 
+  const refreshAfterLeaveEdit = async () => {
+    if (!selectedEmployee || !month) return
+    const saved = await generateEmployeeMonthlyReport(selectedEmployee, month, adminName)
+    setReport(saved)
+    const list = await listMonthlyReports({ month })
+    setMonthReports(list || [])
+    setMessage(`Updated leave for ${saved.displayName || 'employee'} on the monthly report.`)
+  }
+
   const handleGenerate = async () => {
     if (!selectedEmployee || !month) return
     setGenerating(true)
@@ -219,6 +252,58 @@ export function EmployeeMonthlyReportPage() {
     if (!report) return
     const csv = monthlyReportToCsv(report)
     downloadCsv(`${report.displayName || 'employee'}_${report.month}_report.csv`, csv)
+  }
+
+  const loadMonthBundle = async (targetMonth) => {
+    const [attendanceLogs, leaveRequests, timelineEntries, holidays, idleDays, roster] =
+      await Promise.all([
+        getAttendanceLogsForMonth(targetMonth),
+        getLeaveRequestsForMonth(targetMonth),
+        getTimelineEntriesForMonth(targetMonth),
+        getCompanyHolidays(),
+        getWorkIdleForMonth(targetMonth),
+        employees.length ? Promise.resolve(employees) : getEmployees(),
+      ])
+    const rosterEmployees = roster?.length ? roster : employees
+    const reports = (rosterEmployees || []).map((employee) =>
+      buildEmployeeMonthlyReport({
+        employee,
+        month: targetMonth,
+        attendanceLogs,
+        leaveRequests,
+        timelineEntries,
+        holidays,
+        idleDays,
+        generatedBy: adminName,
+      })
+    )
+    return { employees: rosterEmployees, reports, attendanceLogs, timelineEntries }
+  }
+
+  const openOverallReport = () => {
+    setExportMonth(month || currentMonthStr())
+    setReportMonthOpen(true)
+  }
+
+  const handleOverallReport = async () => {
+    if (!exportMonth) return
+    setExporting('xlsx')
+    setError('')
+    setMessage('')
+    try {
+      const bundle = await loadMonthBundle(exportMonth)
+      const filename = overallReportFilename(exportMonth)
+      const blob = buildOverallMonthlyWorkbook(bundle)
+      const saved = await saveBlob(filename, blob)
+      if (!saved) return
+      setReportMonthOpen(false)
+      setMessage(`Saved ${filename} for all employees (${exportMonth}).`)
+    } catch (err) {
+      console.error(err)
+      setError(err.message || 'Failed to save overall monthly report.')
+    } finally {
+      setExporting('')
+    }
   }
 
   const att = report?.attendance || {}
@@ -284,6 +369,15 @@ export function EmployeeMonthlyReportPage() {
           <Button
             variant="primary"
             size="sm"
+            icon={FileSpreadsheet}
+            onClick={openOverallReport}
+            disabled={exporting === 'xlsx'}
+          >
+            Overall Monthly Report
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             icon={Download}
             onClick={handleExportCsv}
             disabled={!report}
@@ -292,6 +386,48 @@ export function EmployeeMonthlyReportPage() {
           </Button>
         </div>
       </div>
+
+      <Modal
+        open={reportMonthOpen}
+        onClose={() => {
+          if (exporting === 'xlsx') return
+          setReportMonthOpen(false)
+        }}
+        title="Overall Monthly Report"
+        size="sm"
+        footer={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setReportMonthOpen(false)}
+              disabled={exporting === 'xlsx'}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              icon={exporting === 'xlsx' ? Loader2 : Download}
+              onClick={handleOverallReport}
+              disabled={exporting === 'xlsx' || !exportMonth}
+            >
+              {exporting === 'xlsx' ? 'Saving…' : 'Save'}
+            </Button>
+          </>
+        }
+      >
+        <label className="block text-xs text-muted font-medium mb-2">Which month?</label>
+        <NativePickerInput
+          type="month"
+          value={exportMonth}
+          onChange={(e) => setExportMonth(e.target.value)}
+          className="bg-canvas border border-border text-sm text-fg rounded-xl px-3 py-2 focus:outline-none w-full"
+        />
+        <p className="text-[11px] text-slate-400 mt-2">
+          Choose a month, then save the Excel file for every employee.
+        </p>
+      </Modal>
 
       {error && (
         <Card className="p-3 border-rose-200 dark:border-rose-800/50 bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
@@ -328,6 +464,7 @@ export function EmployeeMonthlyReportPage() {
                 employee={selectedEmployee}
                 month={month}
                 accountStartDate={accountStartDate}
+                onDayClick={setDayEditDate}
               />
             </div>
           )}
@@ -395,6 +532,13 @@ export function EmployeeMonthlyReportPage() {
               accent="slate"
             />
             <StatCard
+              label="Idle"
+              value={idleTimeLabel(att.totalIdleSeconds, att.totalIdleHoursLabel)}
+              sub="after 20 min without keyboard or mouse"
+              icon={Clock}
+              accent="amber"
+            />
+            <StatCard
               label="Timeline"
               value={`${timeline.totalHours ?? 0}h`}
               sub={`${timeline.entryCount ?? 0} entries`}
@@ -411,6 +555,7 @@ export function EmployeeMonthlyReportPage() {
               employee={selectedEmployee}
               month={month}
               accountStartDate={accountStartDate}
+              onDayClick={setDayEditDate}
             />
 
             <Card className="p-4 border-border space-y-2">
@@ -419,6 +564,7 @@ export function EmployeeMonthlyReportPage() {
                 <div className="flex justify-between"><span>Avg check-in</span><span className="font-mono">{att.avgCheckIn || '—'}</span></div>
                 <div className="flex justify-between"><span>Avg check-out</span><span className="font-mono">{att.avgCheckOut || '—'}</span></div>
                 <div className="flex justify-between"><span>Extra hours</span><span className="font-mono">{att.totalExtraHoursLabel || '0h 0m'}</span></div>
+                <div className="flex justify-between"><span>Idle time</span><span className="font-mono">{idleTimeLabel(att.totalIdleSeconds, att.totalIdleHoursLabel)}</span></div>
                 <div className="flex justify-between"><span>On duty days</span><span>{att.onDutyDays ?? 0}</span></div>
                 <div className="flex justify-between"><span>On-time days</span><span>{att.onTimeDays ?? 0}</span></div>
               </div>
@@ -449,6 +595,7 @@ export function EmployeeMonthlyReportPage() {
                     <th className="p-3 font-semibold">Clock in</th>
                     <th className="p-3 font-semibold">Clock out</th>
                     <th className="p-3 font-semibold">Hours</th>
+                    <th className="p-3 font-semibold">Idle</th>
                     <th className="p-3 font-semibold">Late</th>
                     <th className="p-3 font-semibold">Leave</th>
                     <th className="p-3 font-semibold">Timeline</th>
@@ -475,6 +622,7 @@ export function EmployeeMonthlyReportPage() {
                       <td className="p-3 font-mono">{formatTo12HourTime(row.clockInTime) || '—'}</td>
                       <td className="p-3 font-mono">{formatTo12HourTime(row.clockOutTime) || '—'}</td>
                       <td className="p-3 font-mono">{formatSecondsToHrsMins(row.regularSeconds)}</td>
+                      <td className="p-3 font-mono">{idleTimeLabel(row.idleSeconds)}</td>
                       <td className="p-3">
                         {row.late ? (
                           <span className="text-amber-600 dark:text-amber-400 font-medium">
@@ -484,7 +632,15 @@ export function EmployeeMonthlyReportPage() {
                           '—'
                         )}
                       </td>
-                      <td className="p-3">{row.leaveType || '—'}</td>
+                      <td className="p-3">
+                        <button
+                          type="button"
+                          className="text-left text-accent hover:underline"
+                          onClick={() => setDayEditDate(row.date)}
+                        >
+                          {row.leaveType || 'Set leave'}
+                        </button>
+                      </td>
                       <td className="p-3">{row.timelineHours ? `${row.timelineHours}h` : '—'}</td>
                     </tr>
                   ))}
@@ -494,6 +650,15 @@ export function EmployeeMonthlyReportPage() {
           </div>
         </>
       )}
+
+      <DayLeaveModal
+        open={Boolean(dayEditDate)}
+        employee={selectedEmployee}
+        date={dayEditDate}
+        reviewedBy={adminName}
+        onClose={() => setDayEditDate('')}
+        onSaved={refreshAfterLeaveEdit}
+      />
 
       {/* Month roster summary */}
       <Card className="overflow-x-auto p-0 border-border">
@@ -516,6 +681,7 @@ export function EmployeeMonthlyReportPage() {
                 <th className="p-3 font-semibold">Late</th>
                 <th className="p-3 font-semibold">Leave</th>
                 <th className="p-3 font-semibold">Avg hours</th>
+                <th className="p-3 font-semibold">Idle</th>
                 <th className="p-3 font-semibold">Timeline</th>
                 <th className="p-3 font-semibold">Status</th>
               </tr>
@@ -534,6 +700,9 @@ export function EmployeeMonthlyReportPage() {
                   <td className="p-3 text-amber-600 dark:text-amber-400">{r.attendance?.lateDays ?? '—'}</td>
                   <td className="p-3">{r.leave?.approvedDays ?? '—'}</td>
                   <td className="p-3 font-mono">{r.attendance?.avgHours || '—'}</td>
+                  <td className="p-3 font-mono">
+                    {idleTimeLabel(r.attendance?.totalIdleSeconds, r.attendance?.totalIdleHoursLabel)}
+                  </td>
                   <td className="p-3">{r.timeline?.totalHours ?? '—'}h</td>
                   <td className="p-3">
                     <Badge variant={r.status === 'final' ? 'success' : 'warning'}>{r.status || 'draft'}</Badge>

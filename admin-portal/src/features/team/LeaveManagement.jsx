@@ -28,6 +28,7 @@ import {
   resolvePermissionHours,
 } from './services/leaveEntitlementUtils'
 import { TeamSubNav } from './components/TeamSubNav'
+import { DayLeaveModal } from './components/DayLeaveModal'
 import { collection, onSnapshot } from 'firebase/firestore'
 import { db } from '../../shared/services/firebaseService'
 import { Plus, Check, X, AlertTriangle, Trash2, Filter, Calendar } from 'lucide-react'
@@ -119,6 +120,7 @@ export const LeaveManagement = () => {
   const [reason, setReason] = useState('')
   const [validationError, setValidationError] = useState('')
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [dayEdit, setDayEdit] = useState(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [viewDate, setViewDate] = useState('')
   const [rangeFrom, setRangeFrom] = useState(monthStartYmd)
@@ -740,9 +742,32 @@ export const LeaveManagement = () => {
                       </>
                     )}
                     <button
+                      onClick={() => {
+                        const matched = employees.find(
+                          (emp) =>
+                            (req.employeeId && (emp.uid === req.employeeId || emp.employeeId === req.employeeId)) ||
+                            (req.employeeEmail && emp.email?.toLowerCase() === req.employeeEmail.toLowerCase())
+                        )
+                        setDayEdit({
+                          employee: matched || {
+                            uid: req.employeeId,
+                            employeeId: req.employeeId,
+                            email: req.employeeEmail,
+                            displayName: req.employeeName,
+                            name: req.employeeName,
+                          },
+                          date: toYmd(req.startDate) || toYmd(req.endDate),
+                        })
+                      }}
+                      className="px-2 py-1.5 text-[11px] font-semibold bg-canvas hover:bg-slate-100 dark:hover:bg-slate-800 text-fg rounded-lg border border-border transition-colors"
+                      title="Change this day's leave type"
+                    >
+                      Change
+                    </button>
+                    <button
                       onClick={() => setDeleteTarget(req)}
                       className="p-1.5 bg-rose-50 dark:bg-rose-500/10 hover:bg-rose-100 dark:hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 rounded-lg border border-rose-200 dark:border-rose-500/30 transition-colors"
-                      title="Hide Leave Request"
+                      title="Delete leave request"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -754,6 +779,14 @@ export const LeaveManagement = () => {
         </table>
       </Card>
 
+      <DayLeaveModal
+        open={Boolean(dayEdit)}
+        employee={dayEdit?.employee}
+        date={dayEdit?.date}
+        reviewedBy={adminName}
+        onClose={() => setDayEdit(null)}
+      />
+
       {/* Delete Confirmation Modal */}
       {deleteTarget && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
@@ -763,14 +796,14 @@ export const LeaveManagement = () => {
                 <Trash2 className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-fg text-sm">Hide Leave Request?</h3>
+                <h3 className="font-bold text-fg text-sm">Delete leave request?</h3>
                 <p className="text-xs text-muted mt-1.5 leading-relaxed">
-                  This will remove the {deleteTarget.leaveType} request for{' '}
+                  This permanently deletes the {deleteTarget.leaveType} request for{' '}
                   {deleteTarget.employeeName || 'this employee'} ({deleteTarget.startDate}
                   {deleteTarget.endDate && deleteTarget.endDate !== deleteTarget.startDate
                     ? ` to ${deleteTarget.endDate}`
                     : ''}
-                  ) from this admin list only. The employee leave record and calendar marks will stay unchanged.
+                  ) from the database. The employee leave list, permission balance, and calendar will update.
                 </p>
               </div>
             </div>
@@ -792,7 +825,7 @@ export const LeaveManagement = () => {
                 disabled={deleteLoading}
                 icon={Trash2}
               >
-                {deleteLoading ? 'Hiding…' : 'Hide from Admin'}
+                {deleteLoading ? 'Deleting…' : 'Delete from database'}
               </Button>
             </div>
           </Card>
