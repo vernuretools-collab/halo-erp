@@ -5,7 +5,8 @@ import { Card } from '../../components/ui/Card'
 import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
-import { getUserDoc } from '../../shared/services/authService'
+import { getUserDoc, setClientPassword } from '../../shared/services/authService'
+import { clientLoginLabel, isSyntheticClientEmail } from '../../../../shared/supabase/clientLogin.js'
 import { updateClientInDb } from './services/clientService'
 import {
   getClientOnboardingAdmin,
@@ -26,12 +27,11 @@ import { sendPasswordResetEmail } from 'firebase/auth'
 import { collection, query, where, getDocs, doc, onSnapshot } from 'firebase/firestore'
 import {
   ArrowLeft,
-  Mail,
+  User,
   Phone,
   Building,
   Calendar,
   Lock,
-  User,
   ShieldCheck,
   Save,
   CheckCircle,
@@ -97,6 +97,7 @@ export const ClientProfileView = () => {
   const [rejectReason, setRejectReason] = useState('')
   const [previewAgreement, setPreviewAgreement] = useState(null) // { id, title, sigRecord }
 
+  const [newPassword, setNewPassword] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -333,6 +334,26 @@ export const ClientProfileView = () => {
     } catch (err) {
       console.error(err)
       setError('Failed to update client profile.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleSetPassword = async () => {
+    if (!newPassword || newPassword.length < 6) {
+      setError('Password must be at least 6 characters.')
+      return
+    }
+    setSaving(true)
+    setError('')
+    setSuccess('')
+    try {
+      await setClientPassword(clientId, newPassword)
+      setNewPassword('')
+      setSuccess('Password updated. The client signs in with their username and this password.')
+    } catch (err) {
+      console.error(err)
+      setError(err.message || 'Failed to update password.')
     } finally {
       setSaving(false)
     }
@@ -799,8 +820,8 @@ export const ClientProfileView = () => {
 
               <div className="space-y-3 pt-4 text-left text-xs text-muted border-t border-border">
                 <div className="flex items-center gap-2">
-                  <Mail className="w-4 h-4 text-slate-400" />
-                  <span className="truncate">{client?.email}</span>
+                  <User className="w-4 h-4 text-slate-400" />
+                  <span className="truncate">{clientLoginLabel(client)}</span>
                 </div>
                 {client?.phoneNumber && (
                   <div className="flex items-center gap-2">
@@ -817,19 +838,46 @@ export const ClientProfileView = () => {
 
             <Card className="p-6 space-y-4 border-border">
               <h4 className="font-bold text-xs uppercase tracking-wider text-muted">Security & Credentials</h4>
-              <p className="text-xs text-muted">
-                Trigger a password reset email for this client representative.
-              </p>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleSendResetEmail}
-                disabled={saving}
-                className="w-full text-xs text-accent border-accent/20"
-                icon={Lock}
-              >
-                Send Password Reset Email
-              </Button>
+              {client?.username || isSyntheticClientEmail(client?.email) ? (
+                <>
+                  <p className="text-xs text-muted">
+                    This account signs in with a username and password. Set a new password here.
+                  </p>
+                  <Input
+                    label="New Password"
+                    type="password"
+                    placeholder="Minimum 6 characters"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleSetPassword}
+                    disabled={saving}
+                    className="w-full text-xs text-accent border-accent/20"
+                    icon={Lock}
+                  >
+                    Set New Password
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-muted">
+                    Trigger a password reset email for this client representative.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleSendResetEmail}
+                    disabled={saving}
+                    className="w-full text-xs text-accent border-accent/20"
+                    icon={Lock}
+                  >
+                    Send Password Reset Email
+                  </Button>
+                </>
+              )}
             </Card>
           </div>
 

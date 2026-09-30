@@ -5,6 +5,20 @@ const cors = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+const CLIENT_AUTH_EMAIL_DOMAIN = 'client.halo.local'
+
+function normalizeUsername(raw: string) {
+  return String(raw || '').trim().toLowerCase().replace(/\s+/g, '')
+}
+
+function isValidUsername(username: string) {
+  return /^[a-z0-9](?:[a-z0-9._-]{1,30}[a-z0-9])?$/.test(username)
+}
+
+function usernameToAuthEmail(username: string) {
+  return `${normalizeUsername(username)}@${CLIENT_AUTH_EMAIL_DOMAIN}`
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
 
@@ -38,27 +52,86 @@ Deno.serve(async (req) => {
   )
 
   const body = await req.json()
-  const email = String(body.email || '').trim()
   const password = String(body.password || '')
-  if (!email || !password) return json({ error: 'email and password required' }, 400)
+  const kind = body.type || 'employee'
+
+  if (body.action === 'set-password') {
+    const uid = String(body.uid || '').trim()
+    if (!uid || password.length < 6) {
+      return json({ error: 'uid and a password of at least 6 characters are required' }, 400)
+    }
+    const { error: updateErr } = await admin.auth.admin.updateUserById(uid, { password })
+    if (updateErr) return json({ error: updateErr.message }, 400)
+    return json({ ok: true })
+  }
+
+  if (body.action === 'delete-user') {
+    const uid = String(body.uid || '').trim()
+    if (!uid || uid.length > 80) return json({ error: 'A valid user id is required' }, 400)
+    if (uid === authData.user.id) return json({ error: 'You cannot delete your own account' }, 400)
+
+    const { data: byId, error: byIdErr } = await admin.from('profiles').select('id,auth_id,data').eq('id', uid).maybeSingle()
+    if (byIdErr) return json({ error: byIdErr.message }, 400)
+    let target = byId
+    if (!target) {
+      const { data: byAuth, error: byAuthErr } = await admin.from('profiles').select('id,auth_id,data').eq('auth_id', uid).maybeSingle()
+      if (byAuthErr) return json({ error: byAuthErr.message }, 400)
+      target = byAuth
+    }
+    const targetRole = String(target?.data?.role || '').toLowerCase()
+    if (target && targetRole && targetRole !== 'client') {
+      return json({ error: 'Only client portal users can be deleted here' }, 400)
+    }
+
+    const authId = String(target?.auth_id || uid)
+    const profileId = String(target?.id || uid)
+    const { error: authDeleteErr } = await admin.auth.admin.deleteUser(authId)
+    if (authDeleteErr && !/not found/i.test(authDeleteErr.message || '')) {
+      return json({ error: authDeleteErr.message }, 400)
+    }
+
+    const [onboardById, onboardByUser, profileDelete] = await Promise.all([
+      admin.from('client_onboarding').delete().eq('id', profileId),
+      admin.from('client_onboarding').delete().eq('user_id', profileId),
+      admin.from('profiles').delete().eq('id', profileId),
+    ])
+    const cleanupErr = onboardById.error || onboardByUser.error || profileDelete.error
+    if (cleanupErr) return json({ error: cleanupErr.message }, 400)
+    return json({ ok: true })
+  }
+
+  let email = String(body.email || '').trim().toLowerCase()
+  let username = normalizeUsername(body.username)
+  if (kind === 'client') {
+    if (!username && email.endsWith(`@${CLIENT_AUTH_EMAIL_DOMAIN}`)) {
+      username = email.split('@')[0]
+    }
+    if (!isValidUsername(username)) {
+      return json({ error: 'username must be 3–32 characters: letters, numbers, dots, underscores, or hyphens' }, 400)
+    }
+    email = usernameToAuthEmail(username)
+  }
+  if (!email || !password) {
+    return json({ error: kind === 'client' ? 'username and password required' : 'email and password required' }, 400)
+  }
 
   const { data: created, error: createErr } = await admin.auth.admin.createUser({
     email,
     password,
     email_confirm: true,
-    user_metadata: { displayName: body.displayName || email.split('@')[0] },
+    user_metadata: { displayName: body.displayName || username || email.split('@')[0], username: username || null },
   })
   if (createErr) return json({ error: createErr.message }, 400)
 
   const uid = created.user.id
   const now = new Date().toISOString()
-  const kind = body.type || 'employee'
 
   if (kind === 'client') {
     const clientData = {
       uid,
+      username,
       email,
-      displayName: body.displayName || email.split('@')[0],
+      displayName: String(body.displayName || username).trim().replace(/\s+/g, ' '),
       companyName: body.companyName || '',
       phoneNumber: body.phone || null,
       role: 'client',
@@ -68,20 +141,22 @@ Deno.serve(async (req) => {
       createdAt: now,
       updatedAt: now,
     }
-    await admin.from('profiles').upsert({
-      id: uid,
-      auth_id: uid,
-      org_id: orgId,
-      data: { ...clientData, orgId },
-      updated_at: now,
-    })
-    await admin.from('client_onboarding').upsert({
-      id: uid,
-      user_id: uid,
-      org_id: orgId,
-      data: body.onboardingData || { uid, email, orgId, ...clientData },
-      updated_at: now,
-    })
+    await Promise.all([
+      admin.from('profiles').upsert({
+        id: uid,
+        auth_id: uid,
+        org_id: orgId,
+        data: { ...clientData, orgId },
+        updated_at: now,
+      }),
+      admin.from('client_onboarding').upsert({
+        id: uid,
+        user_id: uid,
+        org_id: orgId,
+        data: body.onboardingData || { uid, email, orgId, ...clientData },
+        updated_at: now,
+      }),
+    ])
     return json(clientData)
   }
 

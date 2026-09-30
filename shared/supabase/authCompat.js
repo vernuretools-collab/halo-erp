@@ -1,4 +1,5 @@
 import { supabase } from './client.js'
+import { loginIdentifierToEmail } from './clientLogin.js'
 
 const ADMIN_ROLES = new Set(['admin', 'owner', 'superadmin'])
 
@@ -80,7 +81,8 @@ function wrapUser(authUser, session, profile) {
   return {
     uid,
     email: authUser.email,
-    displayName: data.displayName || authUser.user_metadata?.displayName || authUser.user_metadata?.full_name || authUser.email?.split('@')[0],
+    username: data.username || null,
+    displayName: data.displayName || authUser.user_metadata?.displayName || authUser.user_metadata?.full_name || data.username || authUser.email?.split('@')[0],
     photoURL: data.photoURL || authUser.user_metadata?.avatar_url || null,
     phoneNumber: data.phoneNumber || authUser.phone || null,
     async getIdToken(forceRefresh) {
@@ -104,7 +106,8 @@ export function getAuth() {
 
 export class GoogleAuthProvider {}
 
-export async function signInWithEmailAndPassword(_auth, email, password) {
+export async function signInWithEmailAndPassword(_auth, identifier, password) {
+  const email = loginIdentifierToEmail(identifier)
   const { data, error } = await supabase.auth.signInWithPassword({ email, password })
   if (error) throw error
   const session = await sessionAfterSignIn(data.session)

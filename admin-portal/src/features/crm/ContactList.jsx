@@ -7,12 +7,14 @@ import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { useCRMStore } from './stores/crmStore'
 import { getClientsFromDb } from './services/clientService'
-import { createClientAccount } from '../../shared/services/authService'
+import { createClientAccount, deleteClientAccount } from '../../shared/services/authService'
+import { clientDisplayName, clientLoginLabel, isValidClientUsername, normalizeClientUsername } from '../../../../shared/supabase/clientLogin.js'
 import {
   Kanban,
   List,
   Contact,
   UserPlus,
+  User,
   Mail,
   Phone,
   Building,
@@ -21,7 +23,8 @@ import {
   ExternalLink,
   Shield,
   Search,
-  FileSignature
+  FileSignature,
+  Trash2
 } from 'lucide-react'
 
 export const ContactList = () => {
@@ -33,11 +36,13 @@ export const ContactList = () => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [pendingDelete, setPendingDelete] = useState(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   // Login-only create — GST, address and billing are filled on Manage Profile
   const EMPTY_FORM = {
-    clientName: '',
-    email: '',
+    username: '',
     password: '',
     phone: '',
     signatoryTitle: '',
@@ -55,12 +60,27 @@ export const ContactList = () => {
     fetchClients()
   }, [])
 
+  const confirmDeleteClient = async () => {
+    if (!pendingDelete?.uid) return
+    const target = pendingDelete
+    setClientAccounts((rows) => rows.filter((c) => c.uid !== target.uid))
+    setPendingDelete(null)
+    setDeleteError('')
+    try {
+      await deleteClientAccount(target.uid)
+    } catch (err) {
+      setDeleteError(err.message || 'Could not delete this account.')
+      setPendingDelete(target)
+      await fetchClients()
+    }
+  }
+
   // Extract contacts from leads store
   const leadContacts = leads.map((l) => ({
     id: l.leadId,
     name: l.contactName,
     company: l.companyName,
-    email: l.email || `${l.contactName?.toLowerCase().replace(/\s+/g, '.')}@${l.companyName?.toLowerCase().replace(/\s+/g, '')}.com`,
+    email: l.email || '',
     phone: l.phone || '',
     dealName: l.name,
   }))
@@ -69,8 +89,7 @@ export const ContactList = () => {
     e.preventDefault()
 
     const required = [
-      ['clientName', 'Client Representative Name'],
-      ['email', 'Client Login Email'],
+      ['username', 'Username'],
       ['password', 'Account Password'],
     ]
     const missing = required.filter(([key]) => !form[key].trim()).map(([, label]) => label)
@@ -79,30 +98,46 @@ export const ContactList = () => {
       return
     }
 
+    const displayName = clientDisplayName(form.username)
+    const username = normalizeClientUsername(displayName)
+    if (!isValidClientUsername(username)) {
+      setError('Name must be 3–32 characters. Letters, numbers, dots, hyphens, and underscores are allowed, and spaces are kept in the name.')
+      return
+    }
+
     if (form.password.length < 6) {
       setError('Password must be at least 6 characters.')
       return
     }
 
-    setLoading(true)
+    const draft = { ...form }
+    const pendingId = `pending-${Date.now()}`
+    setClientAccounts((rows) => [{
+      uid: pendingId,
+      displayName,
+      companyName: displayName,
+      username,
+      phoneNumber: draft.phone.trim() || null,
+      status: 'active',
+    }, ...rows])
+    setShowAddModal(false)
+    setForm(EMPTY_FORM)
     setError('')
     setSuccess('')
 
     try {
-      // 1. Create the Auth user plus /users and /clientOnboarding records
-      const displayName = form.clientName.trim()
       const clientUser = await createClientAccount({
-        email: form.email.trim(),
-        password: form.password,
+        username,
+        password: draft.password,
         displayName,
         companyName: displayName,
-        phone: form.phone.trim(),
-        billingEmail: form.email.trim(),
+        phone: draft.phone.trim(),
+        billingEmail: '',
         billingAddress: '',
         taxId: '',
         paymentMethod: 'ach',
-        signerPhone: form.phone.trim(),
-        signatoryTitle: form.signatoryTitle.trim(),
+        signerPhone: draft.phone.trim(),
+        signatoryTitle: draft.signatoryTitle.trim(),
         dealName: '',
       })
 
@@ -110,29 +145,21 @@ export const ContactList = () => {
         name: `${displayName} Account`,
         companyName: displayName,
         contactName: displayName,
-        email: form.email.trim(),
-        phone: form.phone.trim(),
+        email: '',
+        phone: draft.phone.trim(),
         estimatedValue: 25000,
         pipelineStageId: 'stage_won',
         pipelineStage: 'Won',
         ownerName: 'Admin Executive',
         clientId: clientUser.uid
       })
-
-      setSuccess(`Account created for ${form.email.trim()}. Open Manage Profile to add GST, address and billing details.`)
-      setForm(EMPTY_FORM)
-
-      // Refresh list and close modal
-      await fetchClients()
-      setTimeout(() => {
-        setShowAddModal(false)
-        setSuccess('')
-      }, 2200)
+      fetchClients()
     } catch (err) {
       console.error(err)
+      setClientAccounts((rows) => rows.filter((row) => row.uid !== pendingId))
+      setForm(draft)
+      setShowAddModal(true)
       setError(err.message || 'Failed to create client account.')
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -143,7 +170,8 @@ export const ContactList = () => {
       !q ||
       c.displayName?.toLowerCase().includes(q) ||
       c.companyName?.toLowerCase().includes(q) ||
-      c.email?.toLowerCase().includes(q)
+      c.username?.toLowerCase().includes(q) ||
+      clientLoginLabel(c).toLowerCase().includes(q)
     )
   })
 
@@ -271,12 +299,23 @@ export const ContactList = () => {
                         </p>
                       </div>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDeleteError('')
+                        setPendingDelete(c)
+                      }}
+                      className="shrink-0 p-1.5 rounded-lg text-rose-500 hover:bg-rose-500/10 transition-colors"
+                      aria-label={`Delete ${c.displayName || 'client'}`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
 
                   <div className="space-y-1.5 pt-2 border-t border-border/60 text-xs text-fg">
                     <div className="flex items-center gap-2 text-muted">
-                      <Mail className="w-3.5 h-3.5 text-muted" />
-                      <span className="truncate">{c.email}</span>
+                      <User className="w-3.5 h-3.5 text-muted" />
+                      <span className="truncate">{clientLoginLabel(c)}</span>
                     </div>
                     {c.phoneNumber && (
                       <div className="flex items-center gap-2 text-muted">
@@ -322,10 +361,12 @@ export const ContactList = () => {
                 </div>
 
                 <div className="space-y-1.5 pt-2 border-t border-border/60 text-xs text-fg">
-                  <div className="flex items-center gap-2 text-muted">
-                    <Mail className="w-3.5 h-3.5 text-muted" />
-                    <span className="truncate">{c.email}</span>
-                  </div>
+                  {c.email ? (
+                    <div className="flex items-center gap-2 text-muted">
+                      <Mail className="w-3.5 h-3.5 text-muted" />
+                      <span className="truncate">{c.email}</span>
+                    </div>
+                  ) : null}
                   <div className="flex items-center gap-2 text-muted">
                     <Phone className="w-3.5 h-3.5 text-muted" />
                     <span>{c.phone}</span>
@@ -342,6 +383,47 @@ export const ContactList = () => {
         )
       )}
 
+      {pendingDelete && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <Card className="w-full max-w-md p-6 space-y-4 border-border shadow-2xl bg-surface">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="font-bold text-fg text-sm">Delete this client account?</h3>
+                <p className="text-[11px] text-muted mt-1">
+                  {pendingDelete.displayName || 'This user'} ({clientLoginLabel(pendingDelete)}) will be removed and will no longer be able to sign in.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPendingDelete(null)}
+                disabled={deleting}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            {deleteError && (
+              <div className="p-3 text-xs bg-rose-500/10 text-rose-500 rounded-xl border border-rose-500/20">
+                {deleteError}
+              </div>
+            )}
+            <div className="flex gap-3">
+              <Button type="button" variant="secondary" className="w-1/3" onClick={() => setPendingDelete(null)} disabled={deleting}>
+                Cancel
+              </Button>
+              <button
+                type="button"
+                onClick={confirmDeleteClient}
+                disabled={deleting}
+                className="w-2/3 px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 text-white hover:bg-rose-500 disabled:opacity-60"
+              >
+                {deleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </Card>
+        </div>
+      )}
+
       {/* Add Client Account Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
@@ -350,7 +432,7 @@ export const ContactList = () => {
               <div>
                 <h3 className="font-bold text-fg text-sm">Register Client Portal User</h3>
                 <p className="text-[11px] text-muted mt-0.5">
-                  Create login access now. Add GST, address and billing anytime on Manage Profile.
+                  Create a username and password. Add GST, address and billing anytime on Manage Profile.
                 </p>
               </div>
               <button
@@ -381,27 +463,12 @@ export const ContactList = () => {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <Input
-                    label="Client Representative Name *"
-                    placeholder="e.g. Jane Smith"
-                    value={form.clientName}
-                    onChange={setField('clientName')}
-                    required
-                  />
-                  <Input
-                    label="Signatory Designation"
-                    placeholder="e.g. Director of Operations"
-                    value={form.signatoryTitle}
-                    onChange={setField('signatoryTitle')}
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Input
-                    label="Client Login Email *"
-                    type="email"
-                    placeholder="jane@acme.com"
-                    value={form.email}
-                    onChange={setField('email')}
+                    label="Client Name *"
+                    type="text"
+                    placeholder="e.g. Vivek Anna"
+                    autoComplete="off"
+                    value={form.username}
+                    onChange={setField('username')}
                     required
                   />
                   <Input
@@ -411,6 +478,13 @@ export const ContactList = () => {
                     onChange={setField('phone')}
                   />
                 </div>
+
+                <Input
+                  label="Signatory Designation"
+                  placeholder="e.g. Director of Operations"
+                  value={form.signatoryTitle}
+                  onChange={setField('signatoryTitle')}
+                />
 
                 <Input
                     label="Set Account Password *"

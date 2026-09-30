@@ -10,6 +10,7 @@ import {
 import { auth, db, supabase } from './firebaseService'
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
 import { ONBOARDING_STATUS, buildDefaultAgreementTexts } from './contractTemplates'
+import { normalizeClientUsername, usernameToAuthEmail, isValidClientUsername } from '../../../../shared/supabase/clientLogin.js'
 
 const googleProvider = new GoogleAuthProvider()
 
@@ -151,8 +152,21 @@ export const getUserDoc = async (uid) => {
 async function invokeCreateUser(body) {
   if (!supabase) throw new Error('Supabase is not configured')
   const { data, error } = await supabase.functions.invoke('create-user', { body })
-  if (error) throw error
-  return data
+  if (!error) return data
+
+  let detail = error.message || 'Failed to create the account.'
+  try {
+    if (error.context && typeof error.context.json === 'function') {
+      const payload = await error.context.json()
+      detail = payload?.error || payload?.message || detail
+    }
+  } catch {
+    /* the gateway response had no JSON body */
+  }
+  if (detail === 'Failed to send a request to the Edge Function' || detail === 'Requested function was not found') {
+    detail = 'The create-user Edge Function is not deployed on this Supabase project.'
+  }
+  throw new Error(detail)
 }
 
 /**
@@ -161,6 +175,7 @@ async function invokeCreateUser(body) {
  */
 const buildClientRecords = (uid, email, payload) => {
   const {
+    username,
     displayName,
     companyName,
     phone,
@@ -174,11 +189,13 @@ const buildClientRecords = (uid, email, payload) => {
   } = payload
 
   const now = new Date().toISOString()
+  const loginName = username || email.split('@')[0]
 
   const clientData = {
     uid,
+    username: loginName,
     email,
-    displayName: displayName || email.split('@')[0],
+    displayName: displayName || loginName,
     companyName: companyName || '',
     phoneNumber: phone || null,
     role: 'client',
@@ -191,11 +208,12 @@ const buildClientRecords = (uid, email, payload) => {
 
   const onboardingData = {
     uid,
+    username: loginName,
     email,
     displayName: clientData.displayName,
     companyName: companyName || '',
     billingInfo: {
-      billingEmail: billingEmail || email,
+      billingEmail: billingEmail || '',
       billingAddress: billingAddress || '',
       taxId: taxId || '',
       paymentMethod: paymentMethod || 'ach',
@@ -218,20 +236,27 @@ const buildClientRecords = (uid, email, payload) => {
  * Accepts the full onboarding payload captured by the admin at creation time.
  */
 export const createClientAccount = async (payload = {}) => {
-  const { email, password } = payload
+  const username = normalizeClientUsername(payload.username)
+  const { password } = payload
+  if (!isValidClientUsername(username)) {
+    throw new Error('Username must be 3–32 characters and use only letters, numbers, dots, underscores, or hyphens.')
+  }
+  const email = usernameToAuthEmail(username)
+  const recordPayload = { ...payload, username }
 
   if (import.meta.env.VITE_FIREBASE_API_KEY === 'mock_api_key_dev') {
     // Return dummy data in local mock mode
     const mockUid = `client_${Date.now()}`
-    const { clientData, onboardingData } = buildClientRecords(mockUid, email, payload)
+    const { clientData, onboardingData } = buildClientRecords(mockUid, email, recordPayload)
     await setDoc(doc(db, 'users', mockUid), clientData)
     await setDoc(doc(db, 'clientOnboarding', mockUid), onboardingData)
     return clientData
   }
 
-  const { clientData, onboardingData } = buildClientRecords('pending', email, payload)
+  const { clientData, onboardingData } = buildClientRecords('pending', email, recordPayload)
   return invokeCreateUser({
     type: 'client',
+    username,
     email,
     password,
     displayName: payload.displayName,
@@ -239,6 +264,28 @@ export const createClientAccount = async (payload = {}) => {
     phone: payload.phone,
     onboardingStatus: clientData.onboardingStatus,
     onboardingData,
+  })
+}
+
+/** Set a client portal password without sending email. Admin only. */
+export const setClientPassword = async (uid, password) => {
+  if (!uid) throw new Error('Client account is missing.')
+  if (!password || password.length < 6) throw new Error('Password must be at least 6 characters.')
+  return invokeCreateUser({
+    action: 'set-password',
+    type: 'client',
+    uid,
+    password,
+  })
+}
+
+/** Remove a client portal login, profile, and onboarding record. Admin only. */
+export const deleteClientAccount = async (uid) => {
+  if (!uid) throw new Error('Client account is missing.')
+  return invokeCreateUser({
+    action: 'delete-user',
+    type: 'client',
+    uid,
   })
 }
 

@@ -1,13 +1,13 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Mail, Lock, ArrowRight, AlertCircle, Sun, Moon } from 'lucide-react'
+import { User, Lock, ArrowRight, AlertCircle, Sun, Moon } from 'lucide-react'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { Card } from '../../components/ui/Card'
 import { useUserStore } from '../../stores/userStore'
 import { useUIStore } from '../../stores/uiStore'
 import haloLogo from '../../assets/halologo.png'
-import { loginWithEmail, signupWithEmail, fetchCustomClaims } from '../../shared/services/authService'
+import { loginWithEmail, fetchCustomClaims } from '../../shared/services/authService'
 import {
   getClientOnboardingDoc,
   normalizeOnboardingStatus,
@@ -19,15 +19,15 @@ export const ClientLoginPage = () => {
   const { setUser } = useUserStore()
   const { theme, toggleTheme } = useUIStore()
 
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
   const handleRealLogin = async (e) => {
     e.preventDefault()
-    if (!email || !password) {
-      setError('Please enter work email and password.')
+    if (!username.trim() || !password) {
+      setError('Please enter your username and password.')
       return
     }
 
@@ -40,7 +40,7 @@ export const ClientLoginPage = () => {
     setError('')
 
     try {
-      const firebaseUser = await loginWithEmail(email, password)
+      const firebaseUser = await loginWithEmail(username.trim(), password)
       const claims = await fetchCustomClaims(firebaseUser)
       const onboardingDoc = await getClientOnboardingDoc(firebaseUser.uid)
 
@@ -75,12 +75,16 @@ export const ClientLoginPage = () => {
       }
     } catch (err) {
       console.error('Client Auth error:', err)
-      if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        setError('Incorrect email or password. Please try again.')
-      } else if (err.code === 'auth/user-not-found') {
-        setError('No client account found with this email.')
+      const message = String(err.message || '')
+      if (
+        err.code === 'auth/wrong-password' ||
+        err.code === 'auth/invalid-credential' ||
+        err.code === 'auth/user-not-found' ||
+        /invalid login credentials/i.test(message)
+      ) {
+        setError('Incorrect username or password. Please try again.')
       } else {
-        setError(err.message || 'Authentication failed.')
+        setError(message || 'Authentication failed.')
       }
     } finally {
       setLoading(false)
@@ -125,12 +129,13 @@ export const ClientLoginPage = () => {
 
         <form onSubmit={handleRealLogin} className="space-y-4">
           <Input
-            label="Client Account Email"
-            type="email"
-            placeholder="client@company.com"
-            icon={Mail}
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            label="Username"
+            type="text"
+            placeholder="e.g. jane.smith"
+            autoComplete="username"
+            icon={User}
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
             required
           />
 

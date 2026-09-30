@@ -235,6 +235,16 @@ export const createClientAccount = async (payload = {}) => {
   return created
 }
 
+/** Remove a client portal login, profile, and onboarding record. Admin only. */
+export const deleteClientAccount = async (uid) => {
+  if (!uid) throw new Error('Client account is missing.')
+  return invokeCreateUser({
+    action: 'delete-user',
+    type: 'client',
+    uid,
+  })
+}
+
 /**
  * Programmatically create an Employee Auth user & Firestore profile without logging out the active admin.
  */

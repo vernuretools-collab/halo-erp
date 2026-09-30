@@ -1,17 +1,18 @@
 import React, { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { Layers, Mail, Lock, ArrowRight, AlertCircle } from 'lucide-react'
+import { Layers, User, Lock, ArrowRight, AlertCircle } from 'lucide-react'
 import { Button } from '../../shared/components/ui/Button'
 import { Input } from '../../shared/components/ui/Input'
 import { Card } from '../../shared/components/ui/Card'
 import { loginWithEmail, fetchCustomClaims } from '../../shared/services/authService'
+import { loginIdentifierToEmail } from '../../../shared/supabase/clientLogin.js'
 import { useUserStore } from '../../shared/stores/userStore'
 
 export const ClientLoginPage = () => {
   const navigate = useNavigate()
   const { setUser } = useUserStore()
 
-  const [email, setEmail] = useState('client@acme.com')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -21,7 +22,12 @@ export const ClientLoginPage = () => {
     setError('')
     setLoading(true)
 
-    const loginEmail = email || 'client@acme.com'
+    const loginEmail = loginIdentifierToEmail(username)
+    if (!loginEmail) {
+      setError('Please enter a username and password.')
+      setLoading(false)
+      return
+    }
 
     if (import.meta.env.VITE_FIREBASE_API_KEY === 'mock_api_key_dev') {
       setUser(
@@ -89,12 +95,13 @@ export const ClientLoginPage = () => {
 
         <form onSubmit={handleLogin} className="space-y-4">
           <Input
-            label="Client Account Email"
-            type="email"
-            placeholder="client@acme.com"
-            icon={Mail}
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            label="Username"
+            type="text"
+            placeholder="e.g. jane.smith"
+            icon={User}
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            autoComplete="username"
             required
           />
 

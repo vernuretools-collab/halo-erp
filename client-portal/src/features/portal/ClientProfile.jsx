@@ -8,10 +8,10 @@ import { useUserStore } from '../../stores/userStore'
 import { db, auth } from '../../shared/services/firebaseService'
 import { updateDoc, doc, getDoc } from 'firebase/firestore'
 import { updatePassword, sendPasswordResetEmail } from 'firebase/auth'
+import { clientLoginLabel, isSyntheticClientEmail } from '../../../../shared/supabase/clientLogin.js'
 import {
   User,
   Building,
-  Mail,
   Phone,
   Lock,
   Save,
@@ -27,6 +27,7 @@ export const ClientProfile = () => {
   const [companyName, setCompanyName] = useState('')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
 
   // Password change
   const [newPassword, setNewPassword] = useState('')
@@ -41,6 +42,7 @@ export const ClientProfile = () => {
     const loadProfile = async () => {
       if (!user) return
       setEmail(user.email || '')
+      setUsername(clientLoginLabel({ username: user.username, email: user.email }))
 
       // Load Firestore user doc if not in store
       let currentDoc = userDoc
@@ -60,6 +62,7 @@ export const ClientProfile = () => {
         setDisplayName(currentDoc.displayName || '')
         setCompanyName(currentDoc.companyName || currentDoc.organization || '')
         setPhoneNumber(currentDoc.phoneNumber || '')
+        setUsername(clientLoginLabel({ ...currentDoc, email: currentDoc.email || user.email }))
       } else {
         setDisplayName(user.displayName || '')
         setCompanyName(user.companyName || user.organization || '')
@@ -199,8 +202,8 @@ export const ClientProfile = () => {
 
             <div className="pt-4 border-t border-slate-100 dark:border-emerald-950/60 text-left text-xs text-muted space-y-2">
               <div className="flex items-center gap-2">
-                <Mail className="w-4 h-4 text-slate-400" />
-                <span className="truncate">{email}</span>
+                <User className="w-4 h-4 text-slate-400" />
+                <span className="truncate">{username}</span>
               </div>
               {phoneNumber && (
                 <div className="flex items-center gap-2">
@@ -211,20 +214,22 @@ export const ClientProfile = () => {
             </div>
           </Card>
 
-          <Card className="p-6 border-slate-200 dark:border-emerald-900/40 space-y-3">
-            <h4 className="font-bold text-xs uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <Key className="w-4 h-4" /> Alternative Reset
-            </h4>
-            <p className="text-[11px] text-muted leading-relaxed">
-              If you prefer to change your password using a verified email link, click the button below.
-            </p>
-            <button
-              onClick={handleSendResetEmail}
-              className="w-full text-center text-xs text-emerald-600 dark:text-emerald-400 font-bold hover:underline cursor-pointer"
-            >
-              Email Me Password Reset Link
-            </button>
-          </Card>
+          {!isSyntheticClientEmail(email) && email.includes('@') && (
+            <Card className="p-6 border-slate-200 dark:border-emerald-900/40 space-y-3">
+              <h4 className="font-bold text-xs uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                <Key className="w-4 h-4" /> Alternative Reset
+              </h4>
+              <p className="text-[11px] text-muted leading-relaxed">
+                If you prefer to change your password using a verified email link, click the button below.
+              </p>
+              <button
+                onClick={handleSendResetEmail}
+                className="w-full text-center text-xs text-emerald-600 dark:text-emerald-400 font-bold hover:underline cursor-pointer"
+              >
+                Email Me Password Reset Link
+              </button>
+            </Card>
+          )}
         </div>
 
         {/* Right side: Forms */}
@@ -261,10 +266,10 @@ export const ClientProfile = () => {
                   icon={Phone}
                 />
                 <div>
-                  <label className="block text-xs font-medium text-muted mb-1.5">Login Email (Read-Only)</label>
+                  <label className="block text-xs font-medium text-muted mb-1.5">Username (Read-Only)</label>
                   <div className="flex items-center gap-2 bg-chrome border border-border text-muted text-xs rounded-xl py-2.5 px-3.5">
-                    <Mail className="w-4 h-4" />
-                    <span>{email}</span>
+                    <User className="w-4 h-4" />
+                    <span>{username}</span>
                   </div>
                 </div>
               </div>
