@@ -104,7 +104,7 @@ export const ClientDocumentsPage = ({ embedded = false, lockedProjectId = null }
       try {
         const q = query(collection(db, 'projects'), where('clientId', '==', selectedClientId))
         const snap = await getDocs(q)
-        setClientProjects(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+        setClientProjects(snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((p) => !p.deletedAt))
       } catch (err) {
         console.warn('Could not fetch client projects:', err)
       }

@@ -13,9 +13,11 @@ import {
   deleteEmployeeFromDb,
   createDepartment,
   updateEmployeeInDb,
-  listMonthlyReports,
 } from './services/teamService'
 import { currentMonthStr } from './services/monthlyReportEngine'
+import { isAttendancePresent } from './services/attendanceStatsUtils'
+import { db } from '../../shared/services/firebaseService'
+import { collection, query, where, onSnapshot } from 'firebase/firestore'
 import { createEmployeeAccount, createAdminAccount } from '../../shared/services/authService'
 import { EmployeeAvatar } from '../../../../shared/ui/EmployeeAvatar.jsx'
 import { TeamSubNav } from './components/TeamSubNav'
@@ -36,8 +38,16 @@ import {
   CalendarDays,
   CheckCircle2,
   AlertCircle,
-  Clock,
+  UserX,
 } from 'lucide-react'
+
+function todayDateStr() {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
 
 export const EmployeeList = () => {
   const { employees, departments, setEmployees, setDepartments, addEmployee, deleteEmployee, updateEmployee } = useTeamStore()
@@ -72,7 +82,7 @@ export const EmployeeList = () => {
   const [skillInput, setSkillInput] = useState('')
   const [joiningDate, setJoiningDate] = useState('')
   const [bio, setBio] = useState('')
-  const [monthReportMap, setMonthReportMap] = useState({})
+  const [todayPresence, setTodayPresence] = useState({})
   const thisMonth = currentMonthStr()
 
   const createdRoles = customRoles.filter((r) => !r.isSystem)
@@ -84,16 +94,6 @@ export const EmployeeList = () => {
         const [emps, depts] = await Promise.all([getEmployees(), getDepartments()])
         if (emps) setEmployees(emps)
         if (depts) setDepartments(depts)
-        try {
-          const reports = await listMonthlyReports({ month: thisMonth })
-          const map = {}
-          ;(reports || []).forEach((r) => {
-            if (r.uid) map[r.uid] = r
-          })
-          setMonthReportMap(map)
-        } catch (reportErr) {
-          console.warn('Could not load monthly reports:', reportErr)
-        }
       } catch (err) {
         console.error('Error loading employee directory:', err)
         setListError(err?.message || 'Could not load team members. Sign in again and retry.')
@@ -101,7 +101,30 @@ export const EmployeeList = () => {
       }
     }
     fetchRealEmployees()
-  }, [setEmployees, setDepartments, thisMonth])
+  }, [setEmployees, setDepartments])
+
+  useEffect(() => {
+    const today = todayDateStr()
+    const logsQuery = query(collection(db, 'attendanceLogs'), where('date', '==', today))
+    const unsub = onSnapshot(
+      logsQuery,
+      (snap) => {
+        const map = {}
+        snap.docs.forEach((d) => {
+          const log = { id: d.id, ...d.data() }
+          const present = isAttendancePresent(log)
+          if (log.uid) map[String(log.uid)] = present
+          const idParts = String(d.id).split('_')
+          if (idParts.length > 1) map[idParts.slice(1).join('_')] = present
+        })
+        setTodayPresence(map)
+      },
+      (err) => {
+        console.warn('Could not load today attendance:', err)
+      }
+    )
+    return () => unsub()
+  }, [])
 
   const uniqueDepartments = Array.from(
     new Set(employees.map((emp) => emp.departmentName || emp.department).filter(Boolean))
@@ -394,26 +417,38 @@ export const EmployeeList = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {filtered.map((emp) => {
           const empUid = emp.uid || emp.employeeId || emp.id
-          const monthSnap = monthReportMap[empUid]
-          const att = monthSnap?.attendance
-          const leaveDays = monthSnap?.leave?.approvedDays
+          const identityIds = [empUid, ...(Array.isArray(emp.identityIds) ? emp.identityIds : [])]
+            .filter(Boolean)
+            .map(String)
+          const presentToday = identityIds.some((id) => todayPresence[id] === true)
 
           return (
             <Card key={empUid} hover className="space-y-3.5 border-border relative group">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-3 min-w-0">
                   <EmployeeAvatar
                     src={emp.photoURL || emp.avatar}
                     name={emp.displayName || emp.email}
                     className="w-10 h-10 rounded-xl bg-gradient-to-tr from-accent to-accent-hover text-white font-bold text-sm shadow-md shadow-accent/20"
                   />
-                  <div>
-                    <h4 className="font-bold text-fg text-sm group-hover:text-accent dark:group-hover:text-accent transition-colors">
+                  <div className="min-w-0">
+                    <h4 className="font-bold text-fg text-sm group-hover:text-accent dark:group-hover:text-accent transition-colors truncate">
                       {emp.displayName}
                     </h4>
-                    <p className="text-xs text-muted">{emp.roleName}</p>
+                    <p className="text-xs text-muted truncate">{emp.roleName}</p>
                   </div>
                 </div>
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border shrink-0 ${
+                    presentToday
+                      ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200/60 dark:border-emerald-500/20 text-emerald-700 dark:text-emerald-400'
+                      : 'bg-rose-50 dark:bg-rose-500/10 border-rose-200/60 dark:border-rose-500/20 text-rose-700 dark:text-rose-400'
+                  }`}
+                  title={presentToday ? 'Present today' : 'Absent today'}
+                >
+                  {presentToday ? <CheckCircle2 className="w-3 h-3" /> : <UserX className="w-3 h-3" />}
+                  {presentToday ? 'Present' : 'Absent'}
+                </span>
               </div>
 
               <div className="space-y-1 text-xs text-muted pt-1">
@@ -425,37 +460,6 @@ export const EmployeeList = () => {
                   <Mail className="w-3.5 h-3.5 text-muted" />
                   <span className="truncate text-muted">{emp.email}</span>
                 </div>
-              </div>
-
-              {/* Current month quick stats */}
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                <span
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200/60 dark:border-emerald-500/20 text-[10px] font-medium text-emerald-700 dark:text-emerald-400"
-                  title={`${thisMonth} present days`}
-                >
-                  <CheckCircle2 className="w-3 h-3" />
-                  Present {att?.presentDays ?? '—'}
-                </span>
-                <span
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-500/10 border border-amber-200/60 dark:border-amber-500/20 text-[10px] font-medium text-amber-700 dark:text-amber-400"
-                  title={`${thisMonth} late days`}
-                >
-                  <AlertCircle className="w-3 h-3" />
-                  Late {att?.lateDays ?? '—'}
-                </span>
-                <span
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-accent-soft border border-accent/30/20 text-[10px] font-medium text-accent"
-                  title={`${thisMonth} leave days`}
-                >
-                  Leave {leaveDays ?? '—'}
-                </span>
-                <span
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-canvas border border-border text-[10px] font-medium text-fg"
-                  title={`${thisMonth} avg hours`}
-                >
-                  <Clock className="w-3 h-3" />
-                  {att?.avgHours || '—'}
-                </span>
               </div>
 
               {/* Skills Badges */}

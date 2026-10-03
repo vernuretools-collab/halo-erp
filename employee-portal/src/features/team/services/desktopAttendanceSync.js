@@ -10,6 +10,9 @@ export const ATTENDANCE_SYNC_KEYS = [
   'isOnBreak',
   'breakStartTime',
   'accumulatedBreakSeconds',
+  'isOnLunch',
+  'lunchStartTime',
+  'accumulatedLunchSeconds',
   'accumulatedWorkSeconds',
   'todayShiftLogs',
   'isInExtraTime',
@@ -33,6 +36,8 @@ export function inferAttendanceAction(prev = {}, next = {}) {
   if (prev.clockedIn && !next.clockedIn) return 'clockOut'
   if (!prev.isOnBreak && next.isOnBreak) return 'break'
   if (prev.isOnBreak && !next.isOnBreak) return 'resume'
+  if (!prev.isOnLunch && next.isOnLunch) return 'lunch'
+  if (prev.isOnLunch && !next.isOnLunch) return 'lunchEnd'
   return null
 }
 
@@ -44,6 +49,7 @@ export function notifyDesktopAttendance(state, action = null) {
       signedIn: true,
       clockedIn: Boolean(state?.clockedIn),
       isOnBreak: Boolean(state?.isOnBreak),
+      isOnLunch: Boolean(state?.isOnLunch),
       action,
     })
   } catch {
@@ -51,7 +57,7 @@ export function notifyDesktopAttendance(state, action = null) {
   }
 }
 
-export function notifyDesktopSession({ signedIn, clockedIn = false, isOnBreak = false } = {}) {
+export function notifyDesktopSession({ signedIn, clockedIn = false, isOnBreak = false, isOnLunch = false } = {}) {
   try {
     const desktop = typeof window !== 'undefined' ? window.desktop : null
     if (!desktop?.attendanceChanged) return
@@ -59,6 +65,7 @@ export function notifyDesktopSession({ signedIn, clockedIn = false, isOnBreak = 
       signedIn: Boolean(signedIn),
       clockedIn: Boolean(clockedIn),
       isOnBreak: Boolean(isOnBreak),
+      isOnLunch: Boolean(isOnLunch),
     })
   } catch {
     /* not running inside Electron */

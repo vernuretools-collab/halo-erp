@@ -29,6 +29,7 @@ import {
   Shield,
   Sliders,
   Bot,
+  Trash2,
 } from 'lucide-react'
 import haloLogo from '../../assets/halologo.png'
 import { useUIStore } from '../../stores/uiStore'
@@ -115,6 +116,7 @@ const ADMIN_GROUPS = [
       { name: 'Project List', path: '/projects/list', icon: FolderKanban },
       { name: 'Task Board', path: '/projects/tasks', icon: Briefcase },
       { name: 'Time Tracker', path: '/projects/time', icon: Clock },
+      { name: 'Trash', path: '/projects/trash', icon: Trash2 },
     ],
   },
   {

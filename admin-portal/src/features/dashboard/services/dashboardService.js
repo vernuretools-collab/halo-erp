@@ -189,6 +189,7 @@ export const computeProjectStats = (projectSnap, dateFilter = {}) => {
 
   asSnap(projectSnap).docs.forEach((d) => {
     const p = d.data()
+    if (p.deletedAt) return
     const createdDate = parseFirestoreDate(p.createdAt || p.startDate)
     if (!isWithinDateRange(createdDate, startDate, endDate)) return
 
@@ -222,6 +223,7 @@ export const computeTaskStats = (taskSnap, dateFilter = {}) => {
 
   asSnap(taskSnap).docs.forEach((d) => {
     const t = d.data()
+    if (t.deletedAt) return
     const createdDate = parseFirestoreDate(t.createdAt || t.updatedAt)
     if (!isWithinDateRange(createdDate, startDate, endDate)) return
 

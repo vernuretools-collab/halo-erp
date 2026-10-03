@@ -82,12 +82,12 @@ export const AppShell = () => {
       <DesktopAttendanceBridge />
       <EmployeeSidebar />
       <div
-        className={`flex-1 flex flex-col transition-all duration-300 ${
+        className={`min-w-0 flex-1 flex flex-col transition-all duration-300 ${
           sidebarOpen ? 'pl-64' : 'pl-20'
         }`}
       >
         <EmployeeTopBar />
-        <main className="flex-1 p-6 overflow-y-auto">
+        <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-6">
           <Suspense fallback={<p className="text-sm text-muted">Loading…</p>}>
             <Outlet />
           </Suspense>

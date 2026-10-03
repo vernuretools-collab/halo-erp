@@ -21,11 +21,14 @@ export function useAttendanceClockActions({ listenForDesktopEvents = false } = {
   const setLeaveRequests = useTeamStore((s) => s.setLeaveRequests)
   const clockedIn = useTeamStore((s) => s.clockedIn)
   const isOnBreak = useTeamStore((s) => s.isOnBreak)
+  const isOnLunch = useTeamStore((s) => s.isOnLunch)
   const accumulatedWorkSeconds = useTeamStore((s) => s.accumulatedWorkSeconds)
   const clockOutTime = useTeamStore((s) => s.clockOutTime)
   const loadUserAttendance = useTeamStore((s) => s.loadUserAttendance)
   const toggleClockIn = useTeamStore((s) => s.toggleClockIn)
   const toggleBreak = useTeamStore((s) => s.toggleBreak)
+  const startLunch = useTeamStore((s) => s.startLunch)
+  const finishLunch = useTeamStore((s) => s.finishLunch)
 
   const [clockBusy, setClockBusy] = useState(false)
   const [clockError, setClockError] = useState('')
@@ -130,6 +133,18 @@ export function useAttendanceClockActions({ listenForDesktopEvents = false } = {
     toggleBreak(userMeta)
   }, [toggleBreak, userMeta])
 
+  const handleLunchStart = useCallback(() => {
+    const state = useTeamStore.getState()
+    if (!state.clockedIn || state.isOnLunch) return
+    startLunch(userMeta)
+  }, [startLunch, userMeta])
+
+  const handleLunchEnd = useCallback(() => {
+    const state = useTeamStore.getState()
+    if (!state.isOnLunch) return
+    finishLunch()
+  }, [finishLunch])
+
   const handleDesktopAction = useCallback(
     async (action) => {
       const state = useTeamStore.getState()
@@ -152,7 +167,8 @@ export function useAttendanceClockActions({ listenForDesktopEvents = false } = {
   }, [handleDesktopAction, listenForDesktopEvents])
 
   let statusText = 'Absent'
-  if (clockedIn && isOnBreak) statusText = 'On Break'
+  if (clockedIn && isOnLunch) statusText = 'On Lunch'
+  else if (clockedIn && isOnBreak) statusText = 'On Break'
   else if (clockedIn) statusText = 'Present'
   else if (accumulatedWorkSeconds > 0 || clockOutTime) statusText = 'Off Duty'
 
@@ -165,6 +181,7 @@ export function useAttendanceClockActions({ listenForDesktopEvents = false } = {
     userMeta,
     clockedIn,
     isOnBreak,
+    isOnLunch,
     statusText,
     clockBusy,
     clockError,
@@ -174,6 +191,8 @@ export function useAttendanceClockActions({ listenForDesktopEvents = false } = {
     clockOut,
     handleClockToggle,
     handleBreakToggle,
+    handleLunchStart,
+    handleLunchEnd,
     handleDesktopAction,
   }
 }

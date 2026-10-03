@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useWellnessStore, WELLNESS_REMINDERS } from './stores/wellnessStore'
+import { useTeamStore } from '../team/stores/teamStore'
 import { Card } from '../../components/ui/Card'
 import { Badge } from '../../components/ui/Badge'
 import {
@@ -48,6 +49,7 @@ export const WellnessWidget = () => {
     getNextReminder,
     reminderSettings,
   } = useWellnessStore()
+  const clockedIn = useTeamStore((s) => s.clockedIn)
 
   const [countdown, setCountdown] = useState('')
   const [nextReminder, setNextReminder] = useState(null)
@@ -216,7 +218,7 @@ export const WellnessWidget = () => {
                   {nextReminder.name}
                 </span>
                 <span className="text-xs font-mono text-accent font-bold">
-                  {countdown}
+                  {clockedIn ? countdown : 'After clock-in'}
                 </span>
               </div>
             ) : (

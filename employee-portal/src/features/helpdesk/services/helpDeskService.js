@@ -76,7 +76,9 @@ export const subscribeEmployeeHelpDesk = (user, userDoc, callback) => {
     const unsubProjects = onSnapshot(
       collection(db, 'projects'),
       (snapshot) => {
-        projects = snapshot.docs.map((d) => ({ id: d.id, projectId: d.id, ...d.data() }))
+        projects = snapshot.docs
+          .map((d) => ({ id: d.id, projectId: d.id, ...d.data() }))
+          .filter((p) => !p.deletedAt)
         emit()
       },
       (error) => {

@@ -1,12 +1,15 @@
 import { useEffect, useRef } from 'react'
 import { useWellnessStore, WELLNESS_REMINDERS } from '../stores/wellnessStore'
 import { useNotificationStore } from '../../notifications/stores/notificationStore'
+import { useTeamStore } from '../../team/stores/teamStore'
 import { showForegroundBrowserNotification, armBrowserNotifications } from '../../../shared/services/fcmService'
 
 /**
  * Custom hook that manages the wellness notification engine.
  * Runs interval timers for each enabled reminder, checks work hours and snooze state,
  * and sends native browser notifications (or falls back to in-app notifications).
+ * Reminders stay quiet until the employee is clocked in, then wait one full interval
+ * from that clock-in so overdue reminders do not all fire at once.
  *
  * Mount this in AppShell so it runs app-wide while the user is authenticated.
  */
@@ -48,10 +51,17 @@ export const useWellnessNotifications = () => {
     const checkReminders = () => {
       const state = useWellnessStore.getState()
 
-      // Guard: work hours, snooze, global toggle
+      // Guard: work hours, snooze, global toggle, and an open clock-in
       if (!state.globalEnabled) return
       if (!state.isWithinWorkHours()) return
       if (state.isSnoozed()) return
+
+      const attendance = useTeamStore.getState()
+      if (!attendance.clockedIn) return
+
+      const shiftStart = Number(attendance.clockInTimestamp)
+      // Wait until this shift's clock-in time is known so we don't stamp lastFired on every tick.
+      if (!Number.isFinite(shiftStart) || shiftStart <= 0) return
 
       const now = Date.now()
 
@@ -61,16 +71,14 @@ export const useWellnessNotifications = () => {
 
         const intervalMs = Math.max((settings.interval || reminder.defaultInterval) * 60 * 1000, 1000)
         const lastFiredIso = state.lastFiredAt[reminder.id]
+        const lastFiredTime = lastFiredIso ? new Date(lastFiredIso).getTime() : NaN
 
-        if (!lastFiredIso) {
-          // First time initialized: set initial timestamp to now so it fires after 1 interval
+        // First run, or last fire belongs to a previous shift: start the interval now.
+        if (!Number.isFinite(lastFiredTime) || lastFiredTime < shiftStart) {
           state.setLastFired(reminder.id)
           return
         }
 
-        const lastFiredTime = new Date(lastFiredIso).getTime()
-
-        // Check if interval has elapsed since last fired time
         if (now - lastFiredTime >= intervalMs) {
           // Record new fired timestamp BEFORE sending to prevent double firing
           state.setLastFired(reminder.id)

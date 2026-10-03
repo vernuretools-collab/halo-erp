@@ -1,14 +1,16 @@
 import React, { useEffect, useState } from 'react'
 import { Minus, LogIn, LogOut, Coffee, Play, Loader2, AlertCircle, Sun, Moon } from 'lucide-react'
 import { Button } from '../../components/ui/Button'
+import { Modal } from '../../components/ui/Modal'
 import { useTeamStore } from '../team/stores/teamStore'
 import { useUserStore } from '../../stores/userStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useAttendanceClockActions } from '../team/hooks/useAttendanceClockActions'
 import {
-  computeLiveWorkedSeconds,
-  computeLiveBreakSeconds,
   formatSecondsToHms,
+  timeStrToMinutes,
+  timestampFromClockInTime,
+  toEpochMs,
 } from '../team/services/attendanceStatsUtils'
 import haloLogo from '../../assets/halologo.png'
 import { EmployeeAvatar } from '../../../../shared/ui/EmployeeAvatar.jsx'
@@ -22,11 +24,34 @@ function formatProductive(totalSec) {
   return `${String(hrs).padStart(2, '0')}h ${String(mins).padStart(2, '0')}m`
 }
 
-function formatWallClock(date) {
-  const hh = String(date.getHours()).padStart(2, '0')
-  const mm = String(date.getMinutes()).padStart(2, '0')
-  const ss = String(date.getSeconds()).padStart(2, '0')
-  return `${hh}:${mm}:${ss}`
+function openSpanSeconds(active, start, nowMs) {
+  const startMs = toEpochMs(start)
+  if (!active || !startMs) return 0
+  return Math.max(0, Math.floor((nowMs - startMs) / 1000))
+}
+
+/** Overall is office time from clock-in and includes break and lunch. */
+function popupSessionSeconds(snapshot, nowMs = Date.now()) {
+  const stillIn =
+    Boolean(snapshot.clockedIn) || !snapshot.clockOutTime || snapshot.clockOutTime === 'In office'
+  const inMins = timeStrToMinutes(snapshot.clockInTime)
+  const startMs =
+    inMins !== null ? timestampFromClockInTime(snapshot.clockInTime) : toEpochMs(snapshot.clockInTimestamp)
+  if (startMs == null) return { overall: 0, productive: 0, break: 0 }
+
+  let endMs = nowMs
+  if (!stillIn) {
+    const outMins = timeStrToMinutes(snapshot.clockOutTime)
+    endMs = outMins !== null ? timestampFromClockInTime(snapshot.clockOutTime) : nowMs
+  }
+  const overall = Math.max(0, Math.floor((endMs - startMs) / 1000))
+  const away =
+    (Number(snapshot.accumulatedBreakSeconds) || 0) +
+    openSpanSeconds(snapshot.isOnBreak, snapshot.breakStartTime, endMs) +
+    (Number(snapshot.accumulatedLunchSeconds) || 0) +
+    openSpanSeconds(snapshot.isOnLunch, snapshot.lunchStartTime, endMs)
+  const breakSec = Math.min(overall, Math.max(0, away))
+  return { overall, productive: Math.max(0, overall - breakSec), break: breakSec }
 }
 
 function initialsFromName(name, fallback = 'E') {
@@ -63,11 +88,14 @@ export const MyTimingCard = ({
   const clockInTimestamp = useTeamStore((s) => s.clockInTimestamp)
   const breakStartTime = useTeamStore((s) => s.breakStartTime)
   const accumulatedBreakSeconds = useTeamStore((s) => s.accumulatedBreakSeconds)
-  const accumulatedWorkSeconds = useTeamStore((s) => s.accumulatedWorkSeconds)
+  const isOnLunch = useTeamStore((s) => s.isOnLunch)
+  const lunchStartTime = useTeamStore((s) => s.lunchStartTime)
+  const accumulatedLunchSeconds = useTeamStore((s) => s.accumulatedLunchSeconds)
+  const [confirmBreak, setConfirmBreak] = useState(false)
 
   const [workedSec, setWorkedSec] = useState(0)
+  const [overallSec, setOverallSec] = useState(0)
   const [breakSec, setBreakSec] = useState(0)
-  const [now, setNow] = useState(() => new Date())
 
   useEffect(() => {
     const tick = () => {
@@ -77,13 +105,16 @@ export const MyTimingCard = ({
         clockedIn,
         clockInTimestamp,
         accumulatedBreakSeconds,
-        accumulatedWorkSeconds,
         isOnBreak,
         breakStartTime,
+        isOnLunch,
+        lunchStartTime,
+        accumulatedLunchSeconds,
       }
-      setWorkedSec(computeLiveWorkedSeconds(snapshot))
-      setBreakSec(computeLiveBreakSeconds(snapshot))
-      setNow(new Date())
+      const session = popupSessionSeconds(snapshot)
+      setWorkedSec(session.productive)
+      setOverallSec(session.overall)
+      setBreakSec(session.break)
     }
     tick()
     const timer = setInterval(tick, 1000)
@@ -94,9 +125,11 @@ export const MyTimingCard = ({
     clockedIn,
     clockInTimestamp,
     accumulatedBreakSeconds,
-    accumulatedWorkSeconds,
     isOnBreak,
     breakStartTime,
+    isOnLunch,
+    lunchStartTime,
+    accumulatedLunchSeconds,
   ])
 
   const displayName = userDoc?.displayName || user?.displayName || 'Employee'
@@ -125,7 +158,7 @@ export const MyTimingCard = ({
         }
       : {
           label: 'BREAK',
-          onClick: handleBreakToggle,
+          onClick: () => setConfirmBreak(true),
           disabled: clockBusy,
           variant: 'outline',
           className:
@@ -202,7 +235,7 @@ export const MyTimingCard = ({
       <div className="flex items-start justify-between gap-3 px-3 pt-3 pb-1" style={{ WebkitAppRegion: 'no-drag' }}>
         <p className="text-sm font-semibold text-fg">My Timing</p>
         <p className="text-xs text-muted text-right">
-          Productive Time:{' '}
+          Worked Time:{' '}
           <span className="font-semibold text-fg tabular-nums">{formatProductive(workedSec)}</span>
         </p>
       </div>
@@ -210,8 +243,8 @@ export const MyTimingCard = ({
       <div className="px-3 py-2" style={{ WebkitAppRegion: 'no-drag' }}>
         <div className="rounded-xl border border-border bg-chrome/50 px-3 py-2.5 space-y-2">
           <div className="flex items-center justify-between gap-3">
-            <span className="text-xs text-muted">Current Time</span>
-            <span className="text-base font-bold tabular-nums text-fg">{formatWallClock(now)}</span>
+            <span className="text-xs text-muted">Overall Time</span>
+            <span className="text-base font-bold tabular-nums text-fg">{formatSecondsToHms(overallSec)}</span>
           </div>
           <div className="flex items-center justify-between gap-3">
             <span className="text-xs text-muted">Break Time</span>
@@ -255,6 +288,31 @@ export const MyTimingCard = ({
       </div>
 
       <MyTimingTasks fillWindow={fillWindow} />
+
+      <Modal
+        open={confirmBreak}
+        onClose={() => setConfirmBreak(false)}
+        title="Start break?"
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConfirmBreak(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                handleBreakToggle()
+                setConfirmBreak(false)
+              }}
+            >
+              Confirm
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-muted">Are you taking a break?</p>
+      </Modal>
     </div>
   )
 }

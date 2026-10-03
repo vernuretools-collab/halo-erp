@@ -8,6 +8,7 @@ import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { useProjectStore } from './stores/projectStore'
+import { EmployeeTrashPanel } from './components/EmployeeTrashPanel'
 import {
   isUserOnProject,
   matchesUserIdentity,
@@ -105,7 +106,9 @@ export const ProjectList = () => {
   const [allEmployees, setAllEmployees] = useState([])
   const [membersLoading, setMembersLoading] = useState(false)
   const [selectedMemberIds, setSelectedMemberIds] = useState(new Set())
+  const [memberSearch, setMemberSearch] = useState('')
   const [deleteConfirmProj, setDeleteConfirmProj] = useState(null)
+  const [showTrash, setShowTrash] = useState(false)
 
   // Edit Project Modal state
   const [editModalProj, setEditModalProj] = useState(null)
@@ -163,6 +166,19 @@ export const ProjectList = () => {
     }
     fetchClients()
   }, [showAddModal, editModalProj])
+
+  useEffect(() => {
+    setMemberSearch('')
+  }, [memberModalProj])
+
+  const memberQuery = memberSearch.trim().toLowerCase()
+  const visibleEmployees = allEmployees.filter((emp) => {
+    if (!memberQuery) return true
+    return (
+      String(emp.name || '').toLowerCase().includes(memberQuery) ||
+      String(emp.email || '').toLowerCase().includes(memberQuery)
+    )
+  })
 
   // Fetch available employees when Member Modal opens (employees collection only)
   useEffect(() => {
@@ -419,16 +435,26 @@ export const ProjectList = () => {
           title="Project Management"
           description="Manage active client deliverables, sprint velocity, task boards, and team access"
           actions={
-            <Button
-              icon={Plus}
-              variant="primary"
-              onClick={() => {
-                setCreateError('')
-                setShowAddModal(true)
-              }}
-            >
-              New Project
-            </Button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                title="Trash"
+                onClick={() => setShowTrash(true)}
+                className="inline-flex items-center justify-center w-10 h-10 rounded-xl border border-border bg-chrome text-muted hover:text-fg hover:bg-border transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+              <Button
+                icon={Plus}
+                variant="primary"
+                onClick={() => {
+                  setCreateError('')
+                  setShowAddModal(true)
+                }}
+              >
+                New Project
+              </Button>
+            </div>
           }
         />
 
@@ -605,7 +631,7 @@ export const ProjectList = () => {
                           setDeleteConfirmProj(proj)
                         }}
                         title="Delete project"
-                        className="text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 p-1 rounded hover:bg-chrome transition-colors"
+                        className="text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 p-1 rounded hover:bg-chrome transition-colors cursor-pointer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -737,6 +763,20 @@ export const ProjectList = () => {
               Select team members to give them access and visibility to this project card and its tasks:
             </p>
 
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
+              <input
+                type="search"
+                placeholder="Search employees by name or email..."
+                value={memberSearch}
+                onChange={(e) => setMemberSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') e.preventDefault()
+                }}
+                className="w-full bg-chrome border border-border text-xs text-fg placeholder-slate-400 dark:placeholder-slate-500 rounded-xl pl-8 pr-3 py-2 focus:outline-none focus:border-accent/40 transition-colors"
+              />
+            </div>
+
             <form onSubmit={handleSaveMembers} className="space-y-4 flex-1 overflow-y-auto pr-1">
               {membersLoading ? (
                 <div className="flex items-center justify-center py-8 text-xs text-slate-400">
@@ -746,9 +786,13 @@ export const ProjectList = () => {
                 <div className="text-center py-6 text-xs text-slate-400">
                   No additional employees registered in team directory.
                 </div>
+              ) : visibleEmployees.length === 0 ? (
+                <div className="text-center py-6 text-xs text-slate-400">
+                  No employees match “{memberSearch.trim()}”.
+                </div>
               ) : (
                 <div className="space-y-2 max-h-60 overflow-y-auto">
-                  {allEmployees.map((emp) => {
+                  {visibleEmployees.map((emp) => {
                     const empIdStr = String(emp.id || emp.uid)
                     const isChecked = selectedMemberIds.has(empIdStr)
                     const isCreator =
@@ -1028,7 +1072,7 @@ export const ProjectList = () => {
             </div>
 
             <p className="text-xs text-muted leading-relaxed">
-              Are you sure you want to delete project <strong className="text-fg">{deleteConfirmProj.name}</strong>? This action cannot be undone.
+              Move <strong className="text-fg">{deleteConfirmProj.name}</strong> to Trash? Open the trash icon on this page if you want to restore it.
             </p>
 
             <div className="flex items-center justify-end gap-3 pt-3 border-t border-border">
@@ -1037,20 +1081,21 @@ export const ProjectList = () => {
               </Button>
               <Button
                 variant="danger"
-                onClick={async () => {
+                onClick={() => {
                   const targetId = deleteConfirmProj.projectId || deleteConfirmProj.id
-                  if (targetId) {
-                    await deleteProject(targetId)
-                  }
                   setDeleteConfirmProj(null)
+                  if (targetId) {
+                    deleteProject(targetId).catch((err) => console.error('Failed to delete project:', err))
+                  }
                 }}
               >
-                Yes, Delete Project
+                Move to Trash
               </Button>
             </div>
           </Card>
         </div>
       )}
+      <EmployeeTrashPanel open={showTrash} kind="projects" onClose={() => setShowTrash(false)} />
     </div>
   )
 }

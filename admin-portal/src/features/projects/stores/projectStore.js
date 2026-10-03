@@ -6,6 +6,10 @@ import {
   getProjects,
   getTasks,
   getTaskStatusesFromDb,
+  restoreProjectFromDb,
+  restoreTaskFromDb,
+  permanentlyDeleteProjectFromDb,
+  permanentlyDeleteTaskFromDb,
 } from '../services/projectService'
 
 const PROJECTS_TTL_MS = 45_000
@@ -171,11 +175,12 @@ export const useProjectStore = create(
       setSelectedProjectId: (selectedProjectId) => set({ selectedProjectId }),
       setTaskFilterStatus: (taskFilterStatus) => set({ taskFilterStatus }),
 
-      fetchProjectsAndTasks: async () => {
-        if (projectsFetchInflight) return projectsFetchInflight
+      fetchProjectsAndTasks: async (force = false) => {
+        if (!force && projectsFetchInflight) return projectsFetchInflight
         const cached = get()
         const hasCache = (cached.projects?.length || 0) > 0 || (cached.tasks?.length || 0) > 0
         if (
+          !force &&
           hasCache &&
           cached.lastFetchedAt &&
           Date.now() - cached.lastFetchedAt < PROJECTS_TTL_MS
@@ -234,7 +239,17 @@ export const useProjectStore = create(
       projects: state.projects.filter(
         (p) => p.projectId !== projectId && p.id !== projectId
       ),
+      tasks: state.tasks.filter((t) => t.projectId !== projectId),
     })),
+
+  restoreProject: async (projectId) => {
+    await restoreProjectFromDb(projectId)
+    await get().fetchProjectsAndTasks(true)
+  },
+
+  permanentlyDeleteProject: async (projectId) => {
+    await permanentlyDeleteProjectFromDb(projectId)
+  },
 
   updateProject: (projectId, updates) =>
     set((state) => ({
@@ -342,6 +357,15 @@ export const useProjectStore = create(
     set((state) => ({
       tasks: state.tasks.filter((t) => t.taskId !== taskId),
     })),
+
+  restoreTask: async (taskId) => {
+    await restoreTaskFromDb(taskId)
+    await get().fetchProjectsAndTasks(true)
+  },
+
+  permanentlyDeleteTask: async (taskId) => {
+    await permanentlyDeleteTaskFromDb(taskId)
+  },
     }),
     {
       name: 'crm_admin_project_store',

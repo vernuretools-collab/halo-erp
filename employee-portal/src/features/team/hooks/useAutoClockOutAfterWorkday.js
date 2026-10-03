@@ -7,7 +7,7 @@ import { resolveEmployeeDisplayName } from '../services/attendanceStatsUtils'
 export const AUTO_CLOCK_OUT_ENABLED = false
 
 /**
- * Auto clock-out when accumulated work time (session − breaks + prior work) reaches 8 hours.
+ * Auto clock-out when office time (session including break and lunch + prior work) reaches 8 hours.
  * Mount app-wide so it runs on dashboard, attendance, and other pages.
  */
 export const useAutoClockOutAfterWorkday = () => {
@@ -53,13 +53,7 @@ export const useAutoClockOutAfterWorkday = () => {
         sessionSec = Math.max(0, Math.floor((nowMs - state.clockInTimestamp) / 1000))
       }
 
-      let breakSec = state.accumulatedBreakSeconds || 0
-      if (state.isOnBreak && state.breakStartTime) {
-        breakSec += Math.max(0, Math.floor((nowMs - state.breakStartTime) / 1000))
-      }
-
-      const livedWorked =
-        (state.accumulatedWorkSeconds || 0) + Math.max(0, sessionSec - breakSec)
+      const livedWorked = (state.accumulatedWorkSeconds || 0) + sessionSec
 
       if (livedWorked >= WORKDAY_SECONDS) {
         autoClockOutAfterWorkday({

@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom'
 import { Card } from '../../../components/ui/Card'
 import { Badge } from '../../../components/ui/Badge'
 import { Button } from '../../../components/ui/Button'
+import { Modal } from '../../../components/ui/Modal'
 import { useTeamStore } from '../../team/stores/teamStore'
 import { useUserStore } from '../../../stores/userStore'
 import { useAttendanceClockActions } from '../../team/hooks/useAttendanceClockActions'
@@ -23,7 +24,7 @@ import {
   Calendar,
   ChevronRight,
   ListFilter,
-  History,
+  Utensils,
   AlertCircle,
   Zap,
   Loader2,
@@ -40,11 +41,14 @@ export const ClockInOverviewWidget = ({ children }) => {
     identityIds,
     clockedIn,
     isOnBreak,
+    isOnLunch,
     clockBusy,
     clockError,
     clockHint,
     handleClockToggle,
     handleBreakToggle,
+    handleLunchStart,
+    handleLunchEnd,
   } = useAttendanceClockActions()
 
   const {
@@ -54,8 +58,9 @@ export const ClockInOverviewWidget = ({ children }) => {
     clockOutTime,
     breakStartTime,
     accumulatedBreakSeconds,
+    lunchStartTime,
+    accumulatedLunchSeconds,
     accumulatedWorkSeconds,
-    todayShiftLogs,
     isInExtraTime,
     extraTimeStart,
     accumulatedExtraSeconds,
@@ -84,10 +89,10 @@ export const ClockInOverviewWidget = ({ children }) => {
     return overlay?.status ? attendanceStatusChip(overlay.status, overlay.leaveType) : null
   }, [leaveRequests, activeUid, user, userDoc, currentEmp, displayName, identityIds, todayKey])
 
+  const [confirmKind, setConfirmKind] = useState(null)
   const [currentTimeStr, setCurrentTimeStr] = useState('')
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [elapsedExtraSec, setElapsedExtraSec] = useState(0)
-  const [showLogs, setShowLogs] = useState(false)
 
   // Live real-time ticker for extra work hours
   useEffect(() => {
@@ -131,6 +136,9 @@ export const ClockInOverviewWidget = ({ children }) => {
           accumulatedWorkSeconds,
           isOnBreak,
           breakStartTime,
+          isOnLunch,
+          lunchStartTime,
+          accumulatedLunchSeconds,
         })
       )
     }
@@ -145,6 +153,9 @@ export const ClockInOverviewWidget = ({ children }) => {
     isOnBreak,
     breakStartTime,
     accumulatedBreakSeconds,
+    isOnLunch,
+    lunchStartTime,
+    accumulatedLunchSeconds,
     accumulatedWorkSeconds,
   ])
 
@@ -187,7 +198,11 @@ export const ClockInOverviewWidget = ({ children }) => {
                   {currentTimeStr}
                 </span>
 
-                {clockedIn && isOnBreak ? (
+                {clockedIn && isOnLunch ? (
+                    <Badge variant="warning" className="animate-pulse text-xs px-2.5 py-0.5 font-semibold">
+                      On Lunch
+                    </Badge>
+                  ) : clockedIn && isOnBreak ? (
                     <Badge variant="warning" className="animate-pulse text-xs px-2.5 py-0.5 font-semibold">
                       On Break
                     </Badge>
@@ -271,6 +286,10 @@ export const ClockInOverviewWidget = ({ children }) => {
                     <span className="text-muted italic">
                       You haven't clocked in today
                     </span>
+                  ) : isOnLunch ? (
+                    <span className="text-amber-600 dark:text-amber-400 font-semibold">
+                      On lunch
+                    </span>
                   ) : isOnBreak ? (
                     <span className="text-amber-600 dark:text-amber-400 font-semibold">
                       Paused for break
@@ -327,7 +346,10 @@ export const ClockInOverviewWidget = ({ children }) => {
             {clockedIn && (
               <Button
                 variant={isOnBreak ? 'primary' : 'secondary'}
-                onClick={handleBreakToggle}
+                onClick={() => {
+                  if (isOnBreak) handleBreakToggle()
+                  else setConfirmKind('break')
+                }}
                 title={isOnBreak ? 'Resume Work' : 'Take Break'}
                 className="py-2.5 px-3.5 rounded-xl"
               >
@@ -335,14 +357,19 @@ export const ClockInOverviewWidget = ({ children }) => {
               </Button>
             )}
 
-            <Button
-              variant="outline"
-              onClick={() => setShowLogs(!showLogs)}
-              title="Today's Shift Logs"
-              className="py-2.5 px-3.5 text-muted rounded-xl"
-            >
-              <History className="w-4 h-4 sm:w-5 sm:h-5" />
-            </Button>
+            {clockedIn && (
+              <Button
+                variant={isOnLunch ? 'primary' : 'secondary'}
+                onClick={() => {
+                  if (isOnLunch) handleLunchEnd()
+                  else setConfirmKind('lunch')
+                }}
+                title={isOnLunch ? 'End lunch' : 'Take lunch'}
+                className="py-2.5 px-3.5 rounded-xl"
+              >
+                <Utensils className={`w-4 h-4 sm:w-5 sm:h-5 ${isOnLunch ? 'text-white' : 'text-amber-500'}`} />
+              </Button>
+            )}
             </div>
           </div>
 
@@ -389,53 +416,35 @@ export const ClockInOverviewWidget = ({ children }) => {
         {children ? <div className="flex w-full min-h-0">{children}</div> : null}
       </div>
 
-      {/* Shift History Log Dropdown Panel */}
-      {showLogs && (
-        <Card className="p-4 border-border bg-slate-50/50 dark:bg-slate-900/40 space-y-3 transition-all animate-fadeIn">
-          <div className="flex items-center justify-between pb-2 border-b border-border text-xs">
-            <div className="flex items-center gap-2 text-fg font-semibold">
-              <History className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              <span>Today's Shift Activity Log</span>
-            </div>
-            <span className="text-[10px] text-slate-500">
-              {todayShiftLogs.length} events logged today
-            </span>
-          </div>
-
-          {todayShiftLogs.length === 0 ? (
-            <p className="text-xs text-muted italic text-center py-3">
-              No clock events recorded for today yet. Click "Check In" to log your shift arrival.
-            </p>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-              {todayShiftLogs.map((log) => (
-                <div
-                  key={log.id}
-                  className="flex items-center justify-between p-2.5 rounded-xl bg-surface border border-border text-xs"
-                >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`w-2 h-2 rounded-full ${
-                        log.type === 'clock_in'
-                          ? 'bg-emerald-500'
-                          : log.type === 'clock_out'
-                          ? 'bg-rose-500'
-                          : 'bg-amber-500'
-                      }`}
-                    />
-                    <span className="font-medium text-fg">
-                      {log.label}
-                    </span>
-                  </div>
-                  <span className="font-mono text-[11px] text-muted">
-                    {formatTo12HourTime(log.time)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      )}
+      <Modal
+        open={confirmKind === 'break' || confirmKind === 'lunch'}
+        onClose={() => setConfirmKind(null)}
+        title={confirmKind === 'lunch' ? 'Start lunch?' : 'Start break?'}
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConfirmKind(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                if (confirmKind === 'lunch') handleLunchStart()
+                else handleBreakToggle()
+                setConfirmKind(null)
+              }}
+            >
+              Confirm
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-muted">
+          {confirmKind === 'lunch'
+            ? 'Are you taking lunch?'
+            : 'Are you taking a break?'}
+        </p>
+      </Modal>
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { NavLink, useSearchParams } from 'react-router-dom'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Card } from '../../components/ui/Card'
@@ -6,6 +6,7 @@ import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { SubtaskStepper } from './components/SubtaskStepper'
+import { TaskActivity } from './components/TaskActivity'
 import { useProjectStore } from './stores/projectStore'
 import { useTeamStore } from '../team/stores/teamStore'
 import { useUserStore } from '../../stores/userStore'
@@ -13,6 +14,7 @@ import { getEmployees } from '../team/services/teamService'
 import { isTaskVisibleToUser, getAttendanceGatedElapsedMs, formatElapsed, buildTaskVisibilityIndex, isEmployeeActivelyWorking } from './services/projectService'
 import { TaskListView } from './components/TaskListView'
 import { TaskCalendarView } from './components/TaskCalendarView'
+import { EmployeeTrashPanel } from './components/EmployeeTrashPanel'
 import {
   FolderKanban,
   Kanban,
@@ -72,7 +74,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
     selectedProjectId,
     setSelectedProjectId,
   } = useProjectStore()
-  const { employees, setEmployees, clockedIn, isOnBreak } = useTeamStore()
+  const { employees, setEmployees, clockedIn, isOnBreak, isOnLunch } = useTeamStore()
   const { user, userDoc, claims } = useUserStore()
 
   const currentUserId = userDoc?.uid || user?.uid
@@ -129,12 +131,19 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
 
   const [searchQuery, setSearchQuery] = useState('')
   const [viewMode, setViewMode] = useState('board') // board | list | calendar
+  const boardScrollRef = useRef(null)
+  const boardBarRef = useRef(null)
+  const boardScrollSync = useRef(false)
+  const [boardScrollWidth, setBoardScrollWidth] = useState(0)
 
   const [showAddModal, setShowAddModal] = useState(false)
   const [showAddStatusModal, setShowAddStatusModal] = useState(false)
   const [selectedTask, setSelectedTask] = useState(null)
+  const [activeSubtaskId, setActiveSubtaskId] = useState(null)
+  const [commentFocus, setCommentFocus] = useState(0)
   const [deleteConfirmTask, setDeleteConfirmTask] = useState(null)
   const [deleteConfirmStatus, setDeleteConfirmStatus] = useState(null)
+  const [showTrash, setShowTrash] = useState(false)
   const [nowTick, setNowTick] = useState(Date.now())
 
   // Drag & Drop State
@@ -201,6 +210,10 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
   }, [fetchProjectsAndTasks])
 
   useEffect(() => {
+    setActiveSubtaskId(null)
+  }, [selectedTask?.taskId])
+
+  useEffect(() => {
     if (employees.length === 0) {
       getEmployees().then((data) => {
         if (data && data.length > 0) setEmployees(data)
@@ -265,6 +278,31 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
   const liveSelectedTask = selectedTask
     ? tasks.find((t) => t.taskId === selectedTask.taskId) || null
     : null
+
+  useEffect(() => {
+    if (!liveSelectedTask || deleteConfirmTask) return undefined
+    const onKey = (event) => {
+      if (event.key !== 'Escape') return
+      setSelectedTask(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [liveSelectedTask, deleteConfirmTask])
+
+  useEffect(() => {
+    if (viewMode !== 'board') return undefined
+    const board = boardScrollRef.current
+    if (!board) return undefined
+    const update = () => {
+      const width = board.scrollWidth
+      setBoardScrollWidth((current) => (current === width ? current : width))
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(board)
+    Array.from(board.children).forEach((child) => observer.observe(child))
+    return () => observer.disconnect()
+  }, [viewMode, visibleStatuses, filteredTasks])
 
   useEffect(() => {
     const hasRunning =
@@ -340,14 +378,41 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
 
   const formatTaskTimerLabel = (task) => {
     void nowTick
-    const attendance = { clockedIn, isOnBreak }
+    const attendance = { clockedIn, isOnBreak, isOnLunch }
     const elapsed = formatElapsed(getAttendanceGatedElapsedMs(task, attendance))
+    if (task?.status === 'todo') return elapsed
     const offDutyRunning =
       task?.timerStatus === 'running' && !isEmployeeActivelyWorking(attendance)
     if (task?.timerStatus === 'paused' || offDutyRunning) return `Paused · ${elapsed}`
     if (task?.timerStatus === 'stopped') return elapsed
     if (task?.timerStatus === 'running') return elapsed
     return elapsed
+  }
+
+  const taskElapsedLabel = (task) => {
+    void nowTick
+    return formatElapsed(getAttendanceGatedElapsedMs(task, { clockedIn, isOnBreak, isOnLunch }))
+  }
+
+  const formatTaskDate = (value) => {
+    if (!value) return null
+    const [year, month, day] = String(value).slice(0, 10).split('-').map(Number)
+    if (!year || !month || !day) return null
+    return new Date(year, month - 1, day).toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    })
+  }
+
+  const timerStateLabel = (task) => {
+    if (!task) return 'Not started'
+    if (task.status === 'done' || task.timerStatus === 'stopped') return 'Stopped'
+    const attendance = { clockedIn, isOnBreak, isOnLunch }
+    const offDutyRunning = task.timerStatus === 'running' && !isEmployeeActivelyWorking(attendance)
+    if (task.timerStatus === 'paused' || offDutyRunning) return 'Paused'
+    if (task.timerStatus === 'running') return 'Running'
+    return 'Not started'
   }
 
   return (
@@ -359,9 +424,19 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
             title="Task Sprint Board"
             description="Track cross-project task assignments, sprint statuses, and subtask execution timelines"
             actions={
-              <Button icon={Plus} variant="primary" onClick={handleOpenAddModal}>
-                New Task
-              </Button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  title="Trash"
+                  onClick={() => setShowTrash(true)}
+                  className="inline-flex items-center justify-center w-10 h-10 rounded-xl border border-border bg-chrome text-muted hover:text-fg hover:bg-border transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+                <Button icon={Plus} variant="primary" onClick={handleOpenAddModal}>
+                  New Task
+                </Button>
+              </div>
             }
           />
         )}
@@ -369,9 +444,19 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
           <div className="flex items-center gap-2">
             {embedded ? (
-              <Button icon={Plus} variant="primary" size="sm" onClick={handleOpenAddModal}>
-                New Task
-              </Button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  title="Trash"
+                  onClick={() => setShowTrash(true)}
+                  className="inline-flex items-center justify-center w-8 h-8 rounded-xl border border-border bg-chrome text-muted hover:text-fg hover:bg-border transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+                <Button icon={Plus} variant="primary" size="sm" onClick={handleOpenAddModal}>
+                  New Task
+                </Button>
+              </div>
             ) : (
               <>
                 <NavLink
@@ -503,7 +588,36 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
       )}
 
       {viewMode === 'board' && (
-      <div className="flex gap-4 overflow-x-auto pb-4 items-start min-h-[500px]">
+      <div className="min-w-0">
+      <div
+        ref={boardBarRef}
+        onScroll={() => {
+          if (boardScrollSync.current) return
+          const bar = boardBarRef.current
+          const board = boardScrollRef.current
+          if (!bar || !board) return
+          boardScrollSync.current = true
+          board.scrollLeft = bar.scrollLeft
+          boardScrollSync.current = false
+        }}
+        className="mb-2 overflow-x-scroll overflow-y-hidden [scrollbar-width:thin] [scrollbar-color:rgb(148_163_184)_rgb(226_232_240)] dark:[scrollbar-color:rgb(100_116_139)_rgb(30_41_59)] [&::-webkit-scrollbar]:h-2.5 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-slate-200 dark:[&::-webkit-scrollbar-track]:bg-slate-800 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-400 dark:[&::-webkit-scrollbar-thumb]:bg-slate-500"
+        aria-label="Scroll task columns"
+      >
+        <div style={{ width: boardScrollWidth || '100%' }} className="h-px" />
+      </div>
+      <div
+        ref={boardScrollRef}
+        onScroll={() => {
+          if (boardScrollSync.current) return
+          const bar = boardBarRef.current
+          const board = boardScrollRef.current
+          if (!bar || !board) return
+          boardScrollSync.current = true
+          bar.scrollLeft = board.scrollLeft
+          boardScrollSync.current = false
+        }}
+        className="flex gap-4 overflow-x-auto pb-4 items-start min-h-[500px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
         {visibleStatuses.map((status) => {
           const colTasks = filteredTasks.filter((t) => t.status === status.id)
           const allowDelete = canDeleteStatus(status)
@@ -535,7 +649,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
                         setDeleteConfirmStatus(status)
                       }}
                       title="Delete Custom Status"
-                      className="text-slate-400 hover:text-rose-500 p-1 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors"
+                      className="text-slate-400 hover:text-rose-500 p-1 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -602,7 +716,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
                         >
                           <span className="flex items-center gap-1.5 shrink-0">
                             Status:
-                            {t.timerStatus === 'running' && t.status !== 'done' && (
+                            {t.timerStatus === 'running' && t.status !== 'done' && t.status !== 'todo' && (
                               <button
                                 type="button"
                                 onClick={() => pauseTaskTimer(t.taskId)}
@@ -612,14 +726,14 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
                                 <Pause className="w-2.5 h-2.5" /> Pause
                               </button>
                             )}
-                            {t.timerStatus === 'paused' && t.status !== 'done' && (
+                            {t.timerStatus === 'paused' && t.status !== 'done' && t.status !== 'todo' && (
                               <button
                                 type="button"
                                 onClick={() => resumeTaskTimer(t.taskId)}
-                                disabled={!isEmployeeActivelyWorking({ clockedIn, isOnBreak })}
+                                disabled={!isEmployeeActivelyWorking({ clockedIn, isOnBreak, isOnLunch })}
                                 className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-accent-soft text-accent hover:bg-accent-soft dark:hover:bg-accent-hover/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 title={
-                                  isEmployeeActivelyWorking({ clockedIn, isOnBreak })
+                                  isEmployeeActivelyWorking({ clockedIn, isOnBreak, isOnLunch })
                                     ? 'Resume timer'
                                     : 'Clock in to resume the timer'
                                 }
@@ -660,6 +774,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
             <Plus className="w-5 h-5 transition-transform group-hover:rotate-90" />
           </button>
         </div>
+      </div>
       </div>
       )}
 
@@ -743,94 +858,172 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
       )}
 
       {/* Task Time & Subtask Timeline Detail Modal */}
-      {liveSelectedTask && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <Card className="w-full max-w-2xl p-6 space-y-6 border-border shadow-2xl relative bg-surface max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-border">
-              <div>
-                <h3 className="font-bold text-fg text-base">{liveSelectedTask.title}</h3>
-                <p className="text-xs text-accent font-medium">{liveSelectedTask.projectName}</p>
-              </div>
-              <button
-                onClick={() => setSelectedTask(null)}
-                className="text-slate-400 hover:text-slate-900 dark:hover:text-white p-1 rounded-lg hover:bg-chrome transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 text-xs bg-chrome p-3 rounded-2xl border border-border">
-              <div className="space-y-1">
-                <span className="text-muted block">Created By</span>
-                <span className="text-fg font-bold">{liveSelectedTask.createdByName || liveSelectedTask.assigneeName || 'Employee'}</span>
-              </div>
-              <div className="space-y-1">
-                <span className="text-muted block">Timer</span>
-                <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5" />
-                  {formatTaskTimerLabel(liveSelectedTask)}
-                </span>
-                <span className="text-[10px] text-muted">Runs only while clocked in</span>
-              </div>
-            </div>
-
-            {/* Interactive Vertical Subtask Timeline */}
-            <SubtaskStepper taskId={liveSelectedTask.taskId} subtasks={liveSelectedTask.subtasks || []} />
-
-            {/* Task Timer Controls */}
-            <div className="space-y-3 pt-3 border-t border-border">
-              <div className="flex gap-3 pt-1">
-                <Button
-                  type="button"
-                  variant="danger"
-                  size="sm"
-                  icon={Trash2}
-                  onClick={() => {
-                    setDeleteConfirmTask(liveSelectedTask)
-                    setSelectedTask(null)
-                  }}
-                >
-                  Delete Task
-                </Button>
-                {liveSelectedTask.timerStatus === 'running' && liveSelectedTask.status !== 'done' && (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="flex-1"
-                    icon={Pause}
-                    onClick={() => pauseTaskTimer(liveSelectedTask.taskId)}
-                  >
-                    Pause Timer
-                  </Button>
-                )}
-                {liveSelectedTask.timerStatus === 'paused' && liveSelectedTask.status !== 'done' && (
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="sm"
-                    className="flex-1"
-                    icon={Play}
-                    disabled={!isEmployeeActivelyWorking({ clockedIn, isOnBreak })}
-                    onClick={() => resumeTaskTimer(liveSelectedTask.taskId)}
-                  >
-                    Resume Timer
-                  </Button>
-                )}
-                {(liveSelectedTask.timerStatus === 'stopped' || liveSelectedTask.status === 'done') && (
-                  <div className="flex-1 flex items-center justify-center text-xs font-semibold text-muted bg-chrome rounded-xl px-3">
-                    Timer stopped
+      {liveSelectedTask && (() => {
+        const statusMeta = visibleStatuses.find((status) => status.id === liveSelectedTask.status)
+        const dueLabel = formatTaskDate(liveSelectedTask.dueDate)
+        const assigneeName = liveSelectedTask.assigneeName || 'Unassigned'
+        const createdByName = liveSelectedTask.createdByName || liveSelectedTask.assigneeName || 'Employee'
+        const stateLabel = timerStateLabel(liveSelectedTask)
+        const activelyWorking = isEmployeeActivelyWorking({ clockedIn, isOnBreak, isOnLunch })
+        const timerHeld =
+          !activelyWorking &&
+          (liveSelectedTask.timerStatus === 'paused' || liveSelectedTask.timerStatus === 'running') &&
+          liveSelectedTask.status !== 'done' &&
+          liveSelectedTask.status !== 'todo'
+        const priorityLabel = String(liveSelectedTask.priority || 'medium')
+        const stateTone =
+          stateLabel === 'Running'
+            ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/30'
+            : stateLabel === 'Paused'
+              ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/30'
+              : 'bg-chrome text-muted border-border'
+        return (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => {
+            if (!deleteConfirmTask) setSelectedTask(null)
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="task-detail-title"
+            className="w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden bg-surface border border-border rounded-2xl shadow-2xl text-fg"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="shrink-0 border-b border-border px-6 py-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <h3 id="task-detail-title" className="text-lg font-bold text-fg break-words">
+                    {liveSelectedTask.title}
+                  </h3>
+                  <p className="text-xs text-accent font-medium mt-0.5">{liveSelectedTask.projectName}</p>
+                  <div className="flex flex-wrap items-center gap-1.5 mt-3">
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-chrome px-2 py-0.5 text-[11px] font-semibold text-fg">
+                      <span className={`h-2 w-2 rounded-full ${getStatusDotBg(statusMeta || liveSelectedTask.status)}`} />
+                      {statusMeta?.name || 'To Do'}
+                    </span>
+                    <Badge
+                      variant={
+                        liveSelectedTask.priority === 'critical' || liveSelectedTask.priority === 'high'
+                          ? 'danger'
+                          : 'info'
+                      }
+                    >
+                      {priorityLabel}
+                    </Badge>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-chrome px-2 py-0.5 text-[11px] font-medium text-fg">
+                      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-accent-soft text-[9px] font-bold text-accent">
+                        {(assigneeName.trim().charAt(0) || '?').toUpperCase()}
+                      </span>
+                      {assigneeName}
+                    </span>
+                    {dueLabel && (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-border bg-chrome px-2 py-0.5 text-[11px] font-medium text-fg">
+                        <Calendar className="w-3 h-3 text-muted" />
+                        Due {dueLabel}
+                      </span>
+                    )}
+                    <span className="inline-flex items-center rounded-full border border-border bg-chrome px-2 py-0.5 text-[11px] font-medium text-muted">
+                      Created by {createdByName}
+                    </span>
                   </div>
-                )}
+                </div>
+                <div className="flex items-start gap-2 shrink-0">
+                  <div className="text-right" title="Runs only while clocked in">
+                    <div className="font-mono text-lg font-bold tabular-nums text-fg leading-none">
+                      {taskElapsedLabel(liveSelectedTask)}
+                    </div>
+                    <div className="mt-2 flex items-center justify-end gap-1.5">
+                      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${stateTone}`}>
+                        {stateLabel}
+                      </span>
+                      {liveSelectedTask.timerStatus === 'running' && liveSelectedTask.status !== 'done' && liveSelectedTask.status !== 'todo' && (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          icon={Pause}
+                          onClick={() => pauseTaskTimer(liveSelectedTask.taskId)}
+                        >
+                          Pause
+                        </Button>
+                      )}
+                      {liveSelectedTask.timerStatus === 'paused' && liveSelectedTask.status !== 'done' && liveSelectedTask.status !== 'todo' && (
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          icon={Play}
+                          disabled={!activelyWorking}
+                          title={activelyWorking ? 'Resume timer' : 'Clock in to resume the timer'}
+                          onClick={() => resumeTaskTimer(liveSelectedTask.taskId)}
+                        >
+                          Resume
+                        </Button>
+                      )}
+                    </div>
+                    {timerHeld && (
+                      <p className="mt-1 text-[11px] text-muted">Paused - clock in to resume</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTask(null)}
+                    aria-label="Close"
+                    className="text-slate-400 hover:text-slate-900 dark:hover:text-white p-1 rounded-lg hover:bg-chrome transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
             </div>
-          </Card>
+
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+              <SubtaskStepper
+                taskId={liveSelectedTask.taskId}
+                subtasks={liveSelectedTask.subtasks || []}
+                onActiveSubtaskChange={setActiveSubtaskId}
+                onCommentSubtask={(subtask) => {
+                  setActiveSubtaskId(subtask.id)
+                  setCommentFocus((value) => value + 1)
+                }}
+              />
+              <TaskActivity
+                taskId={liveSelectedTask.taskId}
+                activity={liveSelectedTask.activity || []}
+                focusRequest={commentFocus}
+                subtask={
+                  (liveSelectedTask.subtasks || []).find((st) => st.id === activeSubtaskId) || null
+                }
+              />
+            </div>
+
+            <div className="shrink-0 border-t border-border px-6 py-3 flex items-center justify-between gap-3">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                onClick={() => setDeleteConfirmTask(liveSelectedTask)}
+              >
+                Delete task
+              </Button>
+              {liveSelectedTask.status === 'done' && (
+                <span className="text-xs text-muted">Task is done</span>
+              )}
+              <Button type="button" variant="secondary" size="sm" onClick={() => setSelectedTask(null)}>
+                Close
+              </Button>
+            </div>
+          </div>
         </div>
-      )}
+        )
+      })()}
 
       {/* Confirm Delete Task Modal */}
       {deleteConfirmTask && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <Card className="w-full max-w-md p-6 space-y-4 border-border shadow-2xl relative bg-surface">
             <div className="flex items-center justify-between pb-3 border-b border-border">
               <h3 className="font-bold text-fg text-sm flex items-center gap-2">
@@ -845,7 +1038,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
             </div>
 
             <p className="text-xs text-muted leading-relaxed">
-              Are you sure you want to delete task <strong className="text-fg">{deleteConfirmTask.title}</strong>? This action cannot be undone.
+              Move <strong className="text-fg">{deleteConfirmTask.title}</strong> to Trash? Open the trash icon on this page if you want to restore it.
             </p>
 
             <div className="flex items-center justify-end gap-3 pt-3 border-t border-border">
@@ -856,18 +1049,20 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
                 variant="danger"
                 onClick={async () => {
                   const id = deleteConfirmTask?.taskId || deleteConfirmTask?.id
-                  setDeleteConfirmTask(null)
-                  setSelectedTask(null)
-                  if (id) {
-                    try {
-                      await deleteTask(id)
-                    } catch (err) {
-                      console.error('Error deleting task:', err)
-                    }
+                  if (!id) {
+                    setDeleteConfirmTask(null)
+                    return
+                  }
+                  try {
+                    await deleteTask(id)
+                    setDeleteConfirmTask(null)
+                    setSelectedTask(null)
+                  } catch (err) {
+                    console.error('Error deleting task:', err)
                   }
                 }}
               >
-                Yes, Delete Task
+                Move to Trash
               </Button>
             </div>
           </Card>
@@ -969,6 +1164,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
           </Card>
         </div>
       )}
+      <EmployeeTrashPanel open={showTrash} kind="tasks" onClose={() => setShowTrash(false)} />
     </div>
   )
 }

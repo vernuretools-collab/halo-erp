@@ -5,6 +5,7 @@ import { Card } from '../../components/ui/Card'
 import { Badge } from '../../components/ui/Badge'
 import { useProjectStore } from './stores/projectStore'
 import { FolderKanban, Kanban, Clock, User, CheckCircle2 } from 'lucide-react'
+import { formatWorkDuration } from './formatWorkDuration'
 
 export const TimeTracker = () => {
   const { tasks } = useProjectStore()
@@ -77,8 +78,8 @@ export const TimeTracker = () => {
                 <td className="p-4 font-bold text-slate-900 dark:text-slate-200">{t.title}</td>
                 <td className="p-4 text-slate-800 dark:text-slate-300">{t.projectName}</td>
                 <td className="p-4 text-muted">{t.assigneeName}</td>
-                <td className="p-4 text-muted">{t.estimatedHours} hrs</td>
-                <td className="p-4 font-bold text-emerald-600 dark:text-emerald-400">{t.loggedHours} hrs</td>
+                <td className="p-4 text-muted">{formatWorkDuration(t.estimatedHours)}</td>
+                <td className="p-4 font-bold text-emerald-600 dark:text-emerald-400">{formatWorkDuration(t.loggedHours)}</td>
                 <td className="p-4">
                   <Badge variant={t.status === 'done' ? 'success' : 'info'}>{t.status}</Badge>
                 </td>

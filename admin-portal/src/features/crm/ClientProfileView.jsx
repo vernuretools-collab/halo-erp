@@ -137,7 +137,7 @@ export const ClientProfileView = () => {
       const projSnap = await getDocs(
         query(collection(db, 'projects'), where('clientId', '==', clientId))
       )
-      setProjects(projSnap.docs.map((d) => ({ projectId: d.id, ...d.data() })))
+      setProjects(projSnap.docs.map((d) => ({ projectId: d.id, ...d.data() })).filter((p) => !p.deletedAt))
 
       // Fetch invoices
       const invSnap = await getDocs(

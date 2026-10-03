@@ -23,7 +23,9 @@ export const getProjectById = async (projectId) => {
     if (!projectId) return null
     const snap = await getDoc(doc(db, 'projects', projectId))
     if (snap.exists()) {
-      return { projectId: snap.id, id: snap.id, ...snap.data() }
+      const data = snap.data()
+      if (data?.deletedAt) return null
+      return { projectId: snap.id, id: snap.id, ...data }
     }
     return null
   } catch (err) {
@@ -42,7 +44,9 @@ export const getClientProjects = async (clientId) => {
       ? query(projRef, where('clientId', '==', clientId))
       : projRef
     const snap = await getDocs(q)
-    return snap.docs.map((d) => ({ projectId: d.id, ...d.data() }))
+    return snap.docs
+      .map((d) => ({ projectId: d.id, ...d.data() }))
+      .filter((p) => !p.deletedAt)
   } catch (err) {
     console.error('Error fetching client projects from Firestore:', err)
     return []

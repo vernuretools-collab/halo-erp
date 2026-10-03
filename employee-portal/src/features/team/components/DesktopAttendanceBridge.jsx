@@ -5,15 +5,16 @@ import { useUserStore } from '../../../stores/userStore'
 
 export const DesktopAttendanceBridge = () => {
   const user = useUserStore((s) => s.user)
-  const { clockedIn, isOnBreak } = useAttendanceClockActions({ listenForDesktopEvents: true })
+  const { clockedIn, isOnBreak, isOnLunch } = useAttendanceClockActions({ listenForDesktopEvents: true })
 
   useEffect(() => {
     notifyDesktopSession({
       signedIn: Boolean(user),
       clockedIn,
       isOnBreak,
+      isOnLunch,
     })
-  }, [user, clockedIn, isOnBreak])
+  }, [user, clockedIn, isOnBreak, isOnLunch])
 
   return null
 }

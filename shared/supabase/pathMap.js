@@ -18,6 +18,7 @@ const ROOT_TABLES = {
   documentFiles: 'document_files',
   attendance: 'attendance',
   attendanceLogs: 'attendance_logs',
+  workIdleDays: 'work_idle_days',
   workTimelineEntries: 'work_timeline_entries',
   leaveRequests: 'leave_requests',
   departments: 'departments',
@@ -96,6 +97,15 @@ export function resolveCollection(parts) {
       user_id: parts[1],
       parent_id: null,
       collection_name: 'socialPostReminders',
+    }
+  }
+  if (parts[0] === 'workReminders' && parts[2] === 'items') {
+    return {
+      table: 'app_docs',
+      org_id: null,
+      user_id: parts[1],
+      parent_id: null,
+      collection_name: 'workReminders',
     }
   }
 

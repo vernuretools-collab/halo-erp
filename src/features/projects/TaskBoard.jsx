@@ -6,6 +6,7 @@ import { Badge } from '../../shared/components/ui/Badge'
 import { Button } from '../../shared/components/ui/Button'
 import { Input } from '../../shared/components/ui/Input'
 import { SubtaskStepper } from './components/SubtaskStepper'
+import { TaskComments } from './components/TaskComments'
 import { useProjectStore, DEFAULT_TASK_STATUSES } from './stores/projectStore'
 import { useUserStore } from '../../shared/stores/userStore'
 import { getProjects, getTasks, getTaskStatusesFromDb, createTask, updateTaskStatusInDb, deleteTaskFromDb, isTaskVisibleToUser } from './services/projectService'
@@ -466,6 +467,8 @@ export const TaskBoard = () => {
 
             {/* Interactive Vertical Subtask Timeline */}
             <SubtaskStepper taskId={liveSelectedTask.taskId} subtasks={liveSelectedTask.subtasks || []} />
+
+            <TaskComments task={liveSelectedTask} />
 
             {/* Quick Log Additional Hours */}
             <form onSubmit={handleLogHours} className="space-y-3 pt-3 border-t border-border">

@@ -540,7 +540,7 @@ export const ProjectManagePage = () => {
                         </button>
                         <button
                           onClick={() => setDeleteConfirmStep(step)}
-                          className="text-slate-400 hover:text-rose-400 p-1.5 rounded-lg hover:bg-slate-800"
+                          className="text-slate-400 hover:text-rose-400 p-1.5 rounded-lg hover:bg-slate-800 cursor-pointer"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>

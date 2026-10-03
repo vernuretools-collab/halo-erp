@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { Card } from '../../../components/ui/Card'
 import { Badge } from '../../../components/ui/Badge'
 import { Clock, User, Calendar, ArrowUpDown } from 'lucide-react'
+import { formatLoggedVsEstimate } from '../formatWorkDuration'
 
 const priorityRank = { critical: 0, high: 1, medium: 2, low: 3 }
 
@@ -180,7 +181,7 @@ export const TaskListView = ({
                     <Clock className="w-3 h-3 text-accent" />
                     {getMetaValue
                       ? getMetaValue(task)
-                      : `${task.loggedHours || 0} / ${task.estimatedHours || 0}h`}
+                      : formatLoggedVsEstimate(task.loggedHours, task.estimatedHours)}
                   </span>
                 </td>
               </tr>

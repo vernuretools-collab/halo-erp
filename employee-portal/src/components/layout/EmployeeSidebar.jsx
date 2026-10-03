@@ -20,6 +20,7 @@ import {
   Target,
   Share2,
   LifeBuoy,
+  Network,
   Building2,
   Send,
   StickyNote,
@@ -59,6 +60,7 @@ const NAV_GROUPS = [
     icon: Users,
     items: [
       { name: 'Team Directory', path: '/directory', icon: Users },
+      { name: 'Organization Structure', path: '/team/organization', icon: Network },
       { name: 'Leave & PTO', path: '/team/leave', icon: Calendar },
     ],
   },
@@ -104,7 +106,7 @@ export const EmployeeSidebar = () => {
     const activeGroup = NAV_GROUPS.find((g) => {
       if (g.items.length <= 1) return false
       if (g.items.some((item) => location.pathname.startsWith(item.path))) return true
-      return g.key === 'projects' && /^\/projects\/(?!list$|tasks$)[^/]+/.test(location.pathname)
+      return g.key === 'projects' && /^\/projects\/(?!list$|tasks$|trash$)[^/]+/.test(location.pathname)
     })
     return activeGroup ? { [activeGroup.key]: true } : {}
   }
@@ -136,7 +138,7 @@ export const EmployeeSidebar = () => {
 
   const isGroupActive = (group) =>
     group.items.some((item) => location.pathname.startsWith(item.path)) ||
-    (group.key === 'projects' && /^\/projects\/(?!list$|tasks$)[^/]+/.test(location.pathname))
+    (group.key === 'projects' && /^\/projects\/(?!list$|tasks$|trash$)[^/]+/.test(location.pathname))
 
   return (
     <aside
@@ -243,7 +245,7 @@ export const EmployeeSidebar = () => {
                     const sessionDocs = /\/projects\/[^/]+\/documents\/?$/.test(location.pathname)
                     const sessionActive =
                       (item.path === '/projects/list' &&
-                        /^\/projects\/(?!list$|tasks$)[^/]+/.test(location.pathname) &&
+                        /^\/projects\/(?!list$|tasks$|trash$)[^/]+/.test(location.pathname) &&
                         !sessionNotes &&
                         !sessionTasks &&
                         !sessionTimeline &&

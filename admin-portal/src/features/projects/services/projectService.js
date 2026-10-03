@@ -6,6 +6,7 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
+  deleteField,
   setDoc,
   query,
   where,
@@ -66,7 +67,9 @@ export const getTaskStatusesFromDb = async () => {
 export const getProjects = async () => {
   try {
     const snap = await getDocs(collection(db, 'projects'))
-    return snap.docs.map((d) => ({ projectId: d.id, id: d.id, ...d.data() }))
+    return snap.docs
+      .map((d) => ({ projectId: d.id, id: d.id, ...d.data() }))
+      .filter((p) => !p.deletedAt)
   } catch (err) {
     console.error('Error fetching projects from Firestore:', err)
     return []
@@ -81,7 +84,9 @@ export const getProjectById = async (projectId) => {
     if (!projectId) return null
     const docSnap = await getDoc(doc(db, 'projects', projectId))
     if (docSnap.exists()) {
-      return { projectId: docSnap.id, id: docSnap.id, ...docSnap.data() }
+      const data = docSnap.data()
+      if (data?.deletedAt) return null
+      return { projectId: docSnap.id, id: docSnap.id, ...data }
     }
     return null
   } catch (err) {
@@ -124,14 +129,27 @@ export const createProject = async (projectData) => {
 }
 
 /**
- * Delete a project from Firestore
+ * Delete a project by moving it to Trash
  */
 export const deleteProjectFromDb = async (projectId) => {
   try {
     if (!projectId) return
-    await deleteDoc(doc(db, 'projects', projectId))
+    const actor = trashActorPatch()
+    await updateDoc(doc(db, 'projects', projectId), actor)
+    const tasks = await tasksForProject(projectId)
+    await Promise.all(
+      tasks
+        .filter((t) => !t.deletedAt)
+        .map((t) =>
+          updateDoc(doc(db, 'tasks', t.taskId || t.id), {
+            ...actor,
+            deletedWithProject: projectId,
+          })
+        )
+    )
   } catch (err) {
-    console.error('Error deleting project from Firestore:', err)
+    console.error('Error moving project to trash:', err)
+    throw err
   }
 }
 
@@ -472,7 +490,9 @@ export const deleteProjectTimelineEvent = async (projectId, eventId) => {
 export const getTasks = async () => {
   try {
     const snap = await getDocs(collection(db, 'tasks'))
-    return snap.docs.map((d) => ({ taskId: d.id, ...d.data() }))
+    return snap.docs
+      .map((d) => ({ taskId: d.id, ...d.data() }))
+      .filter((t) => !t.deletedAt)
   } catch (err) {
     console.error('Error fetching tasks from Firestore:', err)
     return []
@@ -547,13 +567,110 @@ export const updateTaskStatusInDb = async (taskId, newStatus) => {
 }
 
 /**
- * Delete a task from Firestore
+ * Delete a task by moving it to Trash
  */
 export const deleteTaskFromDb = async (taskId) => {
   try {
     if (!taskId) return
+    await updateDoc(doc(db, 'tasks', taskId), {
+      ...trashActorPatch(),
+      deletedWithProject: deleteField(),
+    })
+  } catch (err) {
+    console.error('Error moving task to trash:', err)
+    throw err
+  }
+}
+
+function trashActorPatch() {
+  const { user, userDoc } = useUserStore.getState()
+  return {
+    deletedAt: new Date().toISOString(),
+    deletedBy: user?.uid || userDoc?.uid || userDoc?.id || null,
+    deletedByName: userDoc?.displayName || user?.displayName || userDoc?.name || 'Admin',
+  }
+}
+
+const clearedTrashFields = {
+  deletedAt: deleteField(),
+  deletedBy: deleteField(),
+  deletedByName: deleteField(),
+  deletedWithProject: deleteField(),
+}
+
+async function tasksForProject(projectId) {
+  const snap = await getDocs(query(collection(db, 'tasks'), where('projectId', '==', projectId)))
+  return snap.docs.map((d) => ({ taskId: d.id, id: d.id, ...d.data() }))
+}
+
+export const restoreProjectFromDb = async (projectId) => {
+  try {
+    if (!projectId) return
+    await updateDoc(doc(db, 'projects', projectId), clearedTrashFields)
+    const tasks = await tasksForProject(projectId)
+    await Promise.all(
+      tasks
+        .filter((t) => t.deletedWithProject === projectId)
+        .map((t) => updateDoc(doc(db, 'tasks', t.taskId || t.id), clearedTrashFields))
+    )
+  } catch (err) {
+    console.error('Error restoring project from trash:', err)
+    throw err
+  }
+}
+
+export const permanentlyDeleteProjectFromDb = async (projectId) => {
+  try {
+    if (!projectId) return
+    const tasks = await tasksForProject(projectId)
+    await Promise.all(tasks.map((t) => deleteDoc(doc(db, 'tasks', t.taskId || t.id))))
+    await deleteDoc(doc(db, 'projects', projectId))
+  } catch (err) {
+    console.error('Error permanently deleting project:', err)
+    throw err
+  }
+}
+
+export const restoreTaskFromDb = async (taskId) => {
+  try {
+    if (!taskId) return
+    await updateDoc(doc(db, 'tasks', taskId), clearedTrashFields)
+  } catch (err) {
+    console.error('Error restoring task from trash:', err)
+    throw err
+  }
+}
+
+export const permanentlyDeleteTaskFromDb = async (taskId) => {
+  try {
+    if (!taskId) return
     await deleteDoc(doc(db, 'tasks', taskId))
   } catch (err) {
-    console.error('Error deleting task from Firestore:', err)
+    console.error('Error permanently deleting task:', err)
+    throw err
+  }
+}
+
+export const getTrashedProjectsFromDb = async () => {
+  try {
+    const snap = await getDocs(collection(db, 'projects'))
+    return snap.docs
+      .map((d) => ({ projectId: d.id, id: d.id, ...d.data() }))
+      .filter((p) => p.deletedAt)
+  } catch (err) {
+    console.error('Error fetching trashed projects:', err)
+    return []
+  }
+}
+
+export const getTrashedTasksFromDb = async () => {
+  try {
+    const snap = await getDocs(collection(db, 'tasks'))
+    return snap.docs
+      .map((d) => ({ taskId: d.id, id: d.id, ...d.data() }))
+      .filter((t) => t.deletedAt && !t.deletedWithProject)
+  } catch (err) {
+    console.error('Error fetching trashed tasks:', err)
+    return []
   }
 }

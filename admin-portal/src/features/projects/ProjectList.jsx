@@ -953,7 +953,7 @@ export const ProjectList = () => {
             </div>
 
             <p className="text-xs text-muted leading-relaxed">
-              Are you sure you want to delete project <strong className="text-slate-900 dark:text-white">{deleteConfirmProj.name}</strong>? All associated sprint data and tasks will be affected. This action cannot be undone.
+              Are you sure you want to move project <strong className="text-slate-900 dark:text-white">{deleteConfirmProj.name}</strong> to Trash? You can restore it later. Tasks deleted with the project come back when you restore it.
             </p>
 
             <div className="flex items-center justify-end gap-3 pt-3 border-t border-border">
@@ -971,7 +971,7 @@ export const ProjectList = () => {
                   setDeleteConfirmProj(null)
                 }}
               >
-                Yes, Delete Project
+                Move to Trash
               </Button>
             </div>
           </Card>

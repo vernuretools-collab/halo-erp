@@ -15,6 +15,13 @@ function statusLabel(status) {
   return status.name || status.id || 'Task'
 }
 
+function isDoneTask(task) {
+  const status = task?.status
+  const raw = typeof status === 'string' ? status : status?.id || status?.name || ''
+  const key = String(raw).trim().toLowerCase().replace(/[\s-]+/g, '_')
+  return key === 'done' || key === 'completed'
+}
+
 export const MyTimingTasks = ({ fillWindow = false } = {}) => {
   const { user, userDoc, claims } = useUserStore()
   const {
@@ -73,6 +80,7 @@ export const MyTimingTasks = ({ fillWindow = false } = {}) => {
   )
 
   const filteredTasks = tasks.filter((t) => {
+    if (isDoneTask(t)) return false
     if (!isTaskVisibleToUser(t, user, userDoc, claims, projects, tasks, visIndex)) return false
     if (projectFilter && projectFilter !== 'all') {
       const isProjectMatch =

@@ -67,26 +67,17 @@ export function timestampFromClockInTime(clockInTime, date = new Date()) {
 }
 
 /**
- * Live worked seconds from the displayed clock-in time (same source as admin),
- * not leftover stored totals + current session.
+ * Live worked seconds from the displayed clock-in time (same source as admin).
+ * The 8-hour day is elapsed office time and includes break and lunch.
  */
 export function computeLiveWorkedSeconds({
   clockInTime,
   clockOutTime,
   clockedIn,
   clockInTimestamp,
-  accumulatedBreakSeconds = 0,
   accumulatedWorkSeconds = 0,
-  isOnBreak = false,
-  breakStartTime = null,
 } = {}) {
   const now = Date.now()
-  let breakSec = Number(accumulatedBreakSeconds) || 0
-  const breakStartMs = toEpochMs(breakStartTime)
-  if (isOnBreak && breakStartMs) {
-    breakSec += Math.max(0, Math.floor((now - breakStartMs) / 1000))
-  }
-
   const stillIn = Boolean(clockedIn) || !clockOutTime || clockOutTime === 'In office'
   const inMins = timeStrToMinutes(clockInTime)
   const startMs =
@@ -98,7 +89,7 @@ export function computeLiveWorkedSeconds({
       const outMins = timeStrToMinutes(clockOutTime)
       endMs = outMins !== null ? timestampFromClockInTime(clockOutTime) : now
     }
-    return Math.max(0, Math.floor((endMs - startMs) / 1000) - breakSec)
+    return Math.max(0, Math.floor((endMs - startMs) / 1000))
   }
 
   return Math.max(0, Number(accumulatedWorkSeconds) || 0)

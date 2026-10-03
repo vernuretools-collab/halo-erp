@@ -16,6 +16,9 @@ export const AttendanceMetricsBar = () => {
     isOnBreak,
     breakStartTime,
     accumulatedBreakSeconds,
+    isOnLunch,
+    lunchStartTime,
+    accumulatedLunchSeconds,
     accumulatedWorkSeconds,
     leaveRequests,
   } = useTeamStore()
@@ -75,6 +78,9 @@ export const AttendanceMetricsBar = () => {
           accumulatedWorkSeconds,
           isOnBreak,
           breakStartTime,
+          isOnLunch,
+          lunchStartTime,
+          accumulatedLunchSeconds,
         })
       )
     }
@@ -89,6 +95,9 @@ export const AttendanceMetricsBar = () => {
     isOnBreak,
     breakStartTime,
     accumulatedBreakSeconds,
+    isOnLunch,
+    lunchStartTime,
+    accumulatedLunchSeconds,
     accumulatedWorkSeconds,
   ])
 

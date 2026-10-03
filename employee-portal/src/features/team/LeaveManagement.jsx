@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { NavLink } from 'react-router-dom'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Card } from '../../components/ui/Card'
 import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
 import { useTeamStore } from './stores/teamStore'
 import { useUserStore } from '../../stores/userStore'
-import { getEmployees, createLeaveRequest, updateLeaveStatusInDb, deleteLeaveRequestFromDb } from './services/teamService'
+import { getEmployees, createLeaveRequest, updateLeaveStatusInDb, deleteLeaveRequestFromDb, subscribeToCompanyHolidays } from './services/teamService'
 import {
   resolveEmployeeWfhPolicy,
   countUsedWfhDays,
@@ -29,6 +28,7 @@ import {
   resolvePermissionHours,
 } from './services/leaveEntitlementUtils'
 import { Users, CheckCircle2, Calendar, Plus, X, Clock, AlertCircle, AlertTriangle, ChevronLeft, ChevronRight, ChevronDown, Trash2, Ban, Home } from 'lucide-react'
+import { TeamSubNav } from './components/TeamSubNav'
 import { collection, onSnapshot } from 'firebase/firestore'
 import { db } from '../../shared/services/firebaseService'
 
@@ -225,7 +225,17 @@ const PermissionTimeSelect = ({ label, value, onChange }) => {
 }
 
 // ─── Modern Interactive Calendar Picker Component ─────────────────────────────
-const InteractiveCalendarPicker = ({ startDate, setStartDate, endDate, setEndDate, leaveType, setValidationError }) => {
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+const formatHolidayLabel = (dateStr) => {
+  const [y, m, d] = String(dateStr || '').split('-')
+  const month = SHORT_MONTHS[Number(m) - 1]
+  const day = Number(d)
+  if (!y || !month || !day) return dateStr
+  return `${day} ${month}`
+}
+
+const InteractiveCalendarPicker = ({ startDate, setStartDate, endDate, setEndDate, leaveType, setValidationError, holidays = [] }) => {
   const [isOpen, setIsOpen] = useState(false)
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear())
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth())
@@ -301,10 +311,28 @@ const InteractiveCalendarPicker = ({ startDate, setStartDate, endDate, setEndDat
 
   const minAllowedDate = getMinAllowedDate()
 
+  const holidayByDate = {}
+  ;(holidays || []).forEach((item) => {
+    const key = String(item?.date || '').slice(0, 10)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(key)) holidayByDate[key] = item
+  })
+  const monthPrefix = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`
+  const monthHolidays = Object.values(holidayByDate)
+    .filter((item) => String(item.date).startsWith(monthPrefix))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+
   const handleDayClick = (day) => {
     const mStr = String(currentMonth + 1).padStart(2, '0')
     const dStr = String(day).padStart(2, '0')
     const clickedDate = `${currentYear}-${mStr}-${dStr}`
+
+    const holiday = holidayByDate[clickedDate]
+    if (holiday) {
+      setValidationError(
+        `${formatHolidayLabel(clickedDate)} is ${holiday.name || 'Holiday'} (company holiday).`
+      )
+      return
+    }
 
     if (clickedDate < minAllowedDate) {
       if (leaveType === 'On Duty') {
@@ -435,13 +463,17 @@ const InteractiveCalendarPicker = ({ startDate, setStartDate, endDate, setEndDat
               const dateStr = `${currentYear}-${mStr}-${dStr}`
 
               const isToday = dateStr === todayStr
+              const holiday = holidayByDate[dateStr]
+              const isHoliday = Boolean(holiday)
               const isDisabled = dateStr < minAllowedDate
-              const isSelectedStart = dateStr === startDate
-              const isSelectedEnd = !singleDayOnly && dateStr === endDate && endDate !== startDate
-              const isInRange = !singleDayOnly && startDate && endDate && dateStr > startDate && dateStr < endDate
+              const isSelectedStart = !isHoliday && dateStr === startDate
+              const isSelectedEnd = !isHoliday && !singleDayOnly && dateStr === endDate && endDate !== startDate
+              const isInRange = !isHoliday && !singleDayOnly && startDate && endDate && dateStr > startDate && dateStr < endDate
 
               let cellClass = 'text-fg hover:bg-accent-soft hover:text-accent font-medium'
-              if (isDisabled) {
+              if (isHoliday) {
+                cellClass = 'bg-[#EAB308]/20 text-[#EAB308] font-bold cursor-not-allowed'
+              } else if (isDisabled) {
                 cellClass = 'text-muted opacity-60 cursor-not-allowed line-through bg-chrome font-normal'
               } else if (isSelectedStart || isSelectedEnd) {
                 cellClass = 'bg-accent text-white font-bold'
@@ -455,7 +487,8 @@ const InteractiveCalendarPicker = ({ startDate, setStartDate, endDate, setEndDat
                 <button
                   key={day}
                   type="button"
-                  disabled={isDisabled}
+                  disabled={isDisabled && !isHoliday}
+                  title={isHoliday ? holiday.name || 'Holiday' : undefined}
                   onClick={() => handleDayClick(day)}
                   className={`py-2 rounded-xl text-xs transition-all ${cellClass}`}
                 >
@@ -464,6 +497,12 @@ const InteractiveCalendarPicker = ({ startDate, setStartDate, endDate, setEndDat
               )
             })}
           </div>
+
+          {monthHolidays.length > 0 && (
+            <p className="text-[11px] font-medium text-[#EAB308]">
+              Holiday: {monthHolidays.map((item) => `${formatHolidayLabel(item.date)} ${item.name || 'Holiday'}`).join(' · ')}
+            </p>
+          )}
 
           <div className="pt-2 border-t border-border flex items-center justify-between text-[11px]">
             <span className="text-muted font-medium">
@@ -530,6 +569,7 @@ export const LeaveManagement = () => {
   const [endTime, setEndTime] = useState('')
   const [reason, setReason] = useState('')
   const [validationError, setValidationError] = useState('')
+  const [companyHolidays, setCompanyHolidays] = useState([])
   const [loadingLeave, setLoadingLeave] = useState(false)
   const [confirmAction, setConfirmAction] = useState(null) // { type: 'cancel' | 'delete', request }
   const [actionLoading, setActionLoading] = useState(false)
@@ -562,6 +602,11 @@ export const LeaveManagement = () => {
     }).catch(() => {})
     return () => unsub()
   }, [setLeaveRequests, setEmployees])
+
+  useEffect(() => {
+    const unsub = subscribeToCompanyHolidays((list) => setCompanyHolidays(list || []))
+    return () => unsub()
+  }, [])
 
   useEffect(() => {
     if (!wfhPolicy.leaveFormEnabled && leaveType === 'Work From Home') {
@@ -624,21 +669,24 @@ export const LeaveManagement = () => {
     myLeaveRequests,
     employeeWfhFilter,
     'casual',
-    currentMonthStr
+    currentMonthStr,
+    { holidays: companyHolidays }
   )
 
   const usedSickDaysThisMonth = countUsedPaidDays(
     myLeaveRequests,
     employeeWfhFilter,
     'sick',
-    currentMonthStr
+    currentMonthStr,
+    { holidays: companyHolidays }
   )
 
   const usedPaidWfhDaysThisMonth = countUsedPaidDays(
     myLeaveRequests,
     employeeWfhFilter,
     'wfh',
-    currentMonthStr
+    currentMonthStr,
+    { holidays: companyHolidays }
   )
 
   const remainingCasualDays = Math.max(0, leaveLimits.casual - usedCasualDaysThisMonth)
@@ -764,7 +812,7 @@ export const LeaveManagement = () => {
     const finalEndDate = singleDayOnly ? startDate : (endDate || startDate)
     const daysCount = isPermission
       ? 0
-      : expandLeaveWorkingDates(startDate, finalEndDate).length
+      : expandLeaveWorkingDates(startDate, finalEndDate, companyHolidays).length
 
     if (!isPermission && daysCount === 0) {
       setValidationError('Selected dates fall on Sunday or a company holiday. Pick working days only.')
@@ -779,6 +827,7 @@ export const LeaveManagement = () => {
       leaveRequests: myLeaveRequests,
       employeeFilter: employeeWfhFilter,
       limits: leaveLimits,
+      holidays: companyHolidays,
     })
 
     let wfhStatus = 'pending'
@@ -950,31 +999,8 @@ export const LeaveManagement = () => {
           }
         />
 
-        <div className="flex items-center gap-2 border-b border-border pb-3">
-          <NavLink
-            to="/directory"
-            className={({ isActive }) =>
-              `flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
-                isActive
-                  ? 'bg-accent-soft text-accent border border-accent/20 dark:border-accent/30'
-                  : 'text-muted hover:text-slate-900 dark:hover:text-slate-200 hover:bg-chrome'
-              }`
-            }
-          >
-            <Users className="w-3.5 h-3.5" /> Employee Directory
-          </NavLink>
-          <NavLink
-            to="/team/leave"
-            className={({ isActive }) =>
-              `flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
-                isActive
-                  ? 'bg-accent-soft text-accent border border-accent/20 dark:border-accent/30'
-                  : 'text-muted hover:text-slate-900 dark:hover:text-slate-200 hover:bg-chrome'
-              }`
-            }
-          >
-            <Calendar className="w-3.5 h-3.5" /> Leave Management
-          </NavLink>
+        <div className="border-b border-border pb-3">
+          <TeamSubNav />
         </div>
       </div>
 
@@ -1344,6 +1370,7 @@ export const LeaveManagement = () => {
                   setEndDate={setEndDate}
                   leaveType={leaveType}
                   setValidationError={setValidationError}
+                  holidays={companyHolidays}
                 />
               </div>
 

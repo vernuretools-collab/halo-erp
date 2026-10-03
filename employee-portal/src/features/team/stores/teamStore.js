@@ -12,8 +12,57 @@ export const LATE_GRACE_MINUTES = 10
 export const OFFICE_END_HOUR = 19
 export const OFFICE_END_MINUTE = 0
 
-// Regular workday length: 8 hours from clock-in (auto clock-out; extra hours after)
+// Regular workday length: 8 hours of office time, including break and lunch.
 export const WORKDAY_SECONDS = 8 * 3600
+export const LUNCH_SECONDS = 60 * 60
+export const LUNCH_MS = LUNCH_SECONDS * 1000
+
+let armLunchTimer = () => {}
+let disarmLunchTimer = () => {}
+
+function openLunchSeconds(state, nowMs = Date.now()) {
+  if (!state?.isOnLunch || !state.lunchStartTime) return 0
+  const elapsed = Math.max(0, Math.floor((nowMs - Number(state.lunchStartTime)) / 1000))
+  return Math.min(LUNCH_SECONDS, elapsed)
+}
+
+function resolveStoredLunch(fields = {}) {
+  const start = toEpochMs(fields.lunchStartTime)
+  const accumulated = Number(fields.accumulatedLunchSeconds) || 0
+  if (fields.isOnLunch && start) {
+    if (Date.now() - start >= LUNCH_MS) {
+      return {
+        isOnLunch: false,
+        lunchStartTime: null,
+        accumulatedLunchSeconds: accumulated + LUNCH_SECONDS,
+        lunchJustEnded: true,
+      }
+    }
+    return {
+      isOnLunch: true,
+      lunchStartTime: start,
+      accumulatedLunchSeconds: accumulated,
+      lunchJustEnded: false,
+    }
+  }
+  return {
+    isOnLunch: false,
+    lunchStartTime: null,
+    accumulatedLunchSeconds: accumulated,
+    lunchJustEnded: false,
+  }
+}
+
+function applyResolvedLunch(fields = {}) {
+  const lunch = resolveStoredLunch(fields)
+  return {
+    ...fields,
+    isOnLunch: lunch.isOnLunch,
+    lunchStartTime: lunch.lunchStartTime,
+    accumulatedLunchSeconds: lunch.accumulatedLunchSeconds,
+    lunchJustEnded: lunch.lunchJustEnded,
+  }
+}
 
 /**
  * Returns a "YYYY-MM-DD" string for today (local date).
@@ -48,6 +97,9 @@ function freshWorkdayFields(date = todayDateStr()) {
     isOnBreak: false,
     breakStartTime: null,
     accumulatedBreakSeconds: 0,
+    isOnLunch: false,
+    lunchStartTime: null,
+    accumulatedLunchSeconds: 0,
     accumulatedWorkSeconds: 0,
     todayShiftLogs: [],
     isInExtraTime: false,
@@ -77,6 +129,7 @@ function isStaleLocalAttendance(state, today = todayDateStr()) {
   if (state.clockInTimestamp && state.clockInTimestamp < midnight) return true
   if (state.extraTimeStart && state.extraTimeStart < midnight) return true
   if (state.breakStartTime && state.breakStartTime < midnight) return true
+  if (state.lunchStartTime && state.lunchStartTime < midnight) return true
 
   const logs = state.todayShiftLogs || []
   if (hasClockInOnLocalDay(logs, midnight)) return false
@@ -174,6 +227,9 @@ export const useTeamStore = create(
       isOnBreak: false,
       breakStartTime: null,
       accumulatedBreakSeconds: 0,
+      isOnLunch: false,
+      lunchStartTime: null,
+      accumulatedLunchSeconds: 0,
       accumulatedWorkSeconds: 0,
       todayShiftLogs: [],
 
@@ -275,12 +331,15 @@ export const useTeamStore = create(
             clockedIn: false,
             isOnBreak: false,
             breakStartTime: null,
+            isOnLunch: false,
+            lunchStartTime: null,
             date: prevDate,
             clockInTime: state.clockInTime,
             clockInTimestamp: state.clockInTimestamp,
           })
         }
 
+        disarmLunchTimer()
         set(freshWorkdayFields(today))
         return true
       },
@@ -324,6 +383,9 @@ export const useTeamStore = create(
               isOnBreak: live.isOnBreak,
               breakStartTime: live.breakStartTime,
               accumulatedBreakSeconds: live.accumulatedBreakSeconds,
+              isOnLunch: live.isOnLunch,
+              lunchStartTime: live.lunchStartTime,
+              accumulatedLunchSeconds: live.accumulatedLunchSeconds,
               accumulatedWorkSeconds: live.accumulatedWorkSeconds,
               todayShiftLogs: live.todayShiftLogs,
               isInExtraTime: live.isInExtraTime,
@@ -359,6 +421,9 @@ export const useTeamStore = create(
               isOnBreak: Boolean(todayLog.isOnBreak),
               breakStartTime: todayLog.breakStartTime || null,
               accumulatedBreakSeconds: todayLog.accumulatedBreakSeconds || 0,
+              isOnLunch: Boolean(todayLog.isOnLunch),
+              lunchStartTime: todayLog.lunchStartTime || null,
+              accumulatedLunchSeconds: todayLog.accumulatedLunchSeconds || 0,
               accumulatedWorkSeconds: rawWorkSec,
               todayShiftLogs: todayLog.todayShiftLogs || todayLog.shiftLogs || [],
               isInExtraTime: Boolean(todayLog.isInExtraTime),
@@ -391,6 +456,9 @@ export const useTeamStore = create(
                 isOnBreak: false,
                 breakStartTime: null,
                 accumulatedBreakSeconds: 0,
+                isOnLunch: false,
+                lunchStartTime: null,
+                accumulatedLunchSeconds: 0,
                 accumulatedWorkSeconds: 0,
                 regularSeconds: 0,
                 regularHours: secToHrsStr(0),
@@ -416,17 +484,28 @@ export const useTeamStore = create(
           }
           const realStats = computeRealAttendanceStats(monthlyLogsList, currentLive)
 
+          const resolved = applyResolvedLunch(todayState)
+          const { lunchJustEnded, ...resolvedState } = resolved
+          if (lunchJustEnded && uid) {
+            upsertAttendanceLog(uid, {
+              isOnLunch: false,
+              lunchStartTime: null,
+              accumulatedLunchSeconds: resolvedState.accumulatedLunchSeconds,
+            })
+          }
+
           set({
-            ...todayState,
+            ...resolvedState,
             attendanceStats: realStats,
           })
+          armLunchTimer()
         } catch (err) {
           console.error('[teamStore] Error loading user attendance from Firestore:', err)
         }
       },
 
       /**
-       * Auto clock-out after 8 hours of work from clock-in (minus breaks).
+       * Auto clock-out after 8 hours of office time from clock-in, including break and lunch.
        * Called by useAutoClockOutAfterWorkday when live worked time ≥ WORKDAY_SECONDS.
        * @param {object} userMeta - { uid, displayName, departmentName }
        */
@@ -447,13 +526,7 @@ export const useTeamStore = create(
           sessionSeconds = Math.max(0, Math.floor((nowMs - state.clockInTimestamp) / 1000))
         }
 
-        let breakSec = state.accumulatedBreakSeconds || 0
-        if (state.isOnBreak && state.breakStartTime) {
-          breakSec += Math.max(0, Math.floor((nowMs - state.breakStartTime) / 1000))
-        }
-
-        const netSeconds = Math.max(0, sessionSeconds - breakSec)
-        const totalSoFar = (state.accumulatedWorkSeconds || 0) + netSeconds
+        const totalSoFar = (state.accumulatedWorkSeconds || 0) + sessionSeconds
         if (totalSoFar < WORKDAY_SECONDS) return
 
         // Cap regular day at 8h; clock-out at the moment the 8h threshold was reached when possible
@@ -487,14 +560,18 @@ export const useTeamStore = create(
           ...state.todayShiftLogs,
         ]
 
+        disarmLunchTimer()
         set({
           clockedIn: false,
           clockOutTime: timeStr,
           clockInTimestamp: null,
           isOnBreak: false,
           breakStartTime: null,
+          isOnLunch: false,
+          lunchStartTime: null,
           accumulatedWorkSeconds: totalRegularSeconds,
           accumulatedBreakSeconds: 0,
+          accumulatedLunchSeconds: 0,
           lastWorkDate: todayDateStr(),
           todayShiftLogs: updatedLogs,
           overtimeRecords: [record, ...state.overtimeRecords],
@@ -513,7 +590,10 @@ export const useTeamStore = create(
             regularHours: secToHrsStr(totalRegularSeconds),
             accumulatedWorkSeconds: totalRegularSeconds,
             accumulatedBreakSeconds: 0,
+            accumulatedLunchSeconds: 0,
             isOnBreak: false,
+            isOnLunch: false,
+            lunchStartTime: null,
             extraSeconds: state.accumulatedExtraSeconds,
             extraHours: secToHrsStr(state.accumulatedExtraSeconds),
             date: todayDateStr(),
@@ -559,6 +639,7 @@ export const useTeamStore = create(
 
           const currentAccWorkSec = isNewDay ? 0 : (state.accumulatedWorkSeconds || 0)
           const currentAccBreakSec = isNewDay ? 0 : (state.accumulatedBreakSeconds || 0)
+          const currentAccLunchSec = isNewDay ? 0 : (state.accumulatedLunchSeconds || 0)
           const currentAccExtraSec = isNewDay ? 0 : (state.accumulatedExtraSeconds || 0)
           const currentShiftLogs = isNewDay ? [] : (state.todayShiftLogs || [])
 
@@ -575,6 +656,7 @@ export const useTeamStore = create(
             ...currentShiftLogs,
           ]
 
+          disarmLunchTimer()
           set({
             currentUserId: meta.uid || state.currentUserId,
             clockedIn: true,
@@ -583,7 +665,10 @@ export const useTeamStore = create(
             clockOutTime: null,
             isOnBreak: false,
             breakStartTime: null,
+            isOnLunch: false,
+            lunchStartTime: null,
             accumulatedBreakSeconds: currentAccBreakSec,
+            accumulatedLunchSeconds: currentAccLunchSec,
             accumulatedWorkSeconds: currentAccWorkSec,
             isInExtraTime: false,
             extraTimeStart: null,
@@ -608,7 +693,10 @@ export const useTeamStore = create(
               regularHours: secToHrsStr(currentAccWorkSec),
               accumulatedWorkSeconds: currentAccWorkSec,
               accumulatedBreakSeconds: currentAccBreakSec,
+              accumulatedLunchSeconds: currentAccLunchSec,
               isOnBreak: false,
+              isOnLunch: false,
+              lunchStartTime: null,
               isInExtraTime: false,
               extraTimeStart: null,
               extraSeconds: currentAccExtraSec,
@@ -632,8 +720,7 @@ export const useTeamStore = create(
           const sessionSeconds = state.clockInTimestamp
             ? Math.floor((Date.now() - state.clockInTimestamp) / 1000)
             : 0
-          const netSeconds = Math.max(0, sessionSeconds - state.accumulatedBreakSeconds)
-          const totalRegularSeconds = state.accumulatedWorkSeconds + netSeconds
+          const totalRegularSeconds = state.accumulatedWorkSeconds + Math.max(0, sessionSeconds)
 
           const newLog = {
             id: `log_${Date.now()}`,
@@ -654,14 +741,18 @@ export const useTeamStore = create(
             autoClockOut: false,
           }
 
+          disarmLunchTimer()
           set({
             clockedIn: false,
             clockOutTime: timeStr,
             clockInTimestamp: null,
             isOnBreak: false,
             breakStartTime: null,
+            isOnLunch: false,
+            lunchStartTime: null,
             accumulatedWorkSeconds: totalRegularSeconds,
             accumulatedBreakSeconds: 0,
+            accumulatedLunchSeconds: 0,
             lastWorkDate: sessionDate,
             todayShiftLogs: updatedLogs,
             overtimeRecords: [record, ...state.overtimeRecords],
@@ -681,7 +772,10 @@ export const useTeamStore = create(
               regularHours: secToHrsStr(totalRegularSeconds),
               accumulatedWorkSeconds: totalRegularSeconds,
               accumulatedBreakSeconds: 0,
+              accumulatedLunchSeconds: 0,
               isOnBreak: false,
+              isOnLunch: false,
+              lunchStartTime: null,
               extraSeconds: state.accumulatedExtraSeconds,
               extraHours: secToHrsStr(state.accumulatedExtraSeconds),
               date: sessionDate,
@@ -709,8 +803,7 @@ export const useTeamStore = create(
           let updatedShiftLogs = state.todayShiftLogs
           if (state.clockedIn && state.clockInTimestamp) {
             const sessionSeconds = Math.floor((Date.now() - state.clockInTimestamp) / 1000)
-            const netSeconds = Math.max(0, sessionSeconds - state.accumulatedBreakSeconds)
-            finalRegularSec += netSeconds
+            finalRegularSec += Math.max(0, sessionSeconds)
             updatedShiftLogs = [
               {
                 id: `log_${Date.now()}`,
@@ -731,14 +824,18 @@ export const useTeamStore = create(
             timestamp: Date.now(),
           }
 
+          disarmLunchTimer()
           set({
             clockedIn: false,
             clockInTimestamp: null,
             clockOutTime: state.clockedIn ? timeStr : state.clockOutTime,
             isOnBreak: false,
             breakStartTime: null,
+            isOnLunch: false,
+            lunchStartTime: null,
             accumulatedWorkSeconds: finalRegularSec,
             accumulatedBreakSeconds: 0,
+            accumulatedLunchSeconds: 0,
             isInExtraTime: true,
             extraTimeStart: Date.now(),
             extraTimeLogs: [newExtraLog, ...state.extraTimeLogs],
@@ -758,7 +855,10 @@ export const useTeamStore = create(
               regularHours: secToHrsStr(finalRegularSec),
               accumulatedWorkSeconds: finalRegularSec,
               accumulatedBreakSeconds: 0,
+              accumulatedLunchSeconds: 0,
               isOnBreak: false,
+              isOnLunch: false,
+              lunchStartTime: null,
               isInExtraTime: true,
               extraTimeStart: Date.now(),
               extraSeconds: state.accumulatedExtraSeconds,
@@ -876,6 +976,82 @@ export const useTeamStore = create(
           }
         }
       },
+
+      startLunch: (userMeta = {}) => {
+        const meta = resolveUserMeta(userMeta)
+        const state = get()
+        if (!state.clockedIn || state.isOnLunch) return
+        const lunchStartMs = Date.now()
+        const timeStr = canonicalTimeFromDate(new Date(lunchStartMs))
+        const newLog = {
+          id: `log_${lunchStartMs}`,
+          type: 'lunch_start',
+          label: 'Started Lunch',
+          time: timeStr,
+          timestamp: lunchStartMs,
+        }
+        const updatedLogs = [newLog, ...state.todayShiftLogs]
+        set({
+          isOnLunch: true,
+          lunchStartTime: lunchStartMs,
+          todayShiftLogs: updatedLogs,
+        })
+        if (meta.uid) {
+          upsertAttendanceLog(meta.uid, {
+            displayName: meta.displayName || 'Employee',
+            departmentName: meta.departmentName || '',
+            isOnLunch: true,
+            lunchStartTime: lunchStartMs,
+            accumulatedLunchSeconds: state.accumulatedLunchSeconds || 0,
+            todayShiftLogs: updatedLogs,
+            shiftLogs: updatedLogs,
+          })
+        }
+        armLunchTimer()
+      },
+
+      finishLunch: () => {
+        const meta = resolveUserMeta({})
+        const state = get()
+        if (!state.isOnLunch || !state.lunchStartTime) return
+        const lockKey = `crm_lunch_finish_${state.lunchStartTime}`
+        try {
+          if (localStorage.getItem(lockKey)) return
+          localStorage.setItem(lockKey, '1')
+        } catch {
+          /* private mode */
+        }
+        disarmLunchTimer()
+        const duration = openLunchSeconds(state)
+        const newLunchTotal = (state.accumulatedLunchSeconds || 0) + duration
+        const nowMs = Date.now()
+        const timeStr = canonicalTimeFromDate(new Date(nowMs))
+        const newLog = {
+          id: `log_${nowMs}`,
+          type: 'lunch_end',
+          label: 'Ended Lunch',
+          time: timeStr,
+          timestamp: nowMs,
+        }
+        const updatedLogs = [newLog, ...state.todayShiftLogs]
+        set({
+          isOnLunch: false,
+          lunchStartTime: null,
+          accumulatedLunchSeconds: newLunchTotal,
+          todayShiftLogs: updatedLogs,
+        })
+        if (meta.uid) {
+          upsertAttendanceLog(meta.uid, {
+            displayName: meta.displayName || 'Employee',
+            departmentName: meta.departmentName || '',
+            isOnLunch: false,
+            lunchStartTime: null,
+            accumulatedLunchSeconds: newLunchTotal,
+            todayShiftLogs: updatedLogs,
+            shiftLogs: updatedLogs,
+          })
+        }
+      },
     }),
     {
       name: 'crm_employee_team_store',
@@ -888,6 +1064,9 @@ export const useTeamStore = create(
         isOnBreak: state.isOnBreak,
         breakStartTime: state.breakStartTime,
         accumulatedBreakSeconds: state.accumulatedBreakSeconds,
+        isOnLunch: state.isOnLunch,
+        lunchStartTime: state.lunchStartTime,
+        accumulatedLunchSeconds: state.accumulatedLunchSeconds,
         accumulatedWorkSeconds: state.accumulatedWorkSeconds,
         todayShiftLogs: state.todayShiftLogs,
         isInExtraTime: state.isInExtraTime,
@@ -903,10 +1082,31 @@ export const useTeamStore = create(
         if (isStaleLocalAttendance(state, today)) {
           Object.assign(state, freshWorkdayFields(today))
         }
+        armLunchTimer()
       },
     }
   )
 )
+
+let lunchEndTimer = null
+disarmLunchTimer = () => {
+  if (lunchEndTimer) clearTimeout(lunchEndTimer)
+  lunchEndTimer = null
+}
+armLunchTimer = () => {
+  disarmLunchTimer()
+  const { isOnLunch, lunchStartTime, finishLunch } = useTeamStore.getState()
+  if (!isOnLunch || !lunchStartTime) return
+  const remaining = Number(lunchStartTime) + LUNCH_MS - Date.now()
+  if (remaining <= 0) {
+    finishLunch()
+    return
+  }
+  lunchEndTimer = setTimeout(() => {
+    lunchEndTimer = null
+    useTeamStore.getState().finishLunch()
+  }, remaining)
+}
 
 attachTeamStoreCrossWindowSync(useTeamStore)
 

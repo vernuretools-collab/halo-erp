@@ -15,6 +15,9 @@ const ClientProfileView = lazy(() =>
 const ProjectList = lazy(() =>
   import('./features/projects/ProjectList').then((m) => ({ default: m.ProjectList }))
 )
+const ProjectTrashPage = lazy(() =>
+  import('./features/projects/ProjectTrashPage').then((m) => ({ default: m.ProjectTrashPage }))
+)
 const ProjectDetailPage = lazy(() =>
   import('./features/projects/ProjectDetailPage').then((m) => ({ default: m.ProjectDetailPage }))
 )
@@ -139,6 +142,7 @@ export const router = createBrowserRouter([
 
       { path: 'projects', element: <Navigate to="/projects/list" replace /> },
       { path: 'projects/list', element: <ProjectList /> },
+      { path: 'projects/trash', element: <ProjectTrashPage /> },
       { path: 'projects/:projectId', element: <ProjectDetailPage /> },
       { path: 'projects/manage/:projectId', element: <ProjectDetailPage /> },
       { path: 'projects/tasks', element: <TaskBoard /> },

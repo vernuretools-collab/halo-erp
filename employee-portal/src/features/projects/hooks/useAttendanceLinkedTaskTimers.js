@@ -7,6 +7,7 @@ import { isEmployeeActivelyWorking } from '../services/projectService'
 export const useAttendanceLinkedTaskTimers = () => {
   const clockedIn = useTeamStore((s) => s.clockedIn)
   const isOnBreak = useTeamStore((s) => s.isOnBreak)
+  const isOnLunch = useTeamStore((s) => s.isOnLunch)
   const { user, userDoc } = useUserStore()
   const lastFetchedAt = useProjectStore((s) => s.lastFetchedAt)
   const syncTaskTimersWithAttendance = useProjectStore((s) => s.syncTaskTimersWithAttendance)
@@ -15,7 +16,7 @@ export const useAttendanceLinkedTaskTimers = () => {
   useEffect(() => {
     if (!user?.uid && !userDoc?.uid) return
 
-    const attendance = { clockedIn, isOnBreak }
+    const attendance = { clockedIn, isOnBreak, isOnLunch }
     const active = isEmployeeActivelyWorking(attendance)
     const prevActive = prevActiveRef.current
     const freezeElapsed = !active && prevActive !== true
@@ -24,9 +25,10 @@ export const useAttendanceLinkedTaskTimers = () => {
     syncTaskTimersWithAttendance({
       clockedIn,
       isOnBreak,
+      isOnLunch,
       user,
       userDoc,
       freezeElapsed,
     })
-  }, [clockedIn, isOnBreak, user, userDoc, lastFetchedAt, syncTaskTimersWithAttendance])
+  }, [clockedIn, isOnBreak, isOnLunch, user, userDoc, lastFetchedAt, syncTaskTimersWithAttendance])
 }

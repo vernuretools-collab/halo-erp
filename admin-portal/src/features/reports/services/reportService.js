@@ -82,7 +82,7 @@ export const getFinanceMetrics = async () => {
 export const getProjectMetrics = async () => {
   try {
     const snap = await getDocs(collection(db, 'projects'))
-    const projects = snap.docs.map((d) => d.data())
+    const projects = snap.docs.map((d) => d.data()).filter((p) => !p.deletedAt)
 
     const activeProjectsCount = projects.filter((p) => p.status === 'active').length
     const completed = projects.filter((p) => p.status === 'completed')

@@ -1,2 +1,23 @@
 @import "tailwindcss";
 @import "../../shared/theme.css";
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@utility animate-fadeIn {
+  animation: fadeIn 180ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fadeIn {
+    animation: none;
+  }
+}

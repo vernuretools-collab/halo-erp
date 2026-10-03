@@ -3,6 +3,7 @@ import { useOutletContext, useParams } from 'react-router-dom'
 import { Check, Loader2, Minus, MoreHorizontal, Plus, StickyNote, Trash2 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
+import { Modal } from '../../components/ui/Modal'
 import { useProjectNotesStore } from './stores/projectNotesStore'
 import { useUserStore } from '../../stores/userStore'
 
@@ -71,6 +72,7 @@ export const ProjectNotesPage = ({
     useProjectNotesStore()
 
   const [savingId, setSavingId] = useState(null)
+  const [pendingDelete, setPendingDelete] = useState(null)
 
   useEffect(() => {
     fetchNotes(projectId, project?.name || '')
@@ -104,6 +106,13 @@ export const ProjectNotesPage = ({
 
   const handleField = async (noteId, field, value) => {
     await updateNote(noteId, { [field]: value })
+  }
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return
+    const noteId = pendingDelete.noteId
+    setPendingDelete(null)
+    await removeNote(noteId)
   }
 
   return (
@@ -238,7 +247,7 @@ export const ProjectNotesPage = ({
                         <td className="px-2 py-2 w-12 text-center">
                           <button
                             type="button"
-                            onClick={() => removeNote(note.noteId)}
+                            onClick={() => setPendingDelete(note)}
                             className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 cursor-pointer"
                             title="Delete row"
                           >
@@ -254,6 +263,29 @@ export const ProjectNotesPage = ({
           </div>
         </Card>
       )}
+
+      <Modal
+        open={Boolean(pendingDelete)}
+        onClose={() => setPendingDelete(null)}
+        title="Delete this note?"
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" size="sm" onClick={() => setPendingDelete(null)}>
+              Cancel
+            </Button>
+            <Button variant="danger" size="sm" onClick={confirmDelete}>
+              Delete
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-muted">
+          {pendingDelete?.title?.trim()
+            ? `“${pendingDelete.title.trim()}” will be removed from this project.`
+            : 'This task row will be removed from this project.'}
+        </p>
+      </Modal>
     </div>
   )
 }

@@ -7,13 +7,15 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  deleteField,
   query,
   where,
   serverTimestamp,
   onSnapshot,
 } from 'firebase/firestore'
-import { db } from '../../../shared/services/firebaseService'
+import { db, supabase } from '../../../shared/services/firebaseService'
 import { useUserStore } from '../../../stores/userStore'
+import { mergeActivity } from './taskActivity'
 
 export const DEFAULT_TASK_STATUSES = [
   { id: 'todo', name: 'To Do', color: 'blue' },
@@ -380,7 +382,9 @@ export const deleteTaskStatusFromDb = async (statusId) => {
 export const getProjectsFromDb = async () => {
   try {
     const snap = await getDocs(collection(db, 'projects'))
-    return snap.docs.map((d) => ({ projectId: d.id, id: d.id, ...d.data() }))
+    return snap.docs
+      .map((d) => ({ projectId: d.id, id: d.id, ...d.data() }))
+      .filter((p) => !p.deletedAt)
   } catch (err) {
     console.error('Error fetching projects from Firestore:', err)
     return []
@@ -391,7 +395,9 @@ export const getProjectsFromDb = async () => {
 export const getTasksFromDb = async () => {
   try {
     const snap = await getDocs(collection(db, 'tasks'))
-    return snap.docs.map((d) => ({ taskId: d.id, id: d.id, ...d.data() }))
+    return snap.docs
+      .map((d) => ({ taskId: d.id, id: d.id, ...d.data() }))
+      .filter((t) => !t.deletedAt)
   } catch (err) {
     console.error('Error fetching tasks from Firestore:', err)
     return []
@@ -498,13 +504,182 @@ export const updateProjectStatsInDb = async (projectId, stats) => {
   }
 }
 
-// ─── Delete Project ───────────────────────────────────────────────────────────
+function trashActorPatch() {
+  const { user, userDoc } = useUserStore.getState()
+  return {
+    deletedAt: new Date().toISOString(),
+    deletedBy: user?.uid || userDoc?.uid || userDoc?.id || null,
+    deletedByName:
+      userDoc?.displayName || user?.displayName || userDoc?.name || 'Employee',
+  }
+}
+
+const clearedTrashFields = {
+  deletedAt: deleteField(),
+  deletedBy: deleteField(),
+  deletedByName: deleteField(),
+  deletedWithProject: deleteField(),
+}
+
+const ROW_COLS = 'id, org_id, user_id, parent_id, collection_name, auth_id, data, created_at'
+
+function applyTrashPatch(data, updates) {
+  const next = { ...(data || {}) }
+  for (const [key, val] of Object.entries(updates || {})) {
+    if (val && val._method === 'deleteField') delete next[key]
+    else next[key] = val
+  }
+  return next
+}
+
+async function projectRow(projectId) {
+  const { data, error } = await supabase
+    .from('projects')
+    .select(ROW_COLS)
+    .eq('id', projectId)
+    .maybeSingle()
+  if (error) throw error
+  return data
+}
+
+async function taskRowsForProject(projectId) {
+  const { data, error } = await supabase
+    .from('tasks')
+    .select(ROW_COLS)
+    .eq('data->>projectId', String(projectId))
+  if (error) throw error
+  return data || []
+}
+
+async function upsertRows(table, rows) {
+  if (!rows.length) return
+  const updated_at = new Date().toISOString()
+  const CHUNK = 80
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const slice = rows.slice(i, i + CHUNK).map((row) => ({
+      id: row.id,
+      org_id: row.org_id ?? null,
+      user_id: row.user_id ?? null,
+      parent_id: row.parent_id ?? null,
+      collection_name: row.collection_name ?? null,
+      auth_id: row.auth_id ?? null,
+      data: row.data,
+      created_at: row.created_at,
+      updated_at,
+    }))
+    const { error } = await supabase.from(table).upsert(slice, { onConflict: 'id' })
+    if (error) throw error
+  }
+}
+
+async function tryRpc(name, args) {
+  const { error } = await supabase.rpc(name, args)
+  if (!error) return true
+  const missing =
+    error.code === 'PGRST202' ||
+    /could not find the function/i.test(error.message || '') ||
+    /schema cache/i.test(error.message || '')
+  if (missing) return false
+  throw error
+}
+
+async function saveProjectTrash(projectId, projectPatch, mapTasks) {
+  const [project, tasks] = await Promise.all([
+    projectRow(projectId),
+    taskRowsForProject(projectId),
+  ])
+  if (!project) throw new Error('Project not found')
+  await Promise.all([
+    upsertRows('projects', [{ ...project, data: applyTrashPatch(project.data, projectPatch) }]),
+    upsertRows('tasks', mapTasks(tasks)),
+  ])
+}
+
+// ─── Delete Project (move to Trash) ───────────────────────────────────────────
 export const deleteProjectFromDb = async (projectId) => {
   try {
     if (!projectId) return
-    await deleteDoc(doc(db, 'projects', projectId))
+    const actor = trashActorPatch()
+    if (await tryRpc('trash_project', { p_project_id: projectId, p_actor: actor })) return
+    await saveProjectTrash(projectId, actor, (tasks) =>
+      tasks
+        .filter((row) => !row.data?.deletedAt)
+        .map((row) => ({
+          ...row,
+          data: applyTrashPatch(row.data, { ...actor, deletedWithProject: projectId }),
+        }))
+    )
   } catch (err) {
-    console.error('Error deleting project from Firestore:', err)
+    console.error('Error moving project to trash:', err)
+    throw err
+  }
+}
+
+export const restoreProjectFromDb = async (projectId) => {
+  try {
+    if (!projectId) return
+    if (await tryRpc('restore_project', { p_project_id: projectId })) return
+    await saveProjectTrash(projectId, clearedTrashFields, (tasks) =>
+      tasks
+        .filter((row) => row.data?.deletedWithProject === projectId)
+        .map((row) => ({
+          ...row,
+          data: applyTrashPatch(row.data, clearedTrashFields),
+        }))
+    )
+  } catch (err) {
+    console.error('Error restoring project from trash:', err)
+    throw err
+  }
+}
+
+export const permanentlyDeleteProjectFromDb = async (projectId) => {
+  try {
+    if (!projectId) return
+    if (await tryRpc('purge_project', { p_project_id: projectId })) return
+    const [tasksRes, projectRes] = await Promise.all([
+      supabase.from('tasks').delete().eq('data->>projectId', String(projectId)),
+      supabase.from('projects').delete().eq('id', projectId),
+    ])
+    if (tasksRes.error) throw tasksRes.error
+    if (projectRes.error) throw projectRes.error
+  } catch (err) {
+    console.error('Error permanently deleting project:', err)
+    throw err
+  }
+}
+
+function trashedDoc(row, idKey) {
+  return { [idKey]: row.id, id: row.id, ...(row.data || {}) }
+}
+
+export const getTrashedProjectsFromDb = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('projects')
+      .select('id, data')
+      .not('data->>deletedAt', 'is', null)
+    if (error) throw error
+    return (data || []).filter((row) => row.data?.deletedAt).map((row) => trashedDoc(row, 'projectId'))
+  } catch (err) {
+    console.error('Error fetching trashed projects:', err)
+    return []
+  }
+}
+
+export const getTrashedTasksFromDb = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('tasks')
+      .select('id, data')
+      .not('data->>deletedAt', 'is', null)
+    if (error) throw error
+    return (data || [])
+      .filter((row) => row.data?.deletedAt && !row.data?.deletedWithProject)
+      .map((row) => trashedDoc(row, 'taskId'))
+  } catch (err) {
+    console.error('Error fetching trashed tasks:', err)
+    return []
   }
 }
 
@@ -513,7 +688,9 @@ export const getProjectById = async (projectId) => {
     if (!projectId) return null
     const docSnap = await getDoc(doc(db, 'projects', projectId))
     if (docSnap.exists()) {
-      return { projectId: docSnap.id, id: docSnap.id, ...docSnap.data() }
+      const data = docSnap.data()
+      if (data?.deletedAt) return null
+      return { projectId: docSnap.id, id: docSnap.id, ...data }
     }
     return null
   } catch (err) {
@@ -682,7 +859,57 @@ export const deleteProcessStep = async (projectId, stepId) => {
 
 // ─── Timer helpers ─────────────────────────────────────────────────────────────
 export const isEmployeeActivelyWorking = (attendance) =>
-  Boolean(attendance?.clockedIn) && !attendance?.isOnBreak
+  Boolean(attendance?.clockedIn) && !attendance?.isOnBreak && !attendance?.isOnLunch
+
+export const idleTimerFields = () => ({
+  timerStatus: 'paused',
+  timerAccumulatedMs: 0,
+  timerStartedAt: null,
+  timerStoppedAt: null,
+  timerPausedByAttendance: false,
+  loggedHours: 0,
+})
+
+export const timerPatchForStatusMove = (
+  task,
+  newStatus,
+  attendance,
+  now = new Date().toISOString()
+) => {
+  if (!task || !newStatus || task.status === newStatus) return null
+
+  if (newStatus === 'done') {
+    if (task.timerStatus === 'stopped') return null
+    return stopTimerFields(task, now)
+  }
+
+  if (newStatus === 'todo') {
+    if (task.timerStatus === 'running') {
+      return pauseTimerFields(task, now, { byAttendance: false })
+    }
+    if (task.timerStatus === 'paused' && task.timerPausedByAttendance) {
+      return pauseTimerFields(task, now, { byAttendance: false, freezeElapsed: true })
+    }
+    return null
+  }
+
+  if (task.status !== 'todo') return null
+
+  if (isEmployeeActivelyWorking(attendance)) {
+    if (task.timerStatus === 'running') return null
+    const resumable =
+      task.timerStatus === 'stopped'
+        ? { ...task, timerStatus: 'paused', timerAccumulatedMs: Number(task.timerAccumulatedMs) || 0 }
+        : task
+    return resumeTimerFields(resumable, now)
+  }
+
+  if (task.timerStatus === 'paused' && task.timerPausedByAttendance) return null
+  return pauseTimerFields(task, now, {
+    byAttendance: true,
+    freezeElapsed: task.timerStatus !== 'running',
+  })
+}
 
 export const startTimerFields = (now = new Date().toISOString(), options = {}) => {
   const activelyWorking = options.activelyWorking !== false
@@ -819,6 +1046,22 @@ export const createTaskInDb = async (taskData) => {
 }
 
 // ─── Update Task Status ────────────────────────────────────────────────────────
+export const appendTaskActivityInDb = async (taskId, entries) => {
+  const incoming = (entries || []).filter(Boolean)
+  if (!taskId || !incoming.length) return
+  try {
+    const ref = doc(db, 'tasks', taskId)
+    const snap = await getDoc(ref)
+    const current = snap.exists() ? snap.data() : {}
+    await updateDoc(ref, {
+      activity: mergeActivity(current.activity, incoming),
+      updatedAt: serverTimestamp(),
+    })
+  } catch (err) {
+    console.error('Error saving task activity:', err)
+  }
+}
+
 export const updateTaskStatusInDb = async (taskId, newStatus, timerPatch = null) => {
   try {
     if (!taskId) return
@@ -876,13 +1119,38 @@ export const updateTaskSubtasksInDb = async (taskId, subtasks, status = null) =>
   }
 }
 
-// ─── Delete Task ───────────────────────────────────────────────────────────────
+// ─── Delete Task (move to Trash) ───────────────────────────────────────────────
 export const deleteTaskFromDb = async (taskId) => {
   try {
     if (!taskId) return
-    await deleteDoc(doc(db, 'tasks', taskId))
+    await updateDoc(doc(db, 'tasks', taskId), {
+      ...trashActorPatch(),
+      deletedWithProject: deleteField(),
+    })
   } catch (err) {
-    console.error('Error deleting task from Firestore:', err)
+    console.error('Error moving task to trash:', err)
+    throw err
+  }
+}
+
+export const restoreTaskFromDb = async (taskId) => {
+  try {
+    if (!taskId) return
+    await updateDoc(doc(db, 'tasks', taskId), clearedTrashFields)
+  } catch (err) {
+    console.error('Error restoring task from trash:', err)
+    throw err
+  }
+}
+
+export const permanentlyDeleteTaskFromDb = async (taskId) => {
+  try {
+    if (!taskId) return
+    const { error } = await supabase.from('tasks').delete().eq('id', taskId)
+    if (error) throw error
+  } catch (err) {
+    console.error('Error permanently deleting task:', err)
+    throw err
   }
 }
 

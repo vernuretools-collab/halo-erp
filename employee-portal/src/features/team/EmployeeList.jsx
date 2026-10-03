@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react'
-import { NavLink } from 'react-router-dom'
 import { collection, query, where, onSnapshot } from 'firebase/firestore'
 import { db } from '../../shared/services/firebaseService'
 import { PageHeader } from '../../components/layout/PageHeader'
@@ -24,7 +23,6 @@ import {
   Phone,
   Building,
   CheckCircle2,
-  Calendar,
   Layers,
   X,
   Trash2,
@@ -33,6 +31,7 @@ import {
   Loader2,
   AlertCircle,
 } from 'lucide-react'
+import { TeamSubNav } from './components/TeamSubNav'
 
 export const EmployeeList = () => {
   const { employees, departments, setEmployees, setDepartments, setLoading, loading, addEmployee, deleteEmployee } = useTeamStore()
@@ -198,31 +197,8 @@ export const EmployeeList = () => {
           }
         />
 
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-2">
-            <NavLink
-              to="/directory"
-              className={({ isActive }) =>
-                `flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${isActive
-                  ? 'bg-accent-soft text-accent border border-accent/20 dark:border-accent/30'
-                  : 'text-muted hover:text-slate-900 dark:hover:text-slate-200 hover:bg-chrome'
-                }`
-              }
-            >
-              <Users className="w-3.5 h-3.5" /> Employee Directory
-            </NavLink>
-            <NavLink
-              to="/team/leave"
-              className={({ isActive }) =>
-                `flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${isActive
-                  ? 'bg-accent-soft text-accent border border-accent/20 dark:border-accent/30'
-                  : 'text-muted hover:text-slate-900 dark:hover:text-slate-200 hover:bg-chrome'
-                }`
-              }
-            >
-              <Calendar className="w-3.5 h-3.5" /> Leave Management
-            </NavLink>
-          </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <TeamSubNav />
 
           <div className="flex items-center gap-3">
             <select
