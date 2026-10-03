@@ -39,6 +39,9 @@ const RecurringBilling = lazy(() =>
 const EmployeeList = lazy(() =>
   import('./features/team/EmployeeList').then((m) => ({ default: m.EmployeeList }))
 )
+const ScrumPage = lazy(() =>
+  import('./features/team/ScrumPage').then((m) => ({ default: m.ScrumPage }))
+)
 const AnnouncementManager = lazy(() =>
   import('./features/team/AnnouncementManager').then((m) => ({ default: m.AnnouncementManager }))
 )
@@ -159,6 +162,7 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <Navigate to="/team/employees" replace /> },
           { path: 'employees', element: <EmployeeList /> },
+          { path: 'scrum', element: <ScrumPage /> },
           { path: 'announcements', element: <AnnouncementManager /> },
           { path: 'helpdesk', element: <HelpDeskManager /> },
           { path: 'attendance', element: <AttendancePage /> },

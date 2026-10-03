@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard,
@@ -24,12 +24,14 @@ import {
   Building2,
   Send,
   StickyNote,
+  ListChecks,
 } from 'lucide-react'
 import haloLogo from '../../assets/halologo.png'
 import { useUIStore } from '../../stores/uiStore'
 import { useUserStore } from '../../stores/userStore'
 import { logoutUser } from '../../shared/services/authService'
 import { EmployeeAvatar } from '../../../../shared/ui/EmployeeAvatar.jsx'
+import { useIsScrumConductor } from '../../../../shared/scrum/useScrumConductor.js'
 
 const NAV_GROUPS = [
   {
@@ -98,12 +100,24 @@ const NAV_GROUPS = [
 export const EmployeeSidebar = () => {
   const { sidebarOpen, toggleSidebar } = useUIStore()
   const { user, userDoc, clearUser } = useUserStore()
+  const { isConductor } = useIsScrumConductor(user, userDoc)
   const location = useLocation()
   const navigate = useNavigate()
+  const navGroups = NAV_GROUPS.map((group) => {
+    if (group.key !== 'team' || !isConductor) return group
+    return {
+      ...group,
+      items: [
+        group.items[0],
+        { name: 'Scrum', path: '/team/scrum', icon: ListChecks },
+        ...group.items.slice(1),
+      ],
+    }
+  })
 
   // Determine which group contains the active route (auto-expand it)
   const getInitialExpanded = () => {
-    const activeGroup = NAV_GROUPS.find((g) => {
+    const activeGroup = navGroups.find((g) => {
       if (g.items.length <= 1) return false
       if (g.items.some((item) => location.pathname.startsWith(item.path))) return true
       return g.key === 'projects' && /^\/projects\/(?!list$|tasks$|trash$)[^/]+/.test(location.pathname)
@@ -112,6 +126,12 @@ export const EmployeeSidebar = () => {
   }
 
   const [expandedGroups, setExpandedGroups] = useState(getInitialExpanded)
+
+  useEffect(() => {
+    if (isConductor && location.pathname.startsWith('/team/scrum')) {
+      setExpandedGroups({ team: true })
+    }
+  }, [isConductor, location.pathname])
 
   const toggleGroup = (key) => {
     if (!sidebarOpen) return
@@ -178,7 +198,7 @@ export const EmployeeSidebar = () => {
 
       {/* Nav Groups */}
       <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
-        {NAV_GROUPS.map((group) => {
+        {navGroups.map((group) => {
           const GroupIcon = group.icon
           const isExpanded = expandedGroups[group.key]
           const groupActive = isGroupActive(group)

@@ -40,6 +40,8 @@ const ROOT_TABLES = {
   supportTickets: 'help_desk_tickets',
   onboarding: 'client_onboarding',
   campaigns: 'app_docs',
+  dailyScrums: 'app_docs',
+  scrumConductor: 'app_docs',
 }
 
 const ORG_SUB = {

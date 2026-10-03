@@ -1,5 +1,5 @@
 import React from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard,
   Users,
@@ -22,15 +22,19 @@ import {
   CheckCircle2,
   Crown,
   User,
-  CreditCard
+  CreditCard,
+  ListChecks,
 } from 'lucide-react'
 import haloLogo from '../../../assets/halologo.png'
 import { useUIStore } from '../../stores/uiStore'
 import { useUserStore } from '../../stores/userStore'
+import { useIsScrumConductor } from '../../../../shared/scrum/useScrumConductor.js'
 
 export const Sidebar = () => {
   const { sidebarOpen, toggleSidebar } = useUIStore()
-  const { claims, user } = useUserStore()
+  const { claims, user, userDoc } = useUserStore()
+  const { isConductor } = useIsScrumConductor(user, userDoc)
+  const location = useLocation()
 
   const userRole = claims?.role || 'admin'
   const userTier = claims?.tier || 'company'
@@ -70,6 +74,7 @@ export const Sidebar = () => {
       { name: 'Projects Management', path: '/projects', icon: Briefcase },
       { name: 'Finance & Invoicing', path: '/finance', icon: DollarSign },
       { name: 'Team Management', path: '/team', icon: UserCheck },
+      { name: 'Scrum', path: '/team/scrum', icon: ListChecks },
       { name: 'Marketing Hub', path: '/marketing', icon: Megaphone },
       { name: 'KPIs & Health', path: '/kpi', icon: Activity },
       { name: 'Workflows', path: '/workflows', icon: GitBranch },
@@ -80,7 +85,10 @@ export const Sidebar = () => {
     ]
   }
 
-  const navItems = getNavItemsForRole()
+  const navItems = getNavItemsForRole().flatMap((item) => {
+    if (userRole !== 'employee' || !isConductor || item.path !== '/team/employees') return [item]
+    return [item, { name: 'Scrum', path: '/team/scrum', icon: ListChecks }]
+  })
 
   const getRoleLabel = () => {
     if (userTier === 'client' || userRole === 'client') return { label: 'Client Workspace', color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' }
@@ -129,12 +137,18 @@ export const Sidebar = () => {
             <NavLink
               key={item.path}
               to={item.path}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${isActive
+              className={({ isActive }) => {
+                const onScrum = location.pathname.startsWith('/team/scrum')
+                const active = item.path === '/team/scrum'
+                  ? onScrum
+                  : item.path === '/team'
+                    ? isActive && !onScrum
+                    : isActive
+                return `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${active
                   ? 'bg-accent-soft text-accent border border-accent/20 shadow-sm'
                   : 'text-muted hover:text-fg hover:bg-surface'
                 }`
-              }
+              }}
             >
               <Icon className="w-5 h-5 shrink-0" />
               {sidebarOpen && <span className="truncate">{item.name}</span>}

@@ -34,6 +34,9 @@ const SessionIndexRedirect = lazy(() =>
 const EmployeeList = lazy(() =>
   import('./features/team/EmployeeList').then((m) => ({ default: m.EmployeeList }))
 )
+const ScrumConductorPage = lazy(() =>
+  import('./features/team/ScrumConductorPage').then((m) => ({ default: m.ScrumConductorPage }))
+)
 const OrganizationStructure = lazy(() =>
   import('./features/team/OrganizationStructure').then((m) => ({ default: m.OrganizationStructure }))
 )
@@ -125,6 +128,7 @@ export const router = createBrowserRouter([
       { path: 'team/organization', element: <OrganizationStructure /> },
       { path: 'team/attendance', element: <Navigate to="/dashboard" replace /> },
       { path: 'team/leave', element: <LeaveManagement /> },
+      { path: 'team/scrum', element: <ScrumConductorPage /> },
       { path: 'directory', element: <EmployeeList /> },
       { path: 'attendance', element: <Navigate to="/dashboard" replace /> },
       { path: 'leave', element: <LeaveManagement /> },

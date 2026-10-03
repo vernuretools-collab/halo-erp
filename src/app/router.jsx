@@ -25,6 +25,7 @@ import { ExpenseList } from '../features/finance/ExpenseList'
 import { RecurringBilling } from '../features/finance/RecurringBilling'
 
 import { EmployeeList } from '../features/team/EmployeeList'
+import { ScrumPage } from '../features/team/ScrumPage'
 import { AttendancePage } from '../features/team/AttendancePage'
 import { LeaveManagement } from '../features/team/LeaveManagement'
 
@@ -130,6 +131,7 @@ export const router = createBrowserRouter([
                 children: [
                   { path: 'team', element: <Navigate to="/team/employees" replace /> },
                   { path: 'team/employees', element: <EmployeeList /> },
+                  { path: 'team/scrum', element: <ScrumPage /> },
                   { path: 'team/attendance', element: <AttendancePage /> },
                   { path: 'team/leave', element: <LeaveManagement /> },
                 ],

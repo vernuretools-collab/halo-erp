@@ -11,6 +11,7 @@ import {
   FolderOpen,
   Megaphone,
   LifeBuoy,
+  ListChecks,
 } from 'lucide-react'
 
 const linkClass = ({ isActive }) =>
@@ -30,6 +31,9 @@ export function TeamSubNav({ className = '' }) {
     >
       <NavLink to="/team/employees" className={linkClass}>
         <Users className="w-3.5 h-3.5" /> Employee Directory
+      </NavLink>
+      <NavLink to="/team/scrum" className={linkClass}>
+        <ListChecks className="w-3.5 h-3.5" /> Scrum
       </NavLink>
       <NavLink to="/team/announcements" className={linkClass}>
         <Megaphone className="w-3.5 h-3.5" /> Announcements

@@ -30,6 +30,7 @@ import {
   Sliders,
   Bot,
   Trash2,
+  ListChecks,
 } from 'lucide-react'
 import haloLogo from '../../assets/halologo.png'
 import { useUIStore } from '../../stores/uiStore'
@@ -135,6 +136,7 @@ const ADMIN_GROUPS = [
     icon: UserCheck,
     items: [
       { name: 'Employees', path: '/team/employees', icon: Users },
+      { name: 'Scrum', path: '/team/scrum', icon: ListChecks },
       { name: 'Announcements', path: '/team/announcements', icon: Megaphone },
       { name: 'Client Support', path: '/team/helpdesk', icon: LifeBuoy },
       { name: 'Attendance', path: '/team/attendance', icon: CheckCircle2 },
@@ -364,10 +366,16 @@ export const Sidebar = () => {
                     <div className="ml-3 mt-0.5 pl-3 border-l border-border space-y-0.5 pb-1">
                       {group.items.map((item) => {
                         const Icon = item.icon
+                        const exact =
+                          group.items.some(
+                            (other) =>
+                              other.path !== item.path && other.path.startsWith(`${item.path}/`),
+                          )
                         return (
                           <NavLink
                             key={item.path}
                             to={item.path}
+                            end={exact}
                             tabIndex={isExpanded ? 0 : -1}
                             className={({ isActive }) =>
                               `flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs font-medium transition-all ${
