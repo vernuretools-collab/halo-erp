@@ -10,10 +10,13 @@ import { useLiveAuthSession } from '../../../../shared/supabase/useLiveAuthSessi
 import { useWellnessNotifications } from '../../features/wellness/hooks/useWellnessNotifications'
 import { useSocialPostReminders } from '../../features/social-posts/hooks/useSocialPostReminders'
 import { useAutoClockOutAfterWorkday } from '../../features/team/hooks/useAutoClockOutAfterWorkday'
+import { useEodClockOutReminder } from '../../features/team/hooks/useEodClockOutReminder'
+import { useFixedLunchSchedule } from '../../features/team/hooks/useFixedLunchSchedule'
 import { useAnnouncementBrowserAlerts } from '../../features/announcements/hooks/useAnnouncementBrowserAlerts'
 import { usePayslipBrowserAlerts } from '../../features/payslips/hooks/usePayslipBrowserAlerts'
 import { useProjectBrowserAlerts } from '../../features/projects/hooks/useProjectBrowserAlerts'
 import { collectUserIdentityIds } from '../../features/projects/services/projectService'
+import { isJoiningRole } from '../../../../shared/supabase/employeeOnboarding.js'
 import { DesktopAttendanceBridge } from '../../features/team/components/DesktopAttendanceBridge'
 import { useAttendanceLinkedTaskTimers } from '../../features/projects/hooks/useAttendanceLinkedTaskTimers'
 
@@ -62,7 +65,9 @@ export const AppShell = () => {
 
   useWellnessNotifications()
   useSocialPostReminders()
+  useEodClockOutReminder()
   useAutoClockOutAfterWorkday()
+  useFixedLunchSchedule()
   useAttendanceLinkedTaskTimers()
 
   if (!sessionReady) {
@@ -75,6 +80,10 @@ export const AppShell = () => {
 
   if (!user) {
     return <Navigate to="/login" replace />
+  }
+
+  if (isJoiningRole(claims?.role) || isJoiningRole(userDoc?.role)) {
+    return <Navigate to="/joining/form" replace />
   }
 
   return (

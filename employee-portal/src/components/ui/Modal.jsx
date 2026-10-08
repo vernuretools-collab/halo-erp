@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
 export const Modal = ({
@@ -28,15 +29,18 @@ export const Modal = ({
     xl: 'max-w-4xl',
   }
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
-      onClick={onClose}
+      className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose?.()
+      }}
     >
       <div
         role="dialog"
         aria-modal="true"
         className={`w-full ${sizes[size]} bg-surface border border-border rounded-2xl shadow-xl text-fg max-h-[90vh] flex flex-col ${className}`}
+        onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
         {(title || onClose) && (
@@ -61,6 +65,7 @@ export const Modal = ({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

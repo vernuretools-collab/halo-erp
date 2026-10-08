@@ -2,6 +2,8 @@ import React, { lazy } from 'react'
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { AppShell, AppShellError } from './components/layout/AppShell'
 import { EmployeeLoginPage } from './features/auth/EmployeeLoginPage'
+import { JoiningLoginPage } from './features/joining/JoiningLoginPage'
+import { JoiningFormPage } from './features/joining/JoiningFormPage'
 import { DesktopTimingLayout } from './features/desktop/DesktopTimingLayout'
 
 const EmployeeDashboard = lazy(() =>
@@ -88,6 +90,14 @@ export const router = createBrowserRouter([
   {
     path: '/login',
     element: <EmployeeLoginPage />,
+  },
+  {
+    path: '/joining',
+    element: <JoiningLoginPage />,
+  },
+  {
+    path: '/joining/form',
+    element: <JoiningFormPage />,
   },
   {
     path: '/desktop-timing',

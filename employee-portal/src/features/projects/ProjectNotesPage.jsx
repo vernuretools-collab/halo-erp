@@ -61,6 +61,8 @@ export const ProjectNotesPage = ({
   projectId: projectIdProp,
   project: projectProp,
   hideTitle = false,
+  panel = false,
+  toolbar = null,
 } = {}) => {
   const { projectId: routeProjectId } = useParams()
   const outlet = useOutletContext() || {}
@@ -115,6 +117,161 @@ export const ProjectNotesPage = ({
     await removeNote(noteId)
   }
 
+  const progressLabel = `${progress.done}/${progress.total} complete · ${progress.percent}%`
+
+  const table = loading ? (
+    <div className="py-16 text-center text-slate-500">
+      <Loader2 className="w-6 h-6 animate-spin mx-auto text-accent mb-2" />
+      <span className="text-xs">Loading notes...</span>
+    </div>
+  ) : (
+    <div className={panel ? 'flex-1' : 'overflow-x-auto'}>
+      <table className={`w-full border-collapse ${panel ? 'table-fixed' : 'min-w-[640px]'}`}>
+        <thead>
+          <tr className="bg-accent-soft">
+            {[
+              ['Task', panel ? 'w-[30%]' : ''],
+              ['Status', 'w-16'],
+              ['Priority', 'w-[108px]'],
+              ['Notes', ''],
+              ['', 'w-12'],
+            ].map(([label, width]) => (
+              <th
+                key={label || 'actions'}
+                className={`text-left text-[11px] font-bold uppercase tracking-wide text-muted px-3 py-2.5 border-b border-border/80 whitespace-nowrap ${width} ${
+                  label === '' ? 'sticky right-0 bg-accent-soft' : ''
+                }`}
+              >
+                {label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {notes.length === 0 ? (
+            <tr>
+              <td colSpan={5} className="px-4 py-14 text-center">
+                <StickyNote className="w-8 h-8 mx-auto text-slate-400 mb-2" />
+                <p className="text-sm font-semibold text-fg">No tasks yet</p>
+                <p className="text-xs text-slate-400 mt-1">
+                  Add a row, then click status to set red, yellow, or green.
+                </p>
+              </td>
+            </tr>
+          ) : (
+            notes.map((note) => {
+              const status = STATUS_META[note.status] ? note.status : 'red'
+              return (
+                <tr key={note.noteId} className={`border-b border-border ${ROW_TINT[status]}`}>
+                  <td className="px-3 py-2 border-r border-slate-100 dark:border-slate-800/80">
+                    <input
+                      className={cellInput}
+                      value={note.title}
+                      placeholder="Enter task name"
+                      onChange={(e) =>
+                        useProjectNotesStore.setState((state) => ({
+                          notes: state.notes.map((n) =>
+                            n.noteId === note.noteId ? { ...n, title: e.target.value } : n
+                          ),
+                        }))
+                      }
+                      onBlur={(e) => handleField(note.noteId, 'title', e.target.value)}
+                    />
+                  </td>
+                  <td className="px-3 py-2 w-20 text-center border-r border-slate-100 dark:border-slate-800/80">
+                    <StatusButton status={status} onClick={() => cycleStatus(note.noteId)} />
+                  </td>
+                  <td className="px-3 py-2 w-[118px] border-r border-slate-100 dark:border-slate-800/80">
+                    <select
+                      value={note.priority || 'medium'}
+                      onChange={(e) => handleField(note.noteId, 'priority', e.target.value)}
+                      className={`w-full text-[11px] font-bold rounded-md px-2 py-1 border cursor-pointer focus:outline-none ${
+                        PRIORITY_STYLES[note.priority] || PRIORITY_STYLES.medium
+                      }`}
+                    >
+                      <option value="low" style={PRIORITY_OPTION_STYLE}>Low</option>
+                      <option value="medium" style={PRIORITY_OPTION_STYLE}>Medium</option>
+                      <option value="high" style={PRIORITY_OPTION_STYLE}>High</option>
+                    </select>
+                  </td>
+                  <td className="px-3 py-2 border-r border-slate-100 dark:border-slate-800/80">
+                    <input
+                      className={cellInput}
+                      value={note.description}
+                      placeholder="Add notes"
+                      onChange={(e) =>
+                        useProjectNotesStore.setState((state) => ({
+                          notes: state.notes.map((n) =>
+                            n.noteId === note.noteId ? { ...n, description: e.target.value } : n
+                          ),
+                        }))
+                      }
+                      onBlur={(e) => handleField(note.noteId, 'description', e.target.value)}
+                    />
+                  </td>
+                  <td className={`sticky right-0 px-1 py-2 w-12 text-center ${ROW_TINT[status]}`}>
+                    <button
+                      type="button"
+                      onClick={() => setPendingDelete(note)}
+                      className="p-1.5 rounded-lg text-slate-300 hover:text-rose-400 hover:bg-rose-500/10 cursor-pointer"
+                      title="Delete row"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </td>
+                </tr>
+              )
+            })
+          )}
+        </tbody>
+      </table>
+    </div>
+  )
+
+  const deleteModal = (
+    <Modal
+      open={Boolean(pendingDelete)}
+      onClose={() => setPendingDelete(null)}
+      title="Delete this note?"
+      size="sm"
+      footer={
+        <>
+          <Button variant="secondary" size="sm" onClick={() => setPendingDelete(null)}>
+            Cancel
+          </Button>
+          <Button variant="danger" size="sm" onClick={confirmDelete}>
+            Delete
+          </Button>
+        </>
+      }
+    >
+      <p className="text-sm text-muted">
+        {pendingDelete?.title?.trim()
+          ? `“${pendingDelete.title.trim()}” will be removed from this project.`
+          : 'This task row will be removed from this project.'}
+      </p>
+    </Modal>
+  )
+
+  if (panel) {
+    return (
+      <Card className="p-0 overflow-hidden min-w-0 h-full flex flex-col">
+        <div className="flex items-center justify-between gap-3 px-4 pt-4 pb-3">
+          <h2 className="text-sm font-bold text-fg">Project notes</h2>
+          <Button icon={Plus} size="sm" variant="primary" onClick={handleAddRow} disabled={savingId === 'new'}>
+            New Note
+          </Button>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 pb-3">
+          <div className="min-w-0">{toolbar}</div>
+          <div className="text-xs font-semibold text-muted whitespace-nowrap">{progressLabel}</div>
+        </div>
+        {table}
+        {deleteModal}
+      </Card>
+    )
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -126,9 +283,7 @@ export const ProjectNotesPage = ({
             </p>
           </div>
         ) : (
-          <div className="text-xs font-semibold text-muted">
-            {progress.done}/{progress.total} complete · {progress.percent}%
-          </div>
+          <div className="text-xs font-semibold text-muted">{progressLabel}</div>
         )}
         <Button icon={Plus} variant="primary" onClick={handleAddRow} disabled={savingId === 'new'}>
           New Note
@@ -154,138 +309,8 @@ export const ProjectNotesPage = ({
         </div>
       )}
 
-      {loading ? (
-        <div className="py-16 text-center text-slate-500">
-          <Loader2 className="w-6 h-6 animate-spin mx-auto text-accent mb-2" />
-          <span className="text-xs">Loading notes...</span>
-        </div>
-      ) : (
-        <Card className="p-0 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] border-collapse">
-              <thead>
-                <tr className="bg-accent-soft">
-                  {['Task', 'Status', 'Priority', 'Notes', ''].map((label) => (
-                    <th
-                      key={label || 'actions'}
-                      className="text-left text-[11px] font-bold uppercase tracking-wide text-muted px-3 py-2.5 border-b border-border/80 whitespace-nowrap"
-                    >
-                      {label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {notes.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-14 text-center">
-                      <StickyNote className="w-8 h-8 mx-auto text-slate-400 mb-2" />
-                      <p className="text-sm font-semibold text-fg">
-                        No tasks yet
-                      </p>
-                      <p className="text-xs text-slate-400 mt-1">
-                        Add a row, then click status to set red, yellow, or green.
-                      </p>
-                    </td>
-                  </tr>
-                ) : (
-                  notes.map((note) => {
-                    const status = STATUS_META[note.status] ? note.status : 'red'
-                    return (
-                      <tr
-                        key={note.noteId}
-                        className={`border-b border-border ${ROW_TINT[status]}`}
-                      >
-                        <td className="px-3 py-2 min-w-[180px] border-r border-slate-100 dark:border-slate-800/80">
-                          <input
-                            className={cellInput}
-                            value={note.title}
-                            placeholder="Enter task name"
-                            onChange={(e) =>
-                              useProjectNotesStore.setState((state) => ({
-                                notes: state.notes.map((n) =>
-                                  n.noteId === note.noteId ? { ...n, title: e.target.value } : n
-                                ),
-                              }))
-                            }
-                            onBlur={(e) => handleField(note.noteId, 'title', e.target.value)}
-                          />
-                        </td>
-                        <td className="px-3 py-2 w-24 text-center border-r border-slate-100 dark:border-slate-800/80">
-                          <StatusButton status={status} onClick={() => cycleStatus(note.noteId)} />
-                        </td>
-                        <td className="px-3 py-2 w-[130px] border-r border-slate-100 dark:border-slate-800/80">
-                          <select
-                            value={note.priority || 'medium'}
-                            onChange={(e) => handleField(note.noteId, 'priority', e.target.value)}
-                            className={`w-full text-[11px] font-bold rounded-md px-2 py-1 border cursor-pointer focus:outline-none ${
-                              PRIORITY_STYLES[note.priority] || PRIORITY_STYLES.medium
-                            }`}
-                          >
-                            <option value="low" style={PRIORITY_OPTION_STYLE}>Low</option>
-                            <option value="medium" style={PRIORITY_OPTION_STYLE}>Medium</option>
-                            <option value="high" style={PRIORITY_OPTION_STYLE}>High</option>
-                          </select>
-                        </td>
-                        <td className="px-3 py-2 min-w-[180px] border-r border-slate-100 dark:border-slate-800/80">
-                          <input
-                            className={cellInput}
-                            value={note.description}
-                            placeholder="Add notes"
-                            onChange={(e) =>
-                              useProjectNotesStore.setState((state) => ({
-                                notes: state.notes.map((n) =>
-                                  n.noteId === note.noteId
-                                    ? { ...n, description: e.target.value }
-                                    : n
-                                ),
-                              }))
-                            }
-                            onBlur={(e) => handleField(note.noteId, 'description', e.target.value)}
-                          />
-                        </td>
-                        <td className="px-2 py-2 w-12 text-center">
-                          <button
-                            type="button"
-                            onClick={() => setPendingDelete(note)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 cursor-pointer"
-                            title="Delete row"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
-
-      <Modal
-        open={Boolean(pendingDelete)}
-        onClose={() => setPendingDelete(null)}
-        title="Delete this note?"
-        size="sm"
-        footer={
-          <>
-            <Button variant="secondary" size="sm" onClick={() => setPendingDelete(null)}>
-              Cancel
-            </Button>
-            <Button variant="danger" size="sm" onClick={confirmDelete}>
-              Delete
-            </Button>
-          </>
-        }
-      >
-        <p className="text-sm text-muted">
-          {pendingDelete?.title?.trim()
-            ? `“${pendingDelete.title.trim()}” will be removed from this project.`
-            : 'This task row will be removed from this project.'}
-        </p>
-      </Modal>
+      <Card className="p-0 overflow-hidden">{table}</Card>
+      {deleteModal}
     </div>
   )
 }

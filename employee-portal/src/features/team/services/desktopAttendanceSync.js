@@ -12,6 +12,7 @@ export const ATTENDANCE_SYNC_KEYS = [
   'accumulatedBreakSeconds',
   'isOnLunch',
   'lunchStartTime',
+  'lunchEndsAt',
   'accumulatedLunchSeconds',
   'accumulatedWorkSeconds',
   'todayShiftLogs',

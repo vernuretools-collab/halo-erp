@@ -13,6 +13,7 @@ import {
   Info,
   X,
   Heart,
+  Clock,
   Share2,
   ArrowRight,
   Megaphone,
@@ -43,6 +44,8 @@ export const NotificationCenter = () => {
         return <Heart className="w-4 h-4 text-rose-600 dark:text-rose-400" />
       case 'social_post':
         return <Share2 className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+      case 'eod':
+        return <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400" />
       default:
         return <Info className="w-4 h-4 text-accent" />
     }

@@ -1,79 +1,102 @@
 import {
-  collection,
-  doc,
   addDoc,
-  updateDoc,
+  arrayUnion,
+  collection,
   deleteDoc,
+  doc,
   onSnapshot,
   query,
-  orderBy,
   serverTimestamp,
-  arrayUnion,
+  updateDoc,
+  where,
 } from 'firebase/firestore'
 import { db } from '../../../shared/services/firebaseService'
+import {
+  localDateKey,
+  notifyBeforeMinutes,
+} from './socialPostReminderSchedule'
 
-export const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+export {
+  CONTENT_TYPES,
+  EARLY_MINUTES,
+  NOTIFY_BEFORE_OPTIONS,
+  PLATFORMS,
+  REPEAT_OPTIONS,
+  STATUS_LABEL,
+  WEEKDAY_FULL,
+  WEEKDAY_LABELS,
+  contentLabel,
+  formatTimeLabel,
+  isAssignee,
+  isPostedOn,
+  joinTime12,
+  localDateKey,
+  notifyBeforeLabel,
+  notifyBeforeMinutes,
+  occurrenceStatus,
+  occursOn,
+  repeatSummary,
+  resolveSocialPostPing,
+  socialPostPingCopy,
+  splitTime12,
+  trailText,
+} from './socialPostReminderSchedule'
 
-export const localDateKey = (date = new Date()) => {
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const d = String(date.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
+const remindersRef = () => collection(db, 'socialPostReminders')
+
+const mapDoc = (docSnap) => ({ id: docSnap.id, ...docSnap.data() })
+
+export const subscribeMySocialPostReminders = (identityIds, callback, onError) => {
+  const ids = [...new Set((identityIds || []).map(String).filter(Boolean))]
+  if (!ids.length) {
+    callback([])
+    return () => {}
+  }
+
+  const buckets = { created: null, assigned: null }
+  const emit = () => {
+    if (buckets.created == null || buckets.assigned == null) return
+    const merged = new Map()
+    for (const row of [...buckets.created, ...buckets.assigned]) merged.set(row.id, row)
+    callback([...merged.values()])
+  }
+
+  const listen = (field, bucket) =>
+    onSnapshot(
+      query(remindersRef(), where(field, 'in', ids)),
+      (snapshot) => {
+        buckets[bucket] = snapshot.docs.map(mapDoc)
+        emit()
+      },
+      (err) => {
+        console.error('Failed to load post reminders', err)
+        buckets[bucket] = []
+        emit()
+        onError?.(err)
+      }
+    )
+
+  const unsubs = [listen('createdBy', 'created'), listen('assigneeId', 'assigned')]
+  return () => unsubs.forEach((unsub) => unsub())
 }
 
-export const parseTimeToMinutes = (time) => {
-  const match = String(time || '').match(/^(\d{1,2}):(\d{2})$/)
-  if (!match) return null
-  const hours = Number(match[1])
-  const minutes = Number(match[2])
-  if (hours > 23 || minutes > 59) return null
-  return hours * 60 + minutes
-}
-
-export const formatTimeLabel = (time) => {
-  const total = parseTimeToMinutes(time)
-  if (total == null) return time || '—'
-  const hours = Math.floor(total / 60)
-  const minutes = total % 60
-  const suffix = hours >= 12 ? 'PM' : 'AM'
-  const hour12 = hours % 12 || 12
-  return `${hour12}:${String(minutes).padStart(2, '0')} ${suffix}`
-}
-
-export const isPostedOn = (reminder, dateKey) => {
-  const dates = Array.isArray(reminder?.postedDates) ? reminder.postedDates : []
-  return dates.includes(dateKey)
-}
-
-export const isScheduledToday = (reminder, date = new Date()) => {
-  const days = Array.isArray(reminder?.days) ? reminder.days.map(Number) : []
-  return days.includes(date.getDay())
-}
-
-const itemsRef = (uid) => collection(db, 'socialPostReminders', uid, 'items')
-
-export const subscribeMySocialPostReminders = (uid, callback, onError) => {
-  if (!uid) return () => {}
-  const q = query(itemsRef(uid), orderBy('createdAt', 'desc'))
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      callback(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })))
-    },
-    (err) => {
-      console.error('Failed to load post reminders', err)
-      onError?.(err)
-    }
-  )
-}
-
-export const addSocialPostReminder = async (uid, data) => {
-  if (!uid) throw new Error('User ID is required')
-  return addDoc(itemsRef(uid), {
-    title: String(data.title || '').trim(),
-    company: String(data.company || '').trim(),
-    days: Array.isArray(data.days) ? data.days.map(Number) : [],
+export const addSocialPostReminder = async (data) => {
+  return addDoc(remindersRef(), {
+    clientId: String(data.clientId || ''),
+    clientName: String(data.clientName || '').trim(),
+    platform: data.platform,
+    contentType: data.contentType,
+    topic: String(data.topic || '').trim(),
+    caption: String(data.caption || '').trim(),
+    startDate: data.startDate,
     time: data.time,
+    repeat: data.repeat || 'none',
+    days: data.repeat === 'custom' && Array.isArray(data.days) ? data.days.map(Number) : [],
+    endDate: data.repeat && data.repeat !== 'none' ? String(data.endDate || '') : '',
+    notifyBeforeMinutes: notifyBeforeMinutes(data),
+    assigneeId: String(data.assigneeId || ''),
+    assigneeName: String(data.assigneeName || '').trim(),
+    createdBy: String(data.createdBy || ''),
     enabled: data.enabled !== false,
     postedDates: [],
     lastEarlyAt: '',
@@ -82,23 +105,23 @@ export const addSocialPostReminder = async (uid, data) => {
   })
 }
 
-export const updateSocialPostReminder = async (uid, reminderId, updates) => {
-  if (!uid || !reminderId) throw new Error('User ID and reminder ID are required')
-  return updateDoc(doc(db, 'socialPostReminders', uid, 'items', reminderId), updates)
+export const updateSocialPostReminder = async (reminderId, updates) => {
+  if (!reminderId) throw new Error('Reminder ID is required')
+  return updateDoc(doc(db, 'socialPostReminders', reminderId), updates)
 }
 
-export const deleteSocialPostReminder = async (uid, reminderId) => {
-  if (!uid || !reminderId) throw new Error('User ID and reminder ID are required')
-  return deleteDoc(doc(db, 'socialPostReminders', uid, 'items', reminderId))
+export const deleteSocialPostReminder = async (reminderId) => {
+  if (!reminderId) throw new Error('Reminder ID is required')
+  return deleteDoc(doc(db, 'socialPostReminders', reminderId))
 }
 
-export const markSocialPostUploaded = async (uid, reminderId, dateKey = localDateKey()) => {
-  return updateSocialPostReminder(uid, reminderId, {
+export const markSocialPostPosted = async (reminderId, dateKey = localDateKey()) => {
+  return updateSocialPostReminder(reminderId, {
     postedDates: arrayUnion(dateKey),
   })
 }
 
-export const unmarkSocialPostUploaded = async (uid, reminder, dateKey = localDateKey()) => {
+export const unmarkSocialPostPosted = async (reminder, dateKey = localDateKey()) => {
   const dates = (Array.isArray(reminder?.postedDates) ? reminder.postedDates : []).filter((d) => d !== dateKey)
-  return updateSocialPostReminder(uid, reminder.id, { postedDates: dates })
+  return updateSocialPostReminder(reminder.id, { postedDates: dates })
 }

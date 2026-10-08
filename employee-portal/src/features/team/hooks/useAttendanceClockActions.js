@@ -4,6 +4,12 @@ import { useUserStore } from '../../../stores/userStore'
 import { getEmployees } from '../services/teamService'
 import { prepareClockInGate, LOCATION_GATE_ENABLED } from '../services/wfhAttendanceUtils'
 import { collectUserIdentityIds } from '../../projects/services/projectService'
+import {
+  fixedLunchEndMs,
+  getCachedEmployeeControls,
+  isWithinFixedLunch,
+  lunchDurationMs,
+} from '../../../../../shared/employeeControls.js'
 import { subscribeLeaveRequestsForUids } from '../services/leaveRequestsLive'
 
 export const DESKTOP_ATTENDANCE_EVENT = 'crm-desktop-attendance'
@@ -134,9 +140,14 @@ export function useAttendanceClockActions({ listenForDesktopEvents = false } = {
   }, [toggleBreak, userMeta])
 
   const handleLunchStart = useCallback(() => {
+    const controls = getCachedEmployeeControls()
+    if (!controls.showLunchButton) return
     const state = useTeamStore.getState()
     if (!state.clockedIn || state.isOnLunch) return
-    startLunch(userMeta)
+    const endsAt = controls.fixedLunchEnabled
+      ? (isWithinFixedLunch(controls) ? fixedLunchEndMs(controls) : Date.now() + lunchDurationMs(controls))
+      : undefined
+    startLunch(userMeta, endsAt ? { endsAt } : {})
   }, [startLunch, userMeta])
 
   const handleLunchEnd = useCallback(() => {

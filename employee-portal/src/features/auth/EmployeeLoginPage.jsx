@@ -6,7 +6,8 @@ import { Input } from '../../components/ui/Input'
 import { Card } from '../../components/ui/Card'
 import { useUserStore } from '../../stores/userStore'
 import haloLogo from '../../assets/halologo.png'
-import { loginWithEmail, signupWithEmail, fetchCustomClaims, getUserDoc } from '../../shared/services/authService'
+import { loginWithEmail, logoutUser, signupWithEmail, fetchCustomClaims, getUserDoc } from '../../shared/services/authService'
+import { isJoiningRole } from '../../../../shared/supabase/employeeOnboarding.js'
 
 export const EmployeeLoginPage = () => {
   const navigate = useNavigate()
@@ -35,6 +36,11 @@ export const EmployeeLoginPage = () => {
     try {
       const firebaseUser = await loginWithEmail(email.trim(), password)
       const claims = await fetchCustomClaims(firebaseUser, true)
+      if (isJoiningRole(claims?.role)) {
+        await logoutUser()
+        setError('This login is only for the joining form. Open the joining page instead of the employee portal.')
+        return
+      }
       const userDoc = await getUserDoc(firebaseUser.uid, firebaseUser.email)
       const orgId = claims?.orgId || userDoc?.orgId || 'org_demo'
       setUser(firebaseUser, userDoc || null, {

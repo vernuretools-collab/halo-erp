@@ -5,6 +5,8 @@ import { auth } from '../../shared/services/firebaseService'
 import { fetchCustomClaims } from '../../shared/services/authService'
 import { useLiveAuthSession } from '../../../../shared/supabase/useLiveAuthSession.js'
 import { useAutoClockOutAfterWorkday } from '../team/hooks/useAutoClockOutAfterWorkday'
+import { useEodClockOutReminder } from '../team/hooks/useEodClockOutReminder'
+import { useFixedLunchSchedule } from '../team/hooks/useFixedLunchSchedule'
 import { useAttendanceLinkedTaskTimers } from '../projects/hooks/useAttendanceLinkedTaskTimers'
 import { notifyDesktopSession } from '../team/services/desktopAttendanceSync'
 import { DesktopTimingPage } from './DesktopTimingPage'
@@ -22,10 +24,13 @@ export const DesktopTimingLayout = () => {
     fetchCustomClaims,
   })
   useAutoClockOutAfterWorkday()
+  useEodClockOutReminder()
   useAttendanceLinkedTaskTimers()
+  useFixedLunchSchedule()
 
   const clockedIn = useTeamStore((s) => s.clockedIn)
   const isOnBreak = useTeamStore((s) => s.isOnBreak)
+  const isOnLunch = useTeamStore((s) => s.isOnLunch)
 
   useEffect(() => {
     if (!sessionReady) return
@@ -33,8 +38,9 @@ export const DesktopTimingLayout = () => {
       signedIn: Boolean(user),
       clockedIn,
       isOnBreak,
+      isOnLunch,
     })
-  }, [sessionReady, user, clockedIn, isOnBreak])
+  }, [sessionReady, user, clockedIn, isOnBreak, isOnLunch])
 
   if (!sessionReady) {
     return (

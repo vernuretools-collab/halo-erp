@@ -3,8 +3,10 @@ import {
   deleteDoc,
   doc,
   getDocs,
+  query,
   setDoc,
   updateDoc,
+  where,
 } from 'firebase/firestore'
 import { db } from '../../../shared/services/firebaseService'
 
@@ -45,7 +47,10 @@ export const normalizeNote = (id, data = {}) => ({
 
 export const getNotesByProject = async (projectId, projectName = '') => {
   if (!projectId && !projectName) return []
-  const snap = await getDocs(collection(db, COLLECTION))
+  const notesQuery = projectId
+    ? query(collection(db, COLLECTION), where('projectId', '==', projectId))
+    : collection(db, COLLECTION)
+  const snap = await getDocs(notesQuery)
   const notes = snap.docs
     .map((d) => normalizeNote(d.id, d.data()))
     .filter((n) => {
@@ -53,6 +58,7 @@ export const getNotesByProject = async (projectId, projectName = '') => {
       const targetId = String(projectId || '')
       if (targetId && (noteProjectId === targetId || n.id === targetId)) return true
       if (
+        !projectId &&
         projectName &&
         n.projectName &&
         String(n.projectName).trim().toLowerCase() === String(projectName).trim().toLowerCase()

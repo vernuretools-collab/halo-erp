@@ -30,26 +30,72 @@ function openSpanSeconds(active, start, nowMs) {
   return Math.max(0, Math.floor((nowMs - startMs) / 1000))
 }
 
-/** Overall is office time from clock-in and includes break and lunch. */
+function openLunchSeconds(snapshot, endMs) {
+  if (!snapshot.isOnLunch) return 0
+  const startMs = toEpochMs(snapshot.lunchStartTime)
+  if (!startMs) return 0
+  const elapsed = Math.max(0, Math.floor((endMs - startMs) / 1000))
+  const ends = toEpochMs(snapshot.lunchEndsAt)
+  if (ends && ends > startMs) {
+    return Math.min(Math.floor((ends - startMs) / 1000), elapsed)
+  }
+  return elapsed
+}
+
+function completedPairSeconds(logs, startType, endType) {
+  const events = (Array.isArray(logs) ? logs : [])
+    .map((log) => ({ type: log?.type, ts: toEpochMs(log?.timestamp) }))
+    .filter((log) => (log.type === startType || log.type === endType) && log.ts)
+    .sort((a, b) => a.ts - b.ts)
+
+  let open = null
+  let total = 0
+  for (const event of events) {
+    if (event.type === startType) {
+      open = event.ts
+    } else if (event.type === endType && open != null && event.ts >= open) {
+      total += Math.floor((event.ts - open) / 1000)
+      open = null
+    }
+  }
+  return total
+}
+
+function finishedAwaySeconds(snapshot) {
+  let breakSec = Number(snapshot.accumulatedBreakSeconds) || 0
+  let lunchSec = Number(snapshot.accumulatedLunchSeconds) || 0
+  if (breakSec <= 0) {
+    breakSec = completedPairSeconds(snapshot.todayShiftLogs, 'break_start', 'break_end')
+  }
+  if (lunchSec <= 0) {
+    lunchSec = completedPairSeconds(snapshot.todayShiftLogs, 'lunch_start', 'lunch_end')
+  }
+  return breakSec + lunchSec
+}
+
+/**
+ * Overall is office time from the clock-in action and includes break and lunch.
+ * Opening the app does not start the clock.
+ */
 function popupSessionSeconds(snapshot, nowMs = Date.now()) {
-  const stillIn =
-    Boolean(snapshot.clockedIn) || !snapshot.clockOutTime || snapshot.clockOutTime === 'In office'
-  const inMins = timeStrToMinutes(snapshot.clockInTime)
-  const startMs =
-    inMins !== null ? timestampFromClockInTime(snapshot.clockInTime) : toEpochMs(snapshot.clockInTimestamp)
+  const clockedIn = Boolean(snapshot.clockedIn)
+  const clockOutTime = snapshot.clockOutTime
+  const hasClockOut = Boolean(clockOutTime) && clockOutTime !== 'In office'
+  if (!clockedIn && !hasClockOut) return { overall: 0, productive: 0, break: 0 }
+
+  const startMs = toEpochMs(snapshot.clockInTimestamp) ?? timestampFromClockInTime(snapshot.clockInTime)
   if (startMs == null) return { overall: 0, productive: 0, break: 0 }
 
   let endMs = nowMs
-  if (!stillIn) {
-    const outMins = timeStrToMinutes(snapshot.clockOutTime)
-    endMs = outMins !== null ? timestampFromClockInTime(snapshot.clockOutTime) : nowMs
+  if (!clockedIn) {
+    const outMins = timeStrToMinutes(clockOutTime)
+    endMs = outMins !== null ? timestampFromClockInTime(clockOutTime) : nowMs
   }
   const overall = Math.max(0, Math.floor((endMs - startMs) / 1000))
   const away =
-    (Number(snapshot.accumulatedBreakSeconds) || 0) +
+    finishedAwaySeconds(snapshot) +
     openSpanSeconds(snapshot.isOnBreak, snapshot.breakStartTime, endMs) +
-    (Number(snapshot.accumulatedLunchSeconds) || 0) +
-    openSpanSeconds(snapshot.isOnLunch, snapshot.lunchStartTime, endMs)
+    openLunchSeconds(snapshot, endMs)
   const breakSec = Math.min(overall, Math.max(0, away))
   return { overall, productive: Math.max(0, overall - breakSec), break: breakSec }
 }
@@ -90,7 +136,9 @@ export const MyTimingCard = ({
   const accumulatedBreakSeconds = useTeamStore((s) => s.accumulatedBreakSeconds)
   const isOnLunch = useTeamStore((s) => s.isOnLunch)
   const lunchStartTime = useTeamStore((s) => s.lunchStartTime)
+  const lunchEndsAt = useTeamStore((s) => s.lunchEndsAt)
   const accumulatedLunchSeconds = useTeamStore((s) => s.accumulatedLunchSeconds)
+  const todayShiftLogs = useTeamStore((s) => s.todayShiftLogs)
   const [confirmBreak, setConfirmBreak] = useState(false)
 
   const [workedSec, setWorkedSec] = useState(0)
@@ -109,7 +157,9 @@ export const MyTimingCard = ({
         breakStartTime,
         isOnLunch,
         lunchStartTime,
+        lunchEndsAt,
         accumulatedLunchSeconds,
+        todayShiftLogs,
       }
       const session = popupSessionSeconds(snapshot)
       setWorkedSec(session.productive)
@@ -129,7 +179,9 @@ export const MyTimingCard = ({
     breakStartTime,
     isOnLunch,
     lunchStartTime,
+    lunchEndsAt,
     accumulatedLunchSeconds,
+    todayShiftLogs,
   ])
 
   const displayName = userDoc?.displayName || user?.displayName || 'Employee'

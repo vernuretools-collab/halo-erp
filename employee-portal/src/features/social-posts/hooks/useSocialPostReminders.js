@@ -1,39 +1,38 @@
 import { useEffect, useRef } from 'react'
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore'
+import { db } from '../../../shared/services/firebaseService'
 import { showForegroundBrowserNotification } from '../../../shared/services/fcmService'
-import { useNotificationStore } from '../../notifications/stores/notificationStore'
+import { collectUserIdentityIds } from '../../projects/services/projectService'
 import { useUserStore } from '../../../stores/userStore'
 import {
-  isPostedOn,
-  isScheduledToday,
   localDateKey,
-  parseTimeToMinutes,
+  resolveSocialPostPing,
+  socialPostPingCopy,
   subscribeMySocialPostReminders,
   updateSocialPostReminder,
 } from '../services/socialPostRemindersService'
 
-const EARLY_MINUTES = 15
 const TICK_MS = 15000
 
-const reminderBody = (reminder, kind) => {
-  const company = reminder.company ? ` for ${reminder.company}` : ''
-  if (kind === 'early') {
-    return `Upload "${reminder.title}"${company} in 15 minutes.`
-  }
-  return `Time to upload "${reminder.title}"${company}.`
-}
-
 export const useSocialPostReminders = () => {
-  const uid = useUserStore((s) => s.user?.uid)
+  const user = useUserStore((s) => s.user)
+  const userDoc = useUserStore((s) => s.userDoc)
   const remindersRef = useRef([])
+  const identityRef = useRef([])
   const inflightRef = useRef(new Set())
 
+  const identityIds = collectUserIdentityIds(user, userDoc)
+  const identityKey = identityIds.join('|')
+  identityRef.current = identityIds
+
   useEffect(() => {
-    if (!uid) {
+    const ids = identityRef.current
+    if (!ids.length) {
       remindersRef.current = []
       return undefined
     }
     return subscribeMySocialPostReminders(
-      uid,
+      ids,
       (rows) => {
         remindersRef.current = rows
       },
@@ -41,35 +40,38 @@ export const useSocialPostReminders = () => {
         remindersRef.current = []
       }
     )
-  }, [uid])
+  }, [identityKey])
 
   useEffect(() => {
-    const fire = async (reminder, kind, todayKey) => {
+    const fire = async (reminder, decision, todayKey) => {
       const currentUid = useUserStore.getState().user?.uid
       if (!currentUid) return
-      const lockKey = `${reminder.id}:${kind}:${todayKey}`
+      const kind = decision.kind
+      const lockKey = `${reminder.id}:${kind}:${decision.updates.lastEarlyAt || decision.updates.lastDueAt || todayKey}`
       if (inflightRef.current.has(lockKey)) return
       inflightRef.current.add(lockKey)
 
-      const field = kind === 'early' ? 'lastEarlyAt' : 'lastDueAt'
-      reminder[field] = todayKey
+      Object.assign(reminder, decision.updates)
       try {
-        await updateSocialPostReminder(currentUid, reminder.id, { [field]: todayKey })
-        const title = kind === 'early' ? 'Post in 15 minutes' : 'Time to upload'
-        const message = reminderBody(reminder, kind)
+        await updateSocialPostReminder(reminder.id, decision.updates)
+        const { title, message } = socialPostPingCopy(reminder, kind)
+        const occurrenceKey = decision.updates.lastEarlyAt || decision.updates.lastDueAt || todayKey
         void showForegroundBrowserNotification({
           notification: { title, body: message },
           data: {
             type: 'social_post',
             link: '/post-reminders',
-            tag: `social-post-${reminder.id}-${kind}-${todayKey}`,
+            tag: `social-post-${reminder.id}-${kind}-${occurrenceKey}`,
           },
         })
-        useNotificationStore.getState().addNotification({
+        await addDoc(collection(db, 'notifications', currentUid, 'items'), {
           title,
           message,
           type: 'social_post',
+          isRead: false,
           link: '/post-reminders',
+          createdAt: new Date().toISOString(),
+          serverCreatedAt: serverTimestamp(),
         })
       } catch (err) {
         inflightRef.current.delete(lockKey)
@@ -80,24 +82,10 @@ export const useSocialPostReminders = () => {
     const check = () => {
       const now = new Date()
       const todayKey = localDateKey(now)
-      const nowMinutes = now.getHours() * 60 + now.getMinutes()
-
       remindersRef.current.forEach((reminder) => {
-        if (reminder.enabled === false) return
-        if (!isScheduledToday(reminder, now)) return
-        if (isPostedOn(reminder, todayKey)) return
-
-        const due = parseTimeToMinutes(reminder.time)
-        if (due == null) return
-        const early = due - EARLY_MINUTES
-
-        if (nowMinutes >= due && reminder.lastDueAt !== todayKey) {
-          void fire(reminder, 'due', todayKey)
-          return
-        }
-        if (early >= 0 && nowMinutes >= early && nowMinutes < due && reminder.lastEarlyAt !== todayKey) {
-          void fire(reminder, 'early', todayKey)
-        }
+        const decision = resolveSocialPostPing(reminder, now, identityRef.current)
+        if (!decision) return
+        void fire(reminder, decision, todayKey)
       })
     }
 

@@ -20,27 +20,37 @@ export const LUNCH_MS = LUNCH_SECONDS * 1000
 let armLunchTimer = () => {}
 let disarmLunchTimer = () => {}
 
+function lunchCapMs(fields = {}) {
+  const start = toEpochMs(fields.lunchStartTime)
+  const ends = toEpochMs(fields.lunchEndsAt)
+  if (start && ends && ends > start) return ends - start
+  return LUNCH_MS
+}
+
 function openLunchSeconds(state, nowMs = Date.now()) {
   if (!state?.isOnLunch || !state.lunchStartTime) return 0
   const elapsed = Math.max(0, Math.floor((nowMs - Number(state.lunchStartTime)) / 1000))
-  return Math.min(LUNCH_SECONDS, elapsed)
+  return Math.min(Math.floor(lunchCapMs(state) / 1000), elapsed)
 }
 
 function resolveStoredLunch(fields = {}) {
   const start = toEpochMs(fields.lunchStartTime)
   const accumulated = Number(fields.accumulatedLunchSeconds) || 0
+  const capMs = lunchCapMs(fields)
   if (fields.isOnLunch && start) {
-    if (Date.now() - start >= LUNCH_MS) {
+    if (Date.now() - start >= capMs) {
       return {
         isOnLunch: false,
         lunchStartTime: null,
-        accumulatedLunchSeconds: accumulated + LUNCH_SECONDS,
+        lunchEndsAt: null,
+        accumulatedLunchSeconds: accumulated + Math.floor(capMs / 1000),
         lunchJustEnded: true,
       }
     }
     return {
       isOnLunch: true,
       lunchStartTime: start,
+      lunchEndsAt: toEpochMs(fields.lunchEndsAt) || start + LUNCH_MS,
       accumulatedLunchSeconds: accumulated,
       lunchJustEnded: false,
     }
@@ -48,6 +58,7 @@ function resolveStoredLunch(fields = {}) {
   return {
     isOnLunch: false,
     lunchStartTime: null,
+    lunchEndsAt: null,
     accumulatedLunchSeconds: accumulated,
     lunchJustEnded: false,
   }
@@ -59,6 +70,7 @@ function applyResolvedLunch(fields = {}) {
     ...fields,
     isOnLunch: lunch.isOnLunch,
     lunchStartTime: lunch.lunchStartTime,
+    lunchEndsAt: lunch.lunchEndsAt,
     accumulatedLunchSeconds: lunch.accumulatedLunchSeconds,
     lunchJustEnded: lunch.lunchJustEnded,
   }
@@ -99,6 +111,7 @@ function freshWorkdayFields(date = todayDateStr()) {
     accumulatedBreakSeconds: 0,
     isOnLunch: false,
     lunchStartTime: null,
+    lunchEndsAt: null,
     accumulatedLunchSeconds: 0,
     accumulatedWorkSeconds: 0,
     todayShiftLogs: [],
@@ -160,6 +173,37 @@ function attendanceLogBelongsToToday(log, today = todayDateStr()) {
 
   const logs = log.todayShiftLogs || log.shiftLogs || []
   return hasClockInOnLocalDay(logs, midnight)
+}
+
+function mergeSavedPauses(liveState, todayLog) {
+  const next = { ...liveState }
+  if (!todayLog) return next
+
+  const savedBreak = Number(todayLog.accumulatedBreakSeconds) || 0
+  const savedLunch = Number(todayLog.accumulatedLunchSeconds) || 0
+  if (savedBreak > (Number(next.accumulatedBreakSeconds) || 0)) {
+    next.accumulatedBreakSeconds = savedBreak
+  }
+  if (savedLunch > (Number(next.accumulatedLunchSeconds) || 0)) {
+    next.accumulatedLunchSeconds = savedLunch
+  }
+  if (!next.isOnBreak && todayLog.isOnBreak) {
+    next.isOnBreak = true
+    next.breakStartTime = todayLog.breakStartTime || null
+  }
+  if (!next.isOnLunch && todayLog.isOnLunch) {
+    next.isOnLunch = true
+    next.lunchStartTime = todayLog.lunchStartTime || null
+    next.lunchEndsAt = todayLog.lunchEndsAt || null
+  }
+
+  const serverLogs = todayLog.todayShiftLogs || todayLog.shiftLogs || []
+  const localLogs = next.todayShiftLogs || []
+  const localAway = (Number(next.accumulatedBreakSeconds) || 0) + (Number(next.accumulatedLunchSeconds) || 0)
+  if (serverLogs.length > localLogs.length || (localAway <= 0 && serverLogs.length > 0)) {
+    next.todayShiftLogs = serverLogs
+  }
+  return next
 }
 
 function hasGenuineClockInToday(state, midnight = localMidnightMs()) {
@@ -229,6 +273,7 @@ export const useTeamStore = create(
       accumulatedBreakSeconds: 0,
       isOnLunch: false,
       lunchStartTime: null,
+      lunchEndsAt: null,
       accumulatedLunchSeconds: 0,
       accumulatedWorkSeconds: 0,
       todayShiftLogs: [],
@@ -375,25 +420,29 @@ export const useTeamStore = create(
 
           let todayState = {}
           if (alreadyClockedInToday) {
-            todayState = {
-              clockedIn: live.clockedIn,
-              clockInTime: live.clockInTime,
-              clockInTimestamp: live.clockInTimestamp,
-              clockOutTime: live.clockOutTime,
-              isOnBreak: live.isOnBreak,
-              breakStartTime: live.breakStartTime,
-              accumulatedBreakSeconds: live.accumulatedBreakSeconds,
-              isOnLunch: live.isOnLunch,
-              lunchStartTime: live.lunchStartTime,
-              accumulatedLunchSeconds: live.accumulatedLunchSeconds,
-              accumulatedWorkSeconds: live.accumulatedWorkSeconds,
-              todayShiftLogs: live.todayShiftLogs,
-              isInExtraTime: live.isInExtraTime,
-              extraTimeStart: live.extraTimeStart,
-              accumulatedExtraSeconds: live.accumulatedExtraSeconds,
-              extraTimeLogs: live.extraTimeLogs,
-              lastWorkDate: live.lastWorkDate,
-            }
+            todayState = mergeSavedPauses(
+              {
+                clockedIn: live.clockedIn,
+                clockInTime: live.clockInTime,
+                clockInTimestamp: live.clockInTimestamp,
+                clockOutTime: live.clockOutTime,
+                isOnBreak: live.isOnBreak,
+                breakStartTime: live.breakStartTime,
+                accumulatedBreakSeconds: live.accumulatedBreakSeconds,
+                isOnLunch: live.isOnLunch,
+                lunchStartTime: live.lunchStartTime,
+                lunchEndsAt: live.lunchEndsAt,
+                accumulatedLunchSeconds: live.accumulatedLunchSeconds,
+                accumulatedWorkSeconds: live.accumulatedWorkSeconds,
+                todayShiftLogs: live.todayShiftLogs,
+                isInExtraTime: live.isInExtraTime,
+                extraTimeStart: live.extraTimeStart,
+                accumulatedExtraSeconds: live.accumulatedExtraSeconds,
+                extraTimeLogs: live.extraTimeLogs,
+                lastWorkDate: live.lastWorkDate,
+              },
+              todayLog && attendanceLogBelongsToToday(todayLog, today) ? todayLog : null,
+            )
           } else if (todayLog && attendanceLogBelongsToToday(todayLog, today)) {
             // Trust today's stored totals — prior completed sessions are valid
             // even when the current open session is short (multi-session days).
@@ -423,6 +472,7 @@ export const useTeamStore = create(
               accumulatedBreakSeconds: todayLog.accumulatedBreakSeconds || 0,
               isOnLunch: Boolean(todayLog.isOnLunch),
               lunchStartTime: todayLog.lunchStartTime || null,
+              lunchEndsAt: todayLog.lunchEndsAt || null,
               accumulatedLunchSeconds: todayLog.accumulatedLunchSeconds || 0,
               accumulatedWorkSeconds: rawWorkSec,
               todayShiftLogs: todayLog.todayShiftLogs || todayLog.shiftLogs || [],
@@ -490,6 +540,7 @@ export const useTeamStore = create(
             upsertAttendanceLog(uid, {
               isOnLunch: false,
               lunchStartTime: null,
+              lunchEndsAt: null,
               accumulatedLunchSeconds: resolvedState.accumulatedLunchSeconds,
             })
           }
@@ -977,11 +1028,12 @@ export const useTeamStore = create(
         }
       },
 
-      startLunch: (userMeta = {}) => {
+      startLunch: (userMeta = {}, options = {}) => {
         const meta = resolveUserMeta(userMeta)
         const state = get()
         if (!state.clockedIn || state.isOnLunch) return
         const lunchStartMs = Date.now()
+        const endsAt = Number(options.endsAt) > lunchStartMs ? Number(options.endsAt) : lunchStartMs + LUNCH_MS
         const timeStr = canonicalTimeFromDate(new Date(lunchStartMs))
         const newLog = {
           id: `log_${lunchStartMs}`,
@@ -994,6 +1046,7 @@ export const useTeamStore = create(
         set({
           isOnLunch: true,
           lunchStartTime: lunchStartMs,
+          lunchEndsAt: endsAt,
           todayShiftLogs: updatedLogs,
         })
         if (meta.uid) {
@@ -1002,6 +1055,7 @@ export const useTeamStore = create(
             departmentName: meta.departmentName || '',
             isOnLunch: true,
             lunchStartTime: lunchStartMs,
+            lunchEndsAt: endsAt,
             accumulatedLunchSeconds: state.accumulatedLunchSeconds || 0,
             todayShiftLogs: updatedLogs,
             shiftLogs: updatedLogs,
@@ -1037,6 +1091,7 @@ export const useTeamStore = create(
         set({
           isOnLunch: false,
           lunchStartTime: null,
+          lunchEndsAt: null,
           accumulatedLunchSeconds: newLunchTotal,
           todayShiftLogs: updatedLogs,
         })
@@ -1046,6 +1101,7 @@ export const useTeamStore = create(
             departmentName: meta.departmentName || '',
             isOnLunch: false,
             lunchStartTime: null,
+            lunchEndsAt: null,
             accumulatedLunchSeconds: newLunchTotal,
             todayShiftLogs: updatedLogs,
             shiftLogs: updatedLogs,
@@ -1066,6 +1122,7 @@ export const useTeamStore = create(
         accumulatedBreakSeconds: state.accumulatedBreakSeconds,
         isOnLunch: state.isOnLunch,
         lunchStartTime: state.lunchStartTime,
+        lunchEndsAt: state.lunchEndsAt,
         accumulatedLunchSeconds: state.accumulatedLunchSeconds,
         accumulatedWorkSeconds: state.accumulatedWorkSeconds,
         todayShiftLogs: state.todayShiftLogs,
@@ -1095,9 +1152,10 @@ disarmLunchTimer = () => {
 }
 armLunchTimer = () => {
   disarmLunchTimer()
-  const { isOnLunch, lunchStartTime, finishLunch } = useTeamStore.getState()
+  const { isOnLunch, lunchStartTime, lunchEndsAt, finishLunch } = useTeamStore.getState()
   if (!isOnLunch || !lunchStartTime) return
-  const remaining = Number(lunchStartTime) + LUNCH_MS - Date.now()
+  const endsAt = Number(lunchEndsAt) || Number(lunchStartTime) + LUNCH_MS
+  const remaining = endsAt - Date.now()
   if (remaining <= 0) {
     finishLunch()
     return

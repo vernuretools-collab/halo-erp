@@ -3,9 +3,7 @@ import {
   collection,
   deleteDoc,
   doc,
-  onSnapshot,
-  orderBy,
-  query,
+  getDocs,
   serverTimestamp,
   updateDoc,
 } from 'firebase/firestore'
@@ -19,30 +17,24 @@ const toDateKey = (value) => {
   return ''
 }
 
-export const subscribeMyWorkReminders = (uid, callback, onError) => {
-  if (!uid) return () => {}
-  const q = query(itemsRef(uid), orderBy('createdAt', 'desc'))
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      callback(
-        snapshot.docs.map((docSnap) => {
-          const data = docSnap.data() || {}
-          return {
-            id: docSnap.id,
-            title: data.title || '',
-            body: data.body || '',
-            remindOn: toDateKey(data.remindOn),
-            done: data.done === true,
-          }
-        })
-      )
-    },
-    (err) => {
-      console.error('Failed to load work reminders', err)
-      onError?.(err)
-    }
-  )
+const mapReminder = (docSnap) => {
+  const data = docSnap.data() || {}
+  return {
+    id: docSnap.id,
+    title: data.title || '',
+    body: data.body || '',
+    remindOn: toDateKey(data.remindOn),
+    done: data.done === true,
+    createdAt: data.createdAt?.toDate?.()?.toISOString?.() || data.createdAt || '',
+  }
+}
+
+export const getMyWorkReminders = async (uid) => {
+  if (!uid) return []
+  const snap = await getDocs(itemsRef(uid))
+  return snap.docs
+    .map(mapReminder)
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
 }
 
 export const addWorkReminder = async (uid, data) => {

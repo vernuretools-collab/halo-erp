@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, Check, DollarSign, HeartPulse, Info, Briefcase, CheckCircle2, Megaphone, Share2 } from 'lucide-react'
+import { Bell, Check, Clock, DollarSign, HeartPulse, Info, Briefcase, CheckCircle2, Megaphone, Share2 } from 'lucide-react'
 import { useNotificationStore } from './stores/notificationStore'
 import { useUserStore } from '../../stores/userStore'
 import { collectUserIdentityIds } from '../../features/projects/services/projectService'
@@ -24,6 +24,8 @@ const getIconForType = (type) => {
       return <HeartPulse className="w-5 h-5 text-rose-500" />
     case 'social_post':
       return <Share2 className="w-5 h-5 text-sky-500" />
+    case 'eod':
+      return <Clock className="w-5 h-5 text-amber-600" />
     case 'crm':
       return <CheckCircle2 className="w-5 h-5 text-accent" />
     case 'info':
@@ -47,6 +49,8 @@ const getBgForType = (type) => {
       return 'bg-rose-50 dark:bg-rose-500/10'
     case 'social_post':
       return 'bg-sky-50 dark:bg-sky-500/10'
+    case 'eod':
+      return 'bg-amber-50 dark:bg-amber-500/10'
     case 'crm':
       return 'bg-accent-soft'
     case 'info':

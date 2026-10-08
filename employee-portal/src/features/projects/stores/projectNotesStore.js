@@ -11,29 +11,71 @@ export const useProjectNotesStore = create((set, get) => ({
   loading: false,
   error: null,
   currentProjectId: null,
+  notesByProject: {},
 
   fetchNotes: async (projectId, projectName = '') => {
     if (!projectId && !projectName) {
       set({ notes: [], loading: false, currentProjectId: null })
       return
     }
-    set({ loading: true, error: null, currentProjectId: projectId })
+    const cached = projectId ? get().notesByProject[projectId] : null
+    set({
+      loading: !cached,
+      error: null,
+      currentProjectId: projectId,
+      notes: cached || [],
+    })
     try {
       const notes = await getNotesByProject(projectId, projectName)
-      set({ notes, loading: false })
+      if (get().currentProjectId !== projectId) return notes
+      set((state) => ({
+        notes,
+        loading: false,
+        notesByProject: projectId ? { ...state.notesByProject, [projectId]: notes } : state.notesByProject,
+      }))
+      return notes
     } catch (err) {
       console.error('[projectNotesStore] fetchNotes error:', err)
-      set({ loading: false, error: 'Failed to load notes' })
+      if (get().currentProjectId === projectId) set({ loading: false, error: 'Failed to load notes' })
+      return []
     }
   },
 
   addNote: async (noteData) => {
+    const noteId = noteData.noteId || `note_${Date.now()}`
+    const now = new Date().toISOString()
+    const optimistic = {
+      noteId,
+      id: noteId,
+      projectId: noteData.projectId || '',
+      projectName: noteData.projectName || '',
+      title: noteData.title || '',
+      description: noteData.description || '',
+      status: noteData.status || 'red',
+      priority: noteData.priority || 'medium',
+      createdBy: noteData.createdBy || null,
+      createdByName: noteData.createdByName || '',
+      createdByEmail: noteData.createdByEmail || '',
+      createdAt: now,
+      updatedAt: now,
+    }
+    set((state) => ({ notes: [...state.notes, optimistic] }))
     try {
-      const created = await createNoteInDb(noteData)
-      set((state) => ({ notes: [...state.notes, created] }))
+      const created = await createNoteInDb({ ...noteData, noteId })
+      set((state) => {
+        const notes = state.notes.map((n) => (n.noteId === noteId ? created : n))
+        const projectId = created.projectId
+        return {
+          notes,
+          notesByProject: projectId
+            ? { ...state.notesByProject, [projectId]: notes.filter((n) => n.projectId === projectId) }
+            : state.notesByProject,
+        }
+      })
       return created
     } catch (err) {
       console.error('[projectNotesStore] addNote error:', err)
+      set((state) => ({ notes: state.notes.filter((n) => n.noteId !== noteId) }))
       return null
     }
   },
@@ -67,7 +109,14 @@ export const useProjectNotesStore = create((set, get) => ({
   removeNote: async (noteId) => {
     try {
       await deleteNoteFromDb(noteId)
-      set((state) => ({ notes: state.notes.filter((n) => n.noteId !== noteId) }))
+      set((state) => {
+        const notes = state.notes.filter((n) => n.noteId !== noteId)
+        const projectId = state.currentProjectId
+        return {
+          notes,
+          notesByProject: projectId ? { ...state.notesByProject, [projectId]: notes } : state.notesByProject,
+        }
+      })
       return true
     } catch (err) {
       console.error('[projectNotesStore] removeNote error:', err)
