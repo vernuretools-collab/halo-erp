@@ -39,7 +39,7 @@ export const EmployeeOnboardingSetup = () => {
     assets: '',
     issueDate: '',
   })
-  const [kras, setKras] = useState([emptyKra(30), emptyKra(20), emptyKra(20)])
+  const [kras, setKras] = useState([emptyKra(40), emptyKra(20), emptyKra(20)])
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -78,7 +78,9 @@ export const EmployeeOnboardingSetup = () => {
       return
     }
     if (Math.abs(weight - CUSTOM_KRA_TARGET) > 0.001) {
-      setError(`KRA weights must total ${CUSTOM_KRA_TARGET}%. They currently total ${weight}%.`)
+      const gap = Math.abs(weight - CUSTOM_KRA_TARGET)
+      const direction = weight > CUSTOM_KRA_TARGET ? 'Reduce' : 'Increase'
+      setError(`Editable KRA weights total ${weight}%. ${direction} them by ${gap}% so they total ${CUSTOM_KRA_TARGET}%. Portal Compliance and Client Satisfaction already take 10% each.`)
       return
     }
     setSaving(true)
@@ -183,14 +185,17 @@ export const EmployeeOnboardingSetup = () => {
               </select>
             </label>
             <Input label="Work location" placeholder="Padi, Chennai" value={employment.workLocation} onChange={(e) => setField('workLocation', e.target.value)} />
-            <Input label="Assets to be issued" placeholder="Laptop / None / list items" value={employment.assets} onChange={(e) => setField('assets', e.target.value)} />
+            <div>
+              <Input label="Assets to be issued" placeholder="Laptop, mouse — or leave blank / None" value={employment.assets} onChange={(e) => setField('assets', e.target.value)} />
+              <p className="text-xs text-muted mt-1">Leave blank or type None / Nil if nothing is issued. Asset pages appear in the packs only when you list real items.</p>
+            </div>
             <Input label="Issue date" type="date" value={employment.issueDate} onChange={(e) => setField('issueDate', e.target.value)} />
           </div>
         </Card>
 
         <Card>
           <p className="text-xs font-semibold uppercase tracking-wide text-accent mb-1">Joining login</p>
-          <p className="text-sm text-muted mb-4">This username and password only open the joining form. They cannot sign in to the employee portal.</p>
+          <p className="text-sm text-muted mb-4">This is the only joining login. Give these details to the hire for the joining page. They cannot sign in to the employee portal.</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Input label="Username *" placeholder="e.g. priya.sales" value={username} onChange={(e) => setUsername(e.target.value)} required autoComplete="off" />
             <Input label="Password *" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="new-password" />
@@ -270,8 +275,10 @@ export const EmployeeOnboardingSetup = () => {
             <Button type="button" variant="outline" icon={Plus} onClick={() => setKras((current) => [...current, emptyKra('')])}>
               Add KRA row
             </Button>
-            <p className={`text-xs ${weight === CUSTOM_KRA_TARGET ? 'text-muted' : 'text-rose-600'}`}>
-              Your KRAs total {weight}%. They should total {CUSTOM_KRA_TARGET}%. Portal Compliance and Client Satisfaction are already 10% each.
+            <p className={`text-xs text-right ${weight === CUSTOM_KRA_TARGET ? 'text-muted' : 'text-rose-600'}`}>
+              {weight === CUSTOM_KRA_TARGET
+                ? `Editable rows total ${weight}%. With the two locked 10% rows, the scorecard is 100%.`
+                : `Editable rows total ${weight}%. They need to total ${CUSTOM_KRA_TARGET}% (${weight > CUSTOM_KRA_TARGET ? `${weight - CUSTOM_KRA_TARGET}% too high` : `${CUSTOM_KRA_TARGET - weight}% too low`}). The locked rows already use 20%.`}
             </p>
           </div>
         </Card>

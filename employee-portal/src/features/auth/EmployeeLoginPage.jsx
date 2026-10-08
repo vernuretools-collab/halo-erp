@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Mail, Lock, ArrowRight, AlertCircle } from 'lucide-react'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
@@ -7,7 +7,7 @@ import { Card } from '../../components/ui/Card'
 import { useUserStore } from '../../stores/userStore'
 import haloLogo from '../../assets/halologo.png'
 import { loginWithEmail, logoutUser, signupWithEmail, fetchCustomClaims, getUserDoc } from '../../shared/services/authService'
-import { isJoiningRole } from '../../../../shared/supabase/employeeOnboarding.js'
+import { isJoiningAccount } from '../../../../shared/supabase/employeeOnboarding.js'
 
 export const EmployeeLoginPage = () => {
   const navigate = useNavigate()
@@ -36,7 +36,7 @@ export const EmployeeLoginPage = () => {
     try {
       const firebaseUser = await loginWithEmail(email.trim(), password)
       const claims = await fetchCustomClaims(firebaseUser, true)
-      if (isJoiningRole(claims?.role)) {
+      if (isJoiningAccount({ role: claims?.role, email: firebaseUser?.email })) {
         await logoutUser()
         setError('This login is only for the joining form. Open the joining page instead of the employee portal.')
         return
@@ -109,6 +109,10 @@ export const EmployeeLoginPage = () => {
             {loading ? 'Authenticating Staff...' : 'Sign In'}
           </Button>
         </form>
+
+        <p className="text-xs text-muted text-center">
+          New joining? <Link to="/joining" className="text-accent font-medium">Open joining login</Link>
+        </p>
       </Card>
     </div>
   )

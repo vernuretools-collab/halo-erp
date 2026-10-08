@@ -9,7 +9,7 @@ import haloLogo from '../../assets/halologo.png'
 import { loginWithEmail, logoutUser, fetchCustomClaims } from '../../shared/services/authService'
 import { supabase } from '../../shared/services/firebaseService'
 import {
-  isJoiningRole,
+  isJoiningAccount,
   isValidJoiningUsername,
   joiningUsernameToAuthEmail,
   normalizeJoiningUsername,
@@ -27,7 +27,8 @@ export const JoiningLoginPage = () => {
     let cancelled = false
     supabase?.auth.getSession().then(({ data }) => {
       if (cancelled) return
-      if (isJoiningRole(data.session?.user?.app_metadata?.role)) navigate('/joining/form')
+      const sessionUser = data.session?.user
+      if (isJoiningAccount({ role: sessionUser?.app_metadata?.role, email: sessionUser?.email })) navigate('/joining/form')
     })
     return () => {
       cancelled = true
@@ -51,7 +52,7 @@ export const JoiningLoginPage = () => {
     try {
       const user = await loginWithEmail(joiningUsernameToAuthEmail(login), password)
       const claims = await fetchCustomClaims(user, true)
-      if (!isJoiningRole(claims?.role)) {
+      if (!isJoiningAccount({ role: claims?.role, email: user?.email })) {
         await logoutUser()
         setError('This login is for the employee portal. Use the employee sign-in page.')
         return
@@ -61,7 +62,7 @@ export const JoiningLoginPage = () => {
     } catch (err) {
       const message = String(err.message || '')
       if (/invalid|credential|password/i.test(message)) {
-        setError('Incorrect username or password.')
+        setError('This joining login is not active yet. In admin, click Save & create joining login and wait for “Joining login ready”, then use that exact username and password here.')
       } else {
         setError(message || 'Could not sign in.')
       }

@@ -5,8 +5,10 @@ import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
 import { TeamSubNav } from './components/TeamSubNav'
 import { getEmployeeOnboarding } from './services/employeeOnboardingService'
-import { downloadEmploymentPack, downloadHandbookPack, downloadLegalPack } from './services/onboardingPacks'
+import { downloadAllOnboardingPacks, downloadEmploymentPack, downloadHandbookPack, downloadLegalPack, hasIssuedAssets } from './services/onboardingPacks'
+import { OnboardingPackViewer } from '../../../../shared/onboarding/OnboardingPackViewer.jsx'
 import { FIXED_KRAS, ONBOARDING_STATUS, joiningPageUrl } from '../../../../shared/supabase/employeeOnboarding.js'
+import haloLogo from '../../assets/halologo.png'
 import { KYC_DOCUMENTS, POLICY_ITEMS, declarationText } from '../../../../shared/supabase/joiningForm.js'
 
 const EMPLOYMENT_FIELDS = [
@@ -93,7 +95,7 @@ export const EmployeeOnboardingDetail = () => {
           <Card>
             <p className="text-xs font-semibold uppercase tracking-wide text-accent mb-4">Employment details</p>
             <dl className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {EMPLOYMENT_FIELDS.map(([key, label]) => (
+              {EMPLOYMENT_FIELDS.filter(([key]) => key !== 'assets' || hasIssuedAssets(employment.assets)).map(([key, label]) => (
                 <div key={key}>
                   <dt className="text-xs text-muted">{label}</dt>
                   <dd className="text-sm text-fg mt-1">{employment[key] || '—'}</dd>
@@ -203,17 +205,28 @@ export const EmployeeOnboardingDetail = () => {
             )}
           </Card>
 
+          {submitted && (
+            <OnboardingPackViewer
+              row={row}
+              logo={haloLogo}
+              footer={(
+                <div className="px-6 pb-6 flex flex-wrap gap-2">
+                  <Button type="button" variant="primary" onClick={() => downloadAllOnboardingPacks(row)}>Download all 3 PDFs</Button>
+                  <Button type="button" variant="secondary" onClick={() => downloadEmploymentPack(row)}>Employment Agreement Pack</Button>
+                  <Button type="button" variant="secondary" onClick={() => downloadLegalPack(row)}>Legal Agreements & HR Records</Button>
+                  <Button type="button" variant="secondary" onClick={() => downloadHandbookPack(row)}>Employee Handbook & Performance Pack</Button>
+                </div>
+              )}
+            />
+          )}
+
           <Card>
             <p className="text-xs font-semibold uppercase tracking-wide text-accent mb-3">Documents</p>
             {submitted ? (
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="primary" onClick={() => downloadEmploymentPack(row)}>Doc 1 — Employment pack</Button>
-                <Button type="button" variant="primary" onClick={() => downloadLegalPack(row)}>Doc 2 — Legal & HR</Button>
-                <Button type="button" variant="primary" onClick={() => downloadHandbookPack(row)}>Doc 3 — Handbook</Button>
-              </div>
+              <p className="text-sm text-muted">The filled packs are above. You can download them anytime.</p>
             ) : (
               <p className="text-sm text-muted">
-                PDF downloads appear here after the hire submits the joining form.
+                After the hire reviews and submits the 3 packs, they appear here for download anytime.
               </p>
             )}
             {documents.length > 0 && (

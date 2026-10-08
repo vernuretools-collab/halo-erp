@@ -10,6 +10,7 @@ import {
   YES_NO,
   declarationText,
 } from '../../../../shared/supabase/joiningForm.js'
+import { hasIssuedAssets } from '../../../../admin-portal/src/features/team/services/onboardingPacks.js'
 import { SignaturePad } from './SignaturePad'
 
 const labelClass = 'block text-[11px] font-semibold tracking-wide text-slate-800 mb-1.5'
@@ -163,6 +164,7 @@ export function JoiningWizard({ step, answers, setAnswers, employment, readOnly 
                 ['monthlyCtc', 'Monthly CTC (gross)'],
                 ['probationPeriod', 'Probation period'],
                 ['employeeId', 'Employee ID'],
+                ...(hasIssuedAssets(employment.assets) ? [['assets', 'Assets to be issued']] : []),
               ].map(([key, label]) => (
                 <Field key={key} label={label}>
                   <input className={fieldClass} value={employment[key] || ''} disabled />

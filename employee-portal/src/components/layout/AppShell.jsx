@@ -16,7 +16,7 @@ import { useAnnouncementBrowserAlerts } from '../../features/announcements/hooks
 import { usePayslipBrowserAlerts } from '../../features/payslips/hooks/usePayslipBrowserAlerts'
 import { useProjectBrowserAlerts } from '../../features/projects/hooks/useProjectBrowserAlerts'
 import { collectUserIdentityIds } from '../../features/projects/services/projectService'
-import { isJoiningRole } from '../../../../shared/supabase/employeeOnboarding.js'
+import { isJoiningAccount } from '../../../../shared/supabase/employeeOnboarding.js'
 import { DesktopAttendanceBridge } from '../../features/team/components/DesktopAttendanceBridge'
 import { useAttendanceLinkedTaskTimers } from '../../features/projects/hooks/useAttendanceLinkedTaskTimers'
 
@@ -82,7 +82,7 @@ export const AppShell = () => {
     return <Navigate to="/login" replace />
   }
 
-  if (isJoiningRole(claims?.role) || isJoiningRole(userDoc?.role)) {
+  if (isJoiningAccount({ role: claims?.role || userDoc?.role, email: user?.email })) {
     return <Navigate to="/joining/form" replace />
   }
 

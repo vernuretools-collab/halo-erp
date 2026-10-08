@@ -8,13 +8,31 @@ import {
   probationEndDate,
 } from './onboardingPdf.js'
 
-function context(row) {
+const EMPTY_ASSET_WORDS = ['nil', 'none', 'n/a', 'na', 'no', '-', 'null', 'not applicable']
+
+export function hasIssuedAssets(value) {
+  const text = String(value || '').trim().toLowerCase()
+  if (!text) return false
+  return !EMPTY_ASSET_WORDS.includes(text)
+}
+
+export function parseAssetItems(value) {
+  if (!hasIssuedAssets(value)) return []
+  return String(value)
+    .split(/[\n;|/]+/)
+    .flatMap((part) => (part.includes(',') ? part.split(',') : [part]))
+    .map((item) => item.trim())
+    .filter((item) => item && !EMPTY_ASSET_WORDS.includes(item.toLowerCase()))
+}
+
+export function buildOnboardingPackContext(row) {
   const employment = row?.employment || {}
   const answers = row?.answers || {}
   const personal = answers.personal || {}
   const name = personal.fullName || employment.fullName || ''
   const kras = Array.isArray(row?.kras?.custom) ? row.kras.custom : []
   const fixed = row?.kras?.fixed?.length ? row.kras.fixed : FIXED_KRAS
+  const assets = employment.assets || ''
   return {
     employment,
     answers,
@@ -34,7 +52,9 @@ function context(row) {
     mode: employment.workMode || '',
     ctc: employment.monthlyCtc || '',
     probation: employment.probationPeriod || '',
-    assets: employment.assets || '',
+    assets,
+    hasAssets: hasIssuedAssets(assets),
+    assetItems: parseAssetItems(assets),
     address: personal.permanentAddress || personal.currentAddress || '',
     signature: answers.signature || '',
     kras,
@@ -63,7 +83,7 @@ function identity(pack, ctx) {
 }
 
 export function downloadEmploymentPack(row) {
-  const ctx = context(row)
+  const ctx = buildOnboardingPackContext(row)
   const pack = createPack()
   cover(pack, '1', 'Employment Agreement Pack', 'Offer Letter · Appointment Agreement · Job Description · Probation Terms')
   identity(pack, ctx)
@@ -98,7 +118,7 @@ export function downloadEmploymentPack(row) {
     ['Probation period', ctx.probation],
     ['Notice period (probation)', '30 days'],
     ['Notice period (post-confirmation)', '60 days'],
-    ['Assets to be issued', ctx.assets],
+    ...(ctx.hasAssets ? [['Assets to be issued', ctx.assets]] : []),
   ])
   pack.h2('Conditions')
   pack.p('This offer is conditional upon: (a) verification of all documents; (b) satisfactory background verification; (c) execution of all onboarding documents; (d) confirmation that you are not bound by any conflicting restriction from a former employer. This offer lapses if not accepted within 5 working days.')
@@ -163,7 +183,7 @@ export function downloadEmploymentPack(row) {
 }
 
 export function downloadLegalPack(row) {
-  const ctx = context(row)
+  const ctx = buildOnboardingPackContext(row)
   const pack = createPack()
   const conflict = ctx.answers.employment?.conflictOfInterest || 'No'
   cover(pack, '2', 'Legal Agreements & HR Records', 'NDA · Confidentiality · IP · Data Protection · Conflict of Interest · HR Forms · Declarations')
@@ -174,7 +194,7 @@ export function downloadLegalPack(row) {
   pack.p('5–8   Client Undertaking · Portfolio Restriction · Commercial Confidentiality · Conflict of Interest')
   pack.p('9–11  Employee Information · KYC Declaration · Education & Experience')
   pack.p('12–14 Bank & Payroll · Statutory Declarations · Emergency Contact')
-  pack.p('15–17 Asset Handover · IT Equipment Agreement · Asset Return Form')
+  if (ctx.hasAssets) pack.p('15–17 Asset Handover · IT Equipment Agreement · Asset Return Form')
   pack.note('One master signature at the end of this pack covers all sections.')
 
   pack.brand()
@@ -284,8 +304,8 @@ export function downloadLegalPack(row) {
   pack.note('Misrepresentation is grounds for immediate termination without notice or settlement.')
 
   pack.brand()
-  pack.badge('PART II & III · HR RECORDS 12–17')
-  pack.h1('Bank & Payroll · Statutory · Emergency Contact · Company Property')
+  pack.badge(ctx.hasAssets ? 'PART II & III · HR RECORDS 12–17' : 'PART II · HR RECORDS 12–14')
+  pack.h1(ctx.hasAssets ? 'Bank & Payroll · Statutory · Emergency Contact · Company Property' : 'Bank & Payroll · Statutory · Emergency Contact')
   pack.h2('12. Bank and payroll details')
   pack.rows([
     ['Bank name', ctx.bank.bankName],
@@ -308,27 +328,37 @@ export function downloadLegalPack(row) {
     ['Secondary mobile', ctx.emergency.secondaryMobile],
     ['Blood group and known conditions', [ctx.personal.bloodGroup, ctx.emergency.allergies].filter(Boolean).join(' · ')],
   ])
-  pack.h2('15. Asset handover form')
-  pack.p(`Assets issued to ${ctx.name} on ${ctx.joining}: ${ctx.assets || 'None listed at joining.'}`)
-  pack.p('I acknowledge receipt of the above assets in the stated condition and agree to: (a) use them solely for Company work; (b) not damage, modify, or part with them without written authorisation; (c) return all assets on my last working day in the same or better condition; (d) authorise the Company to recover the full replacement cost from my Full & Final Settlement for any loss or damage caused by negligence.')
-  pack.h2('16. IT equipment usage agreement')
-  pack.bullets([
-    'Company-issued devices are strictly for work purposes only. Installation of any software requires prior management approval.',
-    'The Company reserves the right to remotely access, monitor, and wipe Company devices at any time without prior notice.',
-    'Personal data stored on Company devices is the Employee’s own responsibility — the Company is not liable for its loss.',
-    'All devices must be kept physically secure, clean, and updated within 48 hours of any system update prompt.',
-    'Repair or servicing of Company devices must go through the Company only — unauthorised third-party repair shops are strictly prohibited.',
-    'All Company devices must be returned on the last working day. Failure to return any device will be treated as theft and reported accordingly.',
-  ])
-  pack.h2('17. Asset return form')
-  pack.note('Template — to be completed on the last working day, not at joining. Asset rows, clearance checkboxes, and receiving / IT / finance signatures are left blank.')
-  pack.p(`By signing below, I, ${ctx.name}, confirm I have read, understood, and agree to be bound by all 17 sections of this Legal Agreements & HR Records Pack as if signed individually. I specifically acknowledge that confidentiality, portfolio, and commercial secrecy obligations are perpetual and indefinite with no expiry.`)
+  if (ctx.hasAssets) {
+    pack.h2('15. Asset handover form')
+    pack.p(`Assets issued to ${ctx.name} on ${ctx.joining}:`)
+    pack.table(
+      ['#', 'Asset description', 'Brand / Model', 'Serial / IMEI', 'Condition'],
+      (ctx.assetItems.length ? ctx.assetItems : [ctx.assets]).map((item, index) => [String(index + 1), item, '', '', '']),
+    )
+    pack.p('I acknowledge receipt of the above assets in the stated condition and agree to: (a) use them solely for Company work; (b) not damage, modify, or part with them without written authorisation; (c) return all assets on my last working day in the same or better condition; (d) authorise the Company to recover the full replacement cost from my Full & Final Settlement for any loss or damage caused by negligence.')
+    pack.h2('16. IT equipment usage agreement')
+    pack.bullets([
+      'Company-issued devices are strictly for work purposes only. Installation of any software requires prior management approval.',
+      'The Company reserves the right to remotely access, monitor, and wipe Company devices at any time without prior notice.',
+      'Personal data stored on Company devices is the Employee’s own responsibility — the Company is not liable for its loss.',
+      'All devices must be kept physically secure, clean, and updated within 48 hours of any system update prompt.',
+      'Repair or servicing of Company devices must go through the Company only — unauthorised third-party repair shops are strictly prohibited.',
+      'All Company devices must be returned on the last working day. Failure to return any device will be treated as theft and reported accordingly.',
+    ])
+    pack.h2('17. Asset return form')
+    pack.note('Template — to be completed on the last working day, not at joining.')
+    pack.table(
+      ['#', 'Asset description', 'Serial / IMEI', 'Condition at return', 'Remarks'],
+      (ctx.assetItems.length ? ctx.assetItems : [ctx.assets]).map((item, index) => [String(index + 1), item, '', '', '']),
+    )
+  }
+  pack.p(`By signing below, I, ${ctx.name}, confirm I have read, understood, and agree to be bound by all sections of this Legal Agreements & HR Records Pack as if signed individually. I specifically acknowledge that confidentiality, portfolio, and commercial secrecy obligations are perpetual and indefinite with no expiry.`)
   pack.signature({ name: ctx.name, role: ctx.designation, image: ctx.signature })
   pack.save(`${fileSlug(ctx.name)}-legal-hr-pack.pdf`)
 }
 
 export function downloadHandbookPack(row) {
-  const ctx = context(row)
+  const ctx = buildOnboardingPackContext(row)
   const pack = createPack()
   cover(pack, '3', 'Employee Handbook & Performance Pack', 'All HR Policies · Compliance · Technology · KRA/KPI · Learning Plan · Reviews')
   identity(pack, ctx)
@@ -577,4 +607,16 @@ export function downloadHandbookPack(row) {
   pack.p(`By signing below, I, ${ctx.name}, confirm that I have received, read, and fully understood this Employee Handbook & Performance Pack. I agree to be bound by all policies, procedures, standards, and obligations set out herein — including leave policy, attendance policy, code of conduct, POSH policy, compliance policies, technology policies, KRA/KPI framework, learning commitments, and the disciplinary and exit policies — as if I had signed each section individually. I acknowledge these policies may be updated with reasonable notice and specifically acknowledge my mandatory obligation to submit daily scrum updates, EOD reports, and learning logs on the THEC Employee Portal.`)
   pack.signature({ name: `${ctx.name} · ${ctx.designation} · Emp ID ${ctx.id}`, role: ctx.designation, image: ctx.signature, place: 'Chennai, Tamil Nadu' })
   pack.save(`${fileSlug(ctx.name)}-handbook.pdf`)
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+export async function downloadAllOnboardingPacks(row) {
+  downloadEmploymentPack(row)
+  await wait(500)
+  downloadLegalPack(row)
+  await wait(500)
+  downloadHandbookPack(row)
 }

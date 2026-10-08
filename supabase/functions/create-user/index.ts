@@ -6,6 +6,8 @@ const cors = {
 }
 
 const CLIENT_AUTH_EMAIL_DOMAIN = 'client.halo.local'
+const JOINING_AUTH_EMAIL_DOMAIN = 'joining.halo.local'
+const JOINING_ROLE = 'employee_onboarding'
 
 function normalizeUsername(raw: string) {
   return String(raw || '').trim().toLowerCase().replace(/\s+/g, '')
@@ -17,6 +19,60 @@ function isValidUsername(username: string) {
 
 function usernameToAuthEmail(username: string) {
   return `${normalizeUsername(username)}@${CLIENT_AUTH_EMAIL_DOMAIN}`
+}
+
+function joiningAuthEmail(username: string) {
+  return `${normalizeUsername(username)}@${JOINING_AUTH_EMAIL_DOMAIN}`
+}
+
+async function findAuthUserByEmail(admin, email: string) {
+  if (typeof admin.auth.admin.getUserByEmail === 'function') {
+    const found = await admin.auth.admin.getUserByEmail(email)
+    if (!found.error && found.data?.user) return found.data.user
+  }
+  for (let page = 1; page <= 20; page += 1) {
+    const listed = await admin.auth.admin.listUsers({ page, perPage: 200 })
+    if (listed.error) throw new Error(listed.error.message)
+    const users = listed.data?.users || []
+    const match = users.find((user) => String(user.email || '').toLowerCase() === email)
+    if (match) return match
+    if (users.length < 200) return null
+  }
+  return null
+}
+
+async function upsertJoiningAuth(admin, { username, password, displayName, orgId }) {
+  const email = joiningAuthEmail(username)
+  const metadata = {
+    app_metadata: { role: JOINING_ROLE, orgId },
+    user_metadata: { username, displayName: displayName || username },
+  }
+  const created = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    ...metadata,
+  })
+  if (!created.error) {
+    const uid = created.data.user.id
+    const confirmed = await admin.auth.admin.updateUserById(uid, { password, email_confirm: true })
+    if (confirmed.error) throw new Error(confirmed.error.message)
+    return { user: confirmed.data.user || created.data.user, email }
+  }
+
+  if (!/already|registered|exists/i.test(created.error.message || '')) {
+    throw new Error(created.error.message)
+  }
+  const existing = await findAuthUserByEmail(admin, email)
+  if (!existing) throw new Error(created.error.message)
+  const updated = await admin.auth.admin.updateUserById(existing.id, {
+    password,
+    email_confirm: true,
+    app_metadata: { ...(existing.app_metadata || {}), role: JOINING_ROLE, orgId },
+    user_metadata: { ...(existing.user_metadata || {}), username, displayName: displayName || username },
+  })
+  if (updated.error) throw new Error(updated.error.message)
+  return { user: updated.data.user, email }
 }
 
 Deno.serve(async (req) => {
@@ -56,13 +112,22 @@ Deno.serve(async (req) => {
   const kind = body.type || 'employee'
 
   if (body.action === 'set-password') {
-    const uid = String(body.uid || '').trim()
+    let uid = String(body.uid || '').trim()
+    const email = String(body.email || '').trim().toLowerCase()
+    if (!uid && email) {
+      const existing = await findAuthUserByEmail(admin, email)
+      if (!existing) return json({ error: 'No sign-in exists for this username' }, 400)
+      uid = existing.id
+    }
     if (!uid || password.length < 6) {
       return json({ error: 'uid and a password of at least 6 characters are required' }, 400)
     }
-    const { error: updateErr } = await admin.auth.admin.updateUserById(uid, { password })
+    const { error: updateErr } = await admin.auth.admin.updateUserById(uid, {
+      password,
+      email_confirm: true,
+    })
     if (updateErr) return json({ error: updateErr.message }, 400)
-    return json({ ok: true })
+    return json({ ok: true, uid })
   }
 
   if (body.action === 'delete-user') {
@@ -79,7 +144,7 @@ Deno.serve(async (req) => {
       target = byAuth
     }
     const targetRole = String(target?.data?.role || '').toLowerCase()
-    if (target && targetRole && targetRole !== 'client') {
+    if (target && targetRole && targetRole !== 'client' && targetRole !== 'employee_onboarding') {
       return json({ error: 'Only client portal users can be deleted here' }, 400)
     }
 
@@ -98,6 +163,77 @@ Deno.serve(async (req) => {
     const cleanupErr = onboardById.error || onboardByUser.error || profileDelete.error
     if (cleanupErr) return json({ error: cleanupErr.message }, 400)
     return json({ ok: true })
+  }
+
+  if (kind === 'employee_onboarding' || body.action === 'ensure-joining-login') {
+    const username = normalizeUsername(body.username)
+    if (!isValidUsername(username)) {
+      return json({ error: 'username must be 3–32 characters: letters, numbers, dots, underscores, or hyphens' }, 400)
+    }
+    if (password.length < 6) {
+      return json({ error: 'Password must be at least 6 characters' }, 400)
+    }
+    const employment = body.employment && typeof body.employment === 'object' ? body.employment : {}
+    const displayName = String(employment.fullName || body.displayName || username).trim()
+    try {
+      const { user, email } = await upsertJoiningAuth(admin, { username, password, displayName, orgId })
+      const uid = user.id
+      const now = new Date().toISOString()
+      const onboardingId = String(body.onboardingId || '').trim()
+      let existing = null
+      if (onboardingId) {
+        const byId = await admin.from('employee_onboarding').select('id').eq('id', onboardingId).maybeSingle()
+        existing = byId.data
+      }
+      if (!existing) {
+        const byName = await admin.from('employee_onboarding').select('id').eq('username', username).maybeSingle()
+        existing = byName.data
+      }
+      const kras = Array.isArray(body.kras)
+        ? { custom: body.kras, fixed: [
+          { keyResultArea: 'THEC Portal Compliance', kpi: 'Daily submission rate at least 95%', weight: 10 },
+          { keyResultArea: 'Client Satisfaction & Professional Conduct', kpi: 'No escalations; positive manager feedback', weight: 10 },
+        ] }
+        : null
+      if (existing) {
+        const patch: Record<string, unknown> = { auth_id: uid, username }
+        if (Object.keys(employment).length) patch.employment = employment
+        if (kras) patch.kras = kras
+        const { error: updateErr } = await admin.from('employee_onboarding').update(patch).eq('id', existing.id)
+        if (updateErr) return json({ error: updateErr.message }, 400)
+      } else {
+        const { error: insertErr } = await admin.from('employee_onboarding').insert({
+          id: uid,
+          auth_id: uid,
+          username,
+          status: 'draft',
+          employment,
+          kras,
+          created_at: now,
+        })
+        if (insertErr) return json({ error: insertErr.message }, 400)
+      }
+      await admin.from('profiles').upsert({
+        id: uid,
+        auth_id: uid,
+        org_id: orgId,
+        data: {
+          uid,
+          username,
+          email,
+          displayName,
+          role: JOINING_ROLE,
+          tier: 'company',
+          status: 'active',
+          orgId,
+          updatedAt: now,
+        },
+        updated_at: now,
+      })
+      return json({ id: existing?.id || uid, uid, username, email })
+    } catch (err) {
+      return json({ error: err instanceof Error ? err.message : 'Could not save the joining login' }, 400)
+    }
   }
 
   let email = String(body.email || '').trim().toLowerCase()

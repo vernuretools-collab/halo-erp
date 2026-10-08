@@ -187,6 +187,38 @@ export function createPack() {
     y += 8
   }
 
+  function table(headers, body) {
+    const colW = width / headers.length
+    need(22)
+    doc.setFillColor(...TEAL)
+    doc.rect(margin, y, width, 18, 'F')
+    doc.setFont('times', 'bold')
+    doc.setFontSize(8)
+    doc.setTextColor(255, 255, 255)
+    headers.forEach((header, index) => {
+      doc.text(String(header), margin + 5 + index * colW, y + 12)
+    })
+    y += 18
+    body.forEach((row, rowIndex) => {
+      const height = 20
+      need(height)
+      if (rowIndex % 2 === 1) {
+        doc.setFillColor(248, 250, 252)
+        doc.rect(margin, y, width, height, 'F')
+      }
+      doc.setDrawColor(226, 232, 240)
+      doc.rect(margin, y, width, height, 'S')
+      doc.setFont('times', 'normal')
+      doc.setFontSize(8)
+      doc.setTextColor(...INK)
+      row.forEach((cell, index) => {
+        doc.text(String(cell || ''), margin + 5 + index * colW, y + 13)
+      })
+      y += height
+    })
+    y += 8
+  }
+
   function checks(items, selected) {
     const chosen = new Set(selected || [])
     items.forEach((item) => {
@@ -261,7 +293,7 @@ export function createPack() {
     doc.save(filename)
   }
 
-  return { brand, badge, h1, h2, p, note, bullets, identity, rows, checks, signature, columns, write, save, doc }
+  return { brand, badge, h1, h2, p, note, bullets, identity, rows, table, checks, signature, columns, write, save, doc }
 }
 
 export function fileSlug(name) {

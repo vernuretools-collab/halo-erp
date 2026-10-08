@@ -44,10 +44,16 @@ export default defineConfig({
     tailwindcss()
   ],
   resolve: {
-    alias: supabaseFirebaseAliases(),
+    alias: {
+      ...supabaseFirebaseAliases(),
+      '@supabase/supabase-js': path.resolve(__dirname, 'node_modules/@supabase/supabase-js'),
+    },
   },
   server: {
     port: 3002,
-    strictPort: true
+    strictPort: true,
+    fs: {
+      allow: [path.resolve(__dirname, '..')],
+    },
   }
 })

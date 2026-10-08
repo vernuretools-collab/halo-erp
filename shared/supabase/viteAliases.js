@@ -11,5 +11,7 @@ export function supabaseFirebaseAliases() {
     'firebase/functions': path.join(here, 'functionsCompat.js'),
     'firebase/app': path.join(here, 'appCompat.js'),
     'firebase/messaging': path.join(here, 'messagingCompat.js'),
+    // Shared files live outside each portal, so Node looks beside shared/ for this package.
+    '@supabase/supabase-js': path.resolve(process.cwd(), 'node_modules/@supabase/supabase-js'),
   }
 }
