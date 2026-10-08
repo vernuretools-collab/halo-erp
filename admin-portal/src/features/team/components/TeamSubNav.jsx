@@ -2,6 +2,7 @@ import React from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   Users,
+  UserPlus,
   CheckCircle2,
   Calendar,
   CalendarDays,
@@ -31,6 +32,9 @@ export function TeamSubNav({ className = '' }) {
     >
       <NavLink to="/team/employees" className={linkClass}>
         <Users className="w-3.5 h-3.5" /> Employee Directory
+      </NavLink>
+      <NavLink to="/team/onboarding" className={linkClass}>
+        <UserPlus className="w-3.5 h-3.5" /> Employee Onboarding
       </NavLink>
       <NavLink to="/team/scrum" className={linkClass}>
         <ListChecks className="w-3.5 h-3.5" /> Scrum

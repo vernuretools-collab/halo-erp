@@ -6,7 +6,12 @@ import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { useSettingsStore } from './stores/settingsStore'
 import { getPaymentDetails, savePaymentDetails } from '../../shared/services/paymentDetailsService'
-import { Save, Landmark } from 'lucide-react'
+import {
+  DEFAULT_EMPLOYEE_CONTROLS,
+  getEmployeeControls,
+  saveEmployeeControls,
+} from '../../../../shared/employeeControls.js'
+import { Save, Landmark, Utensils } from 'lucide-react'
 
 export const OrgSettings = () => {
   const { orgDetails, updateOrgDetails } = useSettingsStore()
@@ -29,9 +34,14 @@ export const OrgSettings = () => {
     branch: '',
     notes: '',
   })
+  const [employeeControls, setEmployeeControls] = useState(DEFAULT_EMPLOYEE_CONTROLS)
+  const [controlsSaved, setControlsSaved] = useState(false)
+  const [controlsSaving, setControlsSaving] = useState(false)
+  const [controlsError, setControlsError] = useState('')
 
   useEffect(() => {
     getPaymentDetails().then(setBank).catch(() => {})
+    getEmployeeControls().then(setEmployeeControls).catch(() => {})
   }, [])
 
   const handleSave = (e) => {
@@ -42,6 +52,22 @@ export const OrgSettings = () => {
   }
 
   const setBankField = (key) => (e) => setBank((prev) => ({ ...prev, [key]: e.target.value }))
+
+  const handleSaveEmployeeControls = async (e) => {
+    e.preventDefault()
+    setControlsError('')
+    setControlsSaving(true)
+    try {
+      const savedControls = await saveEmployeeControls(employeeControls)
+      setEmployeeControls(savedControls)
+      setControlsSaved(true)
+      setTimeout(() => setControlsSaved(false), 2000)
+    } catch (err) {
+      setControlsError(err.message || 'Failed to save employee controls.')
+    } finally {
+      setControlsSaving(false)
+    }
+  }
 
   const handleSaveBank = async (e) => {
     e.preventDefault()
@@ -104,6 +130,76 @@ export const OrgSettings = () => {
             {saved && <span className="text-xs text-emerald-400 font-semibold">Settings Saved!</span>}
             <Button type="submit" variant="primary" icon={Save} className="ml-auto">
               Save Settings
+            </Button>
+          </div>
+        </form>
+      </Card>
+
+      <Card className="max-w-2xl space-y-4 border-border bg-surface">
+        <div className="flex items-center gap-2 pb-3 border-b border-border">
+          <Utensils className="w-4 h-4 text-accent" />
+          <h3 className="font-bold text-fg text-sm">Employee Controls</h3>
+        </div>
+        <p className="text-xs text-muted">
+          One lunch window for every employee. Screenshots pause while that lunch is running.
+        </p>
+
+        {controlsError && (
+          <div className="p-3 text-xs text-rose-500 bg-rose-500/10 border border-rose-500/20 rounded-xl">{controlsError}</div>
+        )}
+
+        <form onSubmit={handleSaveEmployeeControls} className="space-y-4">
+          <label className="flex items-start gap-3 text-sm text-fg">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-accent"
+              checked={employeeControls.fixedLunchEnabled}
+              onChange={(e) => setEmployeeControls((prev) => ({ ...prev, fixedLunchEnabled: e.target.checked }))}
+            />
+            <span>
+              <span className="font-medium">Fixed lunch for all employees</span>
+              <span className="block text-xs text-muted">
+                Clocked-in employees start lunch automatically at this time, once a day. Work screenshots stop until lunch ends.
+              </span>
+            </span>
+          </label>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Input
+              label="Lunch start"
+              type="time"
+              value={employeeControls.lunchStart}
+              onChange={(e) => setEmployeeControls((prev) => ({ ...prev, lunchStart: e.target.value }))}
+              required={employeeControls.fixedLunchEnabled}
+            />
+            <Input
+              label="Lunch end"
+              type="time"
+              value={employeeControls.lunchEnd}
+              onChange={(e) => setEmployeeControls((prev) => ({ ...prev, lunchEnd: e.target.value }))}
+              required={employeeControls.fixedLunchEnabled}
+            />
+          </div>
+
+          <label className="flex items-start gap-3 text-sm text-fg">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-accent"
+              checked={employeeControls.showLunchButton}
+              onChange={(e) => setEmployeeControls((prev) => ({ ...prev, showLunchButton: e.target.checked }))}
+            />
+            <span>
+              <span className="font-medium">Show lunch button</span>
+              <span className="block text-xs text-muted">
+                Employees can start lunch themselves. Turn this off to use only the fixed window.
+              </span>
+            </span>
+          </label>
+
+          <div className="pt-2 flex items-center justify-between">
+            {controlsSaved && <span className="text-xs text-emerald-400 font-semibold">Employee controls saved.</span>}
+            <Button type="submit" variant="primary" icon={Save} className="ml-auto" disabled={controlsSaving}>
+              {controlsSaving ? 'Saving...' : 'Save Employee Controls'}
             </Button>
           </div>
         </form>

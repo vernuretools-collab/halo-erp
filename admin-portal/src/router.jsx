@@ -39,6 +39,15 @@ const RecurringBilling = lazy(() =>
 const EmployeeList = lazy(() =>
   import('./features/team/EmployeeList').then((m) => ({ default: m.EmployeeList }))
 )
+const EmployeeOnboardingList = lazy(() =>
+  import('./features/team/EmployeeOnboardingList').then((m) => ({ default: m.EmployeeOnboardingList }))
+)
+const EmployeeOnboardingSetup = lazy(() =>
+  import('./features/team/EmployeeOnboardingSetup').then((m) => ({ default: m.EmployeeOnboardingSetup }))
+)
+const EmployeeOnboardingDetail = lazy(() =>
+  import('./features/team/EmployeeOnboardingDetail').then((m) => ({ default: m.EmployeeOnboardingDetail }))
+)
 const ScrumPage = lazy(() =>
   import('./features/team/ScrumPage').then((m) => ({ default: m.ScrumPage }))
 )
@@ -162,6 +171,9 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <Navigate to="/team/employees" replace /> },
           { path: 'employees', element: <EmployeeList /> },
+          { path: 'onboarding', element: <EmployeeOnboardingList /> },
+          { path: 'onboarding/new', element: <EmployeeOnboardingSetup /> },
+          { path: 'onboarding/:id', element: <EmployeeOnboardingDetail /> },
           { path: 'scrum', element: <ScrumPage /> },
           { path: 'announcements', element: <AnnouncementManager /> },
           { path: 'helpdesk', element: <HelpDeskManager /> },

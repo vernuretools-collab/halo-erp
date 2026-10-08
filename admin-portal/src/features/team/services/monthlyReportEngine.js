@@ -8,6 +8,7 @@ import {
   formatSecondsToHrsMins,
   formatTo12HourTime,
   getCappedRegularSeconds,
+  getOverallBreakSeconds,
   getLateInfo,
   isAttendancePresent,
   OFFICE_START_MINUTES,
@@ -278,6 +279,7 @@ export function buildEmployeeMonthlyReport({
   let onTimeDays = 0
   let totalRegularSeconds = 0
   let totalExtraSeconds = 0
+  let totalBreakSeconds = 0
 
   const identityKeys = employeeIdentityKeys(employee)
   const idleByDate = {}
@@ -325,6 +327,7 @@ export function buildEmployeeMonthlyReport({
       : { isLate: false, lateMinutes: 0 }
     const regularSeconds = getCappedRegularSeconds(log)
     const extraSeconds = Number(log?.extraSeconds) || Number(log?.accumulatedExtraSeconds) || 0
+    const breakSeconds = getOverallBreakSeconds(log)
 
     const dayLeaves = leaveByDate[date] || []
     const approvedLeave = dayLeaves.find((l) => l.status === 'approved')
@@ -352,6 +355,7 @@ export function buildEmployeeMonthlyReport({
       if (presentFromLog) {
         totalRegularSeconds += regularSeconds
         totalExtraSeconds += extraSeconds
+        totalBreakSeconds += breakSeconds
       }
     } else if (canBeAbsent && !present && !isPaidWfh) {
       absentDays += 1
@@ -367,6 +371,7 @@ export function buildEmployeeMonthlyReport({
       clockOutTime: clockOutTime ? formatTo12HourTime(clockOutTime) : null,
       regularSeconds,
       extraSeconds,
+      breakSeconds,
       idleSeconds: idleByDate[date] || 0,
       leaveType,
       timelineHours: timelineByDate[date] || 0,
@@ -452,6 +457,8 @@ export function buildEmployeeMonthlyReport({
       totalExtraHoursLabel: formatSecondsToHrsMins(totalExtraSeconds),
       totalIdleSeconds,
       totalIdleHoursLabel: formatSecondsToHrsMins(totalIdleSeconds),
+      totalBreakSeconds,
+      totalBreakHoursLabel: formatSecondsToHrsMins(totalBreakSeconds),
     },
     leave: {
       approvedDays,
@@ -510,6 +517,7 @@ export function monthlyReportToCsv(report) {
   lines.push(`Total Regular Hours,${csvEscape(a.totalRegularHoursLabel)}`)
   lines.push(`Total Extra Hours,${csvEscape(a.totalExtraHoursLabel)}`)
   lines.push(`Idle Time,${csvEscape(a.totalIdleHoursLabel || formatSecondsToHrsMins(a.totalIdleSeconds))}`)
+  lines.push(`Break Time,${csvEscape(a.totalBreakHoursLabel || formatSecondsToHrsMins(a.totalBreakSeconds))}`)
   lines.push(`Leave Approved Days,${report.leave?.approvedDays ?? ''}`)
   lines.push(`LOP Unpaid Days,${report.leave?.lopDays ?? report.leave?.unpaidLeaveDays ?? ''}`)
   lines.push(`Unpaid Days (LOP + Absent),${report.leave?.unpaidDays ?? ''}`)
@@ -517,7 +525,7 @@ export function monthlyReportToCsv(report) {
   lines.push(`Timeline Hours,${report.timeline?.totalHours ?? ''}`)
   lines.push('')
   lines.push(
-    'Date,Present,Late,Late Minutes,Clock In,Clock Out,Regular Seconds,Extra Seconds,Idle Seconds,Leave Type,Timeline Hours'
+    'Date,Present,Late,Late Minutes,Clock In,Clock Out,Break Seconds,Regular Seconds,Extra Seconds,Idle Seconds,Leave Type,Timeline Hours'
   )
   ;(report.daily || []).forEach((row) => {
     lines.push(
@@ -528,6 +536,7 @@ export function monthlyReportToCsv(report) {
         row.lateMinutes ?? 0,
         csvEscape(row.clockInTime || ''),
         csvEscape(row.clockOutTime || ''),
+        row.breakSeconds ?? 0,
         row.regularSeconds ?? 0,
         row.extraSeconds ?? 0,
         row.idleSeconds ?? 0,

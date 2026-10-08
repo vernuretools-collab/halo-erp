@@ -33,7 +33,7 @@ import {
   overallReportFilename,
   saveBlob,
 } from './services/monthlyReportExports'
-import { formatSecondsToHrsMins, formatTo12HourTime } from './services/attendanceStatsUtils'
+import { formatSecondsToHrsMins, formatTo12HourTime, getOverallBreakSeconds } from './services/attendanceStatsUtils'
 import {
   RefreshCw,
   Download,
@@ -100,6 +100,7 @@ export function EmployeeMonthlyReportPage() {
   const [month, setMonth] = useState(initialMonth)
   const [selectedUid, setSelectedUid] = useState(initialUid)
   const [report, setReport] = useState(null)
+  const [attendanceLogs, setAttendanceLogs] = useState([])
   const [monthReports, setMonthReports] = useState([])
   const [loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
@@ -177,12 +178,14 @@ export function EmployeeMonthlyReportPage() {
     setLoading(true)
     setError('')
     try {
-      const [stored, list] = await Promise.all([
+      const [stored, list, logs] = await Promise.all([
         getMonthlyReport(selectedUid, month),
         listMonthlyReports({ month }),
+        getAttendanceLogsForMonth(month),
       ])
       setReport(stored)
       setMonthReports(list || [])
+      setAttendanceLogs(logs || [])
     } catch (err) {
       console.error(err)
       setError('Unable to load monthly report.')
@@ -305,6 +308,25 @@ export function EmployeeMonthlyReportPage() {
       setExporting('')
     }
   }
+
+  const breakByDate = useMemo(() => {
+    const byDate = {}
+    ;(attendanceLogs || []).forEach((log) => {
+      if (!log?.date) return
+      if (log.uid && selectedUid && String(log.uid) !== String(selectedUid)) return
+      byDate[log.date] = getOverallBreakSeconds(log)
+    })
+    return byDate
+  }, [attendanceLogs, selectedUid])
+
+  const dailyRows = useMemo(
+    () =>
+      (report?.daily || []).map((row) => ({
+        ...row,
+        breakSeconds: breakByDate[row.date] ?? row.breakSeconds ?? 0,
+      })),
+    [report, breakByDate]
+  )
 
   const att = report?.attendance || {}
   const leave = report?.leave || {}
@@ -594,6 +616,7 @@ export function EmployeeMonthlyReportPage() {
                     <th className="p-3 font-semibold">Status</th>
                     <th className="p-3 font-semibold">Clock in</th>
                     <th className="p-3 font-semibold">Clock out</th>
+                    <th className="p-3 font-semibold">Break</th>
                     <th className="p-3 font-semibold">Hours</th>
                     <th className="p-3 font-semibold">Idle</th>
                     <th className="p-3 font-semibold">Late</th>
@@ -602,7 +625,7 @@ export function EmployeeMonthlyReportPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                  {(report.daily || []).map((row) => (
+                  {dailyRows.map((row) => (
                     <tr key={row.date} className="text-fg">
                       <td className="p-3 font-medium whitespace-nowrap">{row.date}</td>
                       <td className="p-3">
@@ -621,6 +644,7 @@ export function EmployeeMonthlyReportPage() {
                       </td>
                       <td className="p-3 font-mono">{formatTo12HourTime(row.clockInTime) || '—'}</td>
                       <td className="p-3 font-mono">{formatTo12HourTime(row.clockOutTime) || '—'}</td>
+                      <td className="p-3 font-mono">{formatSecondsToHrsMins(row.breakSeconds)}</td>
                       <td className="p-3 font-mono">{formatSecondsToHrsMins(row.regularSeconds)}</td>
                       <td className="p-3 font-mono">{idleTimeLabel(row.idleSeconds)}</td>
                       <td className="p-3">

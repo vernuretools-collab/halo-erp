@@ -3,6 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard,
   Users,
+  UserPlus,
   Briefcase,
   DollarSign,
   UserCheck,
@@ -136,6 +137,7 @@ const ADMIN_GROUPS = [
     icon: UserCheck,
     items: [
       { name: 'Employees', path: '/team/employees', icon: Users },
+      { name: 'Employee Onboarding', path: '/team/onboarding', icon: UserPlus },
       { name: 'Scrum', path: '/team/scrum', icon: ListChecks },
       { name: 'Announcements', path: '/team/announcements', icon: Megaphone },
       { name: 'Client Support', path: '/team/helpdesk', icon: LifeBuoy },

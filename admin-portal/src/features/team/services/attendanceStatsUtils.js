@@ -82,6 +82,41 @@ export function getCappedRegularSeconds(log) {
   return Math.max(0, sec)
 }
 
+function toEpochMs(value) {
+  if (value == null || value === '') return null
+  if (typeof value === 'number' && Number.isFinite(value)) return value < 1e12 ? value * 1000 : value
+  if (typeof value?.toMillis === 'function') return value.toMillis()
+  if (typeof value?.seconds === 'number') return value.seconds * 1000
+  const numeric = Number(value)
+  if (Number.isFinite(numeric) && numeric > 1e11) return numeric
+  const parsed = Date.parse(value)
+  return Number.isNaN(parsed) ? null : parsed
+}
+
+/**
+ * Total pause time for a day: finished breaks and lunch, plus a break or lunch still in progress.
+ * @param {object} log
+ * @param {number} [now]
+ * @returns {number}
+ */
+export function getOverallBreakSeconds(log, now = Date.now()) {
+  if (!log) return 0
+  let seconds = (Number(log.accumulatedBreakSeconds) || 0) + (Number(log.accumulatedLunchSeconds) || 0)
+  if (log.isOnBreak) {
+    const start = toEpochMs(log.breakStartTime)
+    if (start) seconds += Math.max(0, Math.floor((now - start) / 1000))
+  }
+  if (log.isOnLunch) {
+    const start = toEpochMs(log.lunchStartTime)
+    if (start) {
+      const ends = toEpochMs(log.lunchEndsAt)
+      const cap = ends && ends > start ? Math.floor((ends - start) / 1000) : 60 * 60
+      seconds += Math.min(cap, Math.max(0, Math.floor((now - start) / 1000)))
+    }
+  }
+  return Math.max(0, Math.round(seconds))
+}
+
 export function minutesToTimeStr(totalMinutes) {
   if (totalMinutes === null || totalMinutes === undefined || isNaN(totalMinutes)) return null
   let hrs = Math.floor(totalMinutes / 60) % 24
