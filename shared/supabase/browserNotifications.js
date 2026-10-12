@@ -4,6 +4,27 @@ const ICON = '/halologo.png'
 const recentlyShown = new Set()
 const suppressedAnnouncementIds = new Set()
 
+let primedAudio = null
+let audioCtx = null
+let audioUnlocked = false
+let unlockBound = false
+
+const ensurePrimedAudio = () => {
+  if (!primedAudio && typeof Audio !== 'undefined') {
+    primedAudio = new Audio(ANNOUNCEMENT_SOUND)
+    primedAudio.preload = 'auto'
+  }
+  return primedAudio
+}
+
+const ensureAudioContext = () => {
+  const Ctx = window.AudioContext || window.webkitAudioContext
+  if (!Ctx) return null
+  if (!audioCtx) audioCtx = new Ctx()
+  if (audioCtx.state === 'suspended') void audioCtx.resume()
+  return audioCtx
+}
+
 const isElectronDesktop = () =>
   typeof window !== 'undefined' && typeof window.desktop?.showNotification === 'function'
 
@@ -31,18 +52,27 @@ export const ensureNotificationServiceWorker = async () => {
   }
 }
 
+const detachUnlockListeners = () => {
+  if (typeof document === 'undefined') return
+  document.removeEventListener('pointerdown', unlockAnnouncementAudio, true)
+  document.removeEventListener('keydown', unlockAnnouncementAudio, true)
+}
+
 export const unlockAnnouncementAudio = () => {
-  if (typeof navigator !== 'undefined' && navigator.userActivation && !navigator.userActivation.isActive) {
-    return
-  }
+  if (typeof window === 'undefined') return
   try {
-    const audio = new Audio(ANNOUNCEMENT_SOUND)
+    ensureAudioContext()
+    if (audioUnlocked) return
+    const audio = ensurePrimedAudio()
+    if (!audio) return
     audio.volume = 0
     void audio
       .play()
       .then(() => {
         audio.pause()
         audio.currentTime = 0
+        audioUnlocked = true
+        detachUnlockListeners()
       })
       .catch(() => {})
   } catch {
@@ -50,11 +80,20 @@ export const unlockAnnouncementAudio = () => {
   }
 }
 
+const bindAnnouncementAudioUnlock = () => {
+  if (unlockBound || typeof document === 'undefined') return
+  unlockBound = true
+  document.addEventListener('pointerdown', unlockAnnouncementAudio, true)
+  document.addEventListener('keydown', unlockAnnouncementAudio, true)
+}
+
+bindAnnouncementAudioUnlock()
+
 export const playAnnouncementChime = () => {
   const playOscillator = () => {
     try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)()
-      if (ctx.state === 'suspended') void ctx.resume()
+      const ctx = ensureAudioContext()
+      if (!ctx) return
       const now = ctx.currentTime
       const osc = ctx.createOscillator()
       const gain = ctx.createGain()
@@ -74,8 +113,17 @@ export const playAnnouncementChime = () => {
   }
 
   try {
-    const audio = new Audio(ANNOUNCEMENT_SOUND)
+    const audio = ensurePrimedAudio()
+    if (!audio) {
+      playOscillator()
+      return
+    }
     audio.volume = 0.7
+    try {
+      audio.currentTime = 0
+    } catch {
+      // ignore if the file is not seekable yet
+    }
     void audio.play().catch(playOscillator)
   } catch {
     playOscillator()
@@ -143,7 +191,7 @@ export const showForegroundBrowserNotification = async (payload) => {
   recentlyShown.add(tag)
   setTimeout(() => recentlyShown.delete(tag), 30000)
 
-  if (type !== 'wellness') playAnnouncementChime()
+  playAnnouncementChime()
 
   if (isElectronDesktop()) {
     try {

@@ -1,5 +1,8 @@
-/** Internal auth address for username-only joining accounts. Never shown in the UI. */
-export const JOINING_AUTH_EMAIL_DOMAIN = 'joining.halo.local'
+/** Internal auth addresses for username-only joining accounts. Never shown in the UI. */
+export const JOINING_AUTH_EMAIL_DOMAINS = ['join.halo.local', 'joining.halo.local']
+
+/** Domain used when a joining sign-in is created. */
+export const JOINING_AUTH_EMAIL_DOMAIN = JOINING_AUTH_EMAIL_DOMAINS[0]
 
 export const ONBOARDING_STATUS = {
   DRAFT: 'draft',
@@ -32,7 +35,13 @@ export function isJoiningRole(role) {
 }
 
 export function isJoiningEmail(email) {
-  return String(email || '').trim().toLowerCase().endsWith(`@${JOINING_AUTH_EMAIL_DOMAIN}`)
+  const value = String(email || '').trim().toLowerCase()
+  return JOINING_AUTH_EMAIL_DOMAINS.some((domain) => value.endsWith(`@${domain}`))
+}
+
+export function joiningAuthEmails(username) {
+  const login = normalizeJoiningUsername(username)
+  return JOINING_AUTH_EMAIL_DOMAINS.map((domain) => `${login}@${domain}`)
 }
 
 export function isJoiningAccount({ role, email } = {}) {
@@ -53,6 +62,59 @@ export function joiningUsernameToAuthEmail(username) {
 
 export function customKraWeight(kras = []) {
   return kras.reduce((sum, row) => sum + (Number(row?.weight) || 0), 0)
+}
+
+function localDate(value) {
+  const text = String(value || '').trim()
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (match) return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+  const parsed = new Date(text)
+  if (Number.isNaN(parsed.getTime())) return null
+  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate())
+}
+
+function toIsoDate(date) {
+  if (!date) return ''
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${day}`
+}
+
+export function addIsoDays(value, days) {
+  const date = localDate(value)
+  if (!date) return ''
+  date.setDate(date.getDate() + days)
+  return toIsoDate(date)
+}
+
+export function probationIsoDate(value, period) {
+  const date = localDate(value)
+  if (!date) return ''
+  const text = String(period || '').toLowerCase()
+  const months = text.includes('6') ? 6 : text.includes('1 month') ? 1 : text.includes('none') ? 0 : 3
+  date.setMonth(date.getMonth() + months)
+  return toIsoDate(date)
+}
+
+export const DEFAULT_LEARNING_PLAN = [
+  { id: 'd30', label: 'Day 1–30', title: 'Understand & Set Up', points: '' },
+  { id: 'd60', label: 'Day 31–60', title: 'Deliver & Contribute', points: '' },
+  { id: 'd90', label: 'Day 61–90', title: 'Own & Optimise', points: '' },
+]
+
+export function defaultReviews(employment = {}) {
+  const manager = String(employment.reportingManager || '').trim()
+  return [
+    { id: 'r30', review: '30-Day Review', date: addIsoDays(employment.dateOfJoining, 30), reviewer: manager, focus: '' },
+    { id: 'r60', review: '60-Day Review', date: addIsoDays(employment.dateOfJoining, 60), reviewer: manager, focus: '' },
+    { id: 'r90', review: '90-Day Review', date: addIsoDays(employment.dateOfJoining, 90), reviewer: 'Manager + Senior Mgmt', focus: '' },
+    { id: 'probation', review: 'End of Probation', date: probationIsoDate(employment.dateOfJoining, employment.probationPeriod), reviewer: 'Manager + Co-Founder', focus: '' },
+  ]
+}
+
+export function learningPoints(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item || '').trim()).filter(Boolean)
+  return String(value || '').split(/\n+/).map((item) => item.trim()).filter(Boolean)
 }
 
 export function joiningPageUrl() {
@@ -78,6 +140,7 @@ export function onboardingFromProfile(profile) {
     documents: Array.isArray(data.documents) ? data.documents : [],
     created_at: profile.created_at || data.createdAt || data.updatedAt,
     submitted_at: data.submittedAt || null,
+    login_password: data.loginPassword || '',
     source: 'profile',
   }
 }

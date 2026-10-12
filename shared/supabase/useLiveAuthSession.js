@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { onAuthStateChanged } from 'firebase/auth'
 import { supabase } from './client.js'
+import { isJoiningRole } from './employeeOnboarding.js'
 
 export function useLiveAuthSession({ auth, useUserStore, fetchCustomClaims }) {
   const user = useUserStore((s) => s.user)
@@ -25,7 +26,9 @@ export function useLiveAuthSession({ auth, useUserStore, fetchCustomClaims }) {
           ...(state.claims || {}),
           ...(claims || {}),
           orgId: claims?.orgId || state.claims?.orgId || 'org_demo',
-          role: state.userDoc?.role || claims?.role || state.claims?.role || 'employee',
+          role: isJoiningRole(claims?.role)
+            ? claims.role
+            : (state.userDoc?.role || claims?.role || state.claims?.role || 'employee'),
           tier: claims?.tier || state.claims?.tier || 'company',
         }
         setUser(sessionUser, state.userDoc || null, mergedClaims)

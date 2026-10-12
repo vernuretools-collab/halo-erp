@@ -104,7 +104,7 @@ export function SignaturePad({ value, onChange, disabled }) {
           type="button"
           disabled={disabled}
           onClick={() => fileRef.current?.click()}
-          className="inline-flex items-center gap-2 rounded-lg border border-teal-700 px-3 py-2 text-sm text-teal-800 disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-lg border border-teal-700 px-3 py-2 text-sm text-teal-800 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Upload className="w-4 h-4" /> Upload signature
         </button>
@@ -112,7 +112,7 @@ export function SignaturePad({ value, onChange, disabled }) {
           type="button"
           disabled={disabled}
           onClick={clear}
-          className="ml-auto inline-flex items-center gap-2 rounded-lg border border-rose-500 px-3 py-2 text-sm text-rose-600 disabled:opacity-50"
+          className="ml-auto inline-flex items-center gap-2 rounded-lg border border-rose-500 px-3 py-2 text-sm text-rose-600 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Eraser className="w-4 h-4" /> Clear
         </button>

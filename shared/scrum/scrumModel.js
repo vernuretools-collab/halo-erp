@@ -137,9 +137,19 @@ export function sessionIdentityIds(session) {
   })
 }
 
-/** True when the signed-in person is the single employee admin chose to conduct scrum. */
-export function isCurrentConductor(conductor, session) {
-  if (!conductor?.employeeId && !String(conductor?.employeeEmail || conductor?.email || '').trim()) return false
+function hasConductorIdentity(conductor) {
+  return Boolean(conductor?.employeeId || String(conductor?.employeeEmail || conductor?.email || '').trim())
+}
+
+/** Selected scrum users. An `employees` array wins, including when it is empty. */
+export function conductorList(record) {
+  if (!record) return []
+  if (Array.isArray(record.employees)) return record.employees.filter(hasConductorIdentity)
+  return hasConductorIdentity(record) ? [record] : []
+}
+
+function matchesConductor(conductor, session) {
+  if (!hasConductorIdentity(conductor)) return false
   const conductorIds = new Set(collectIdentityIds({
     ...conductor,
     id: conductor.employeeId || conductor.id,
@@ -153,4 +163,9 @@ export function isCurrentConductor(conductor, session) {
     .map((email) => String(email || '').trim().toLowerCase())
     .filter(Boolean)
   return emails.includes(conductorEmail)
+}
+
+/** True when the signed-in person is one of the employees admin chose for scrum. */
+export function isCurrentConductor(conductor, session) {
+  return conductorList(conductor).some((person) => matchesConductor(person, session))
 }

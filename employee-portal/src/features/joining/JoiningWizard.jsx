@@ -36,7 +36,57 @@ function SectionTitle({ children }) {
   )
 }
 
-export function JoiningWizard({ step, answers, setAnswers, employment, readOnly }) {
+function displayValue(value) {
+  const text = String(value ?? '').trim()
+  return text || '—'
+}
+
+function PreviewSection({ title, onEdit, children }) {
+  return (
+    <section className="rounded-xl border border-slate-200 overflow-hidden">
+      <div className="flex items-center justify-between gap-3 bg-slate-50 px-4 py-3">
+        <h4 className="text-sm font-semibold text-teal-800">{title}</h4>
+        {onEdit ? (
+          <button type="button" onClick={onEdit} className="text-xs font-semibold text-teal-700 underline">
+            Edit
+          </button>
+        ) : null}
+      </div>
+      <dl className="px-4 py-1">{children}</dl>
+    </section>
+  )
+}
+
+function PreviewRow({ label, value }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-[200px_1fr] gap-1 py-2.5 border-b border-slate-100 last:border-0">
+      <dt className="text-xs font-semibold text-slate-500">{label}</dt>
+      <dd className="text-sm text-slate-800 whitespace-pre-wrap break-words">{displayValue(value)}</dd>
+    </div>
+  )
+}
+
+const EMPLOYMENT_FIELDS = [
+  ['designation', 'Designation'],
+  ['department', 'Department'],
+  ['dateOfJoining', 'Date of joining'],
+  ['reportingManager', 'Reporting to'],
+  ['workMode', 'Work mode'],
+  ['monthlyCtc', 'Monthly CTC (gross)'],
+  ['probationPeriod', 'Probation period'],
+  ['employeeId', 'Employee ID'],
+]
+
+export function JoiningWizard({
+  step,
+  answers,
+  setAnswers,
+  employment,
+  readOnly,
+  detailsConfirmed,
+  setDetailsConfirmed,
+  onEditStep,
+}) {
   const personal = answers.personal
   const setPersonal = (key, value) => setAnswers((current) => ({
     ...current,
@@ -77,7 +127,7 @@ export function JoiningWizard({ step, answers, setAnswers, employment, readOnly 
             style={{ width: `${((step + 1) / JOINING_STEPS.length) * 100}%` }}
           />
         </div>
-        <div className="mt-3 flex justify-between gap-2 text-xs">
+        <div className="mt-3 flex flex-wrap justify-between gap-x-2 gap-y-1 text-xs">
           {JOINING_STEPS.map((item, index) => (
             <span key={item.id} className={index === step ? 'text-amber-600 font-semibold' : index < step ? 'text-teal-700' : 'text-slate-400'}>
               {item.label}
@@ -156,14 +206,7 @@ export function JoiningWizard({ step, answers, setAnswers, employment, readOnly 
             <p className="text-sm text-slate-500 mb-4">These details have been set by HR. Please review and confirm they are correct.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {[
-                ['designation', 'Designation'],
-                ['department', 'Department'],
-                ['dateOfJoining', 'Date of joining'],
-                ['reportingManager', 'Reporting to'],
-                ['workMode', 'Work mode'],
-                ['monthlyCtc', 'Monthly CTC (gross)'],
-                ['probationPeriod', 'Probation period'],
-                ['employeeId', 'Employee ID'],
+                ...EMPLOYMENT_FIELDS,
                 ...(hasIssuedAssets(employment.assets) ? [['assets', 'Assets to be issued']] : []),
               ].map(([key, label]) => (
                 <Field key={key} label={label}>
@@ -311,7 +354,7 @@ export function JoiningWizard({ step, answers, setAnswers, employment, readOnly 
           <>
             <SectionTitle>Policy acknowledgement</SectionTitle>
             <p className="text-sm text-slate-500 mb-4">
-              Please read and acknowledge the following key policies. By checking each box, you confirm you have read and understood the policy. Full policy text is in your Document Pack.
+              Please read and acknowledge the following key policies. By checking each box, you confirm you have read and understood the policy.
             </p>
             <div className="space-y-3">
               {POLICY_ITEMS.map((item) => (
@@ -330,6 +373,96 @@ export function JoiningWizard({ step, answers, setAnswers, employment, readOnly 
                 </label>
               ))}
             </div>
+          </>
+        )}
+
+        {step === 7 && (
+          <>
+            <SectionTitle>Review your details</SectionTitle>
+            <p className="text-sm text-slate-500 mb-4">
+              Check everything below. Use Edit if something needs to change, then return here to submit.
+            </p>
+            <div className="space-y-4">
+              <PreviewSection title="Personal details" onEdit={readOnly ? null : () => onEditStep(0)}>
+                <PreviewRow label="Full name" value={personal.fullName} />
+                <PreviewRow label="Date of birth" value={personal.dateOfBirth} />
+                <PreviewRow label="Gender" value={personal.gender} />
+                <PreviewRow label="Nationality" value={personal.nationality} />
+                <PreviewRow label="Aadhaar number" value={personal.aadhaar} />
+                <PreviewRow label="PAN number" value={personal.pan} />
+                <PreviewRow label="Mobile number" value={personal.mobile} />
+                <PreviewRow label="Personal email" value={personal.email} />
+                <PreviewRow label="Permanent address" value={personal.permanentAddress} />
+                <PreviewRow label="Current address" value={personal.currentAddress} />
+                <PreviewRow label="Father's name" value={personal.fatherName} />
+                <PreviewRow label="Mother's name" value={personal.motherName} />
+                <PreviewRow label="Marital status" value={personal.maritalStatus} />
+                <PreviewRow label="Blood group" value={personal.bloodGroup} />
+              </PreviewSection>
+              <PreviewSection title="Employment details" onEdit={readOnly ? null : () => onEditStep(1)}>
+                {EMPLOYMENT_FIELDS.map(([key, label]) => (
+                  <PreviewRow key={key} label={label} value={employment[key]} />
+                ))}
+                {hasIssuedAssets(employment.assets) ? <PreviewRow label="Assets to be issued" value={employment.assets} /> : null}
+                <PreviewRow label="Conflict of interest" value={answers.employment.conflictOfInterest} />
+              </PreviewSection>
+              <PreviewSection title="Bank & payroll" onEdit={readOnly ? null : () => onEditStep(2)}>
+                <PreviewRow label="Bank name" value={answers.bank.bankName} />
+                <PreviewRow label="Account holder" value={answers.bank.accountHolder} />
+                <PreviewRow label="Account number" value={answers.bank.accountNumber} />
+                <PreviewRow label="IFSC code" value={answers.bank.ifsc} />
+                <PreviewRow label="Branch & city" value={answers.bank.branchCity} />
+                <PreviewRow label="Account type" value={answers.bank.accountType} />
+                <PreviewRow label="UAN (PF)" value={answers.bank.uan} />
+              </PreviewSection>
+              <PreviewSection title="KYC & documents" onEdit={readOnly ? null : () => onEditStep(3)}>
+                <PreviewRow label="Highest qualification" value={answers.kyc.qualification} />
+                <PreviewRow label="Institution & year" value={answers.kyc.institutionYear} />
+                <PreviewRow label="Last employer" value={answers.kyc.lastEmployer} />
+                <PreviewRow label="Last designation" value={answers.kyc.lastDesignation} />
+                <PreviewRow label="Documents" value={answers.kyc.documents.join(', ')} />
+                <PreviewRow label="Previous obligations" value={answers.kyc.obligations} />
+              </PreviewSection>
+              <PreviewSection title="Emergency contact" onEdit={readOnly ? null : () => onEditStep(4)}>
+                <PreviewRow label="Primary contact" value={answers.emergency.primaryName} />
+                <PreviewRow label="Relationship" value={answers.emergency.primaryRelationship} />
+                <PreviewRow label="Mobile number" value={answers.emergency.primaryMobile} />
+                <PreviewRow label="Address" value={answers.emergency.address} />
+                <PreviewRow label="Secondary contact" value={answers.emergency.secondaryName} />
+                <PreviewRow label="Secondary relationship" value={answers.emergency.secondaryRelationship} />
+                <PreviewRow label="Secondary mobile" value={answers.emergency.secondaryMobile} />
+                <PreviewRow label="Allergies / medical" value={answers.emergency.allergies} />
+              </PreviewSection>
+              <PreviewSection title="Policy acknowledgement" onEdit={readOnly ? null : () => onEditStep(5)}>
+                {POLICY_ITEMS.map((item) => (
+                  <div key={item.id} className="py-2.5 border-b border-slate-100 last:border-0">
+                    <p className="text-sm text-slate-800">{item.text}</p>
+                    <p className={`mt-1 text-xs font-semibold ${answers.policies[item.id] ? 'text-teal-700' : 'text-rose-600'}`}>
+                      {answers.policies[item.id] ? 'Acknowledged' : 'Not acknowledged'}
+                    </p>
+                  </div>
+                ))}
+              </PreviewSection>
+              <PreviewSection title="Signature" onEdit={readOnly ? null : () => onEditStep(6)}>
+                <div className="py-3">
+                  {answers.signature ? (
+                    <img src={answers.signature} alt="Signature" className="max-h-32 border border-slate-200 rounded-xl bg-white" />
+                  ) : (
+                    <p className="text-sm text-slate-500">No signature added.</p>
+                  )}
+                </div>
+              </PreviewSection>
+            </div>
+            <label className="mt-6 flex gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-slate-800">
+              <input
+                type="checkbox"
+                className="mt-1"
+                disabled={readOnly}
+                checked={Boolean(detailsConfirmed)}
+                onChange={(e) => setDetailsConfirmed?.(e.target.checked)}
+              />
+              <span>I confirm that all the details I have given are correct.</span>
+            </label>
           </>
         )}
 

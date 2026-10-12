@@ -9,7 +9,14 @@ import {
   where,
 } from 'firebase/firestore'
 import { db } from '../supabase/client.js'
-import { collectIdentityIds, hasScrumNotes, isActiveEmployee, monthBounds, scrumDocId } from './scrumModel.js'
+import {
+  collectIdentityIds,
+  conductorList,
+  hasScrumNotes,
+  isActiveEmployee,
+  monthBounds,
+  scrumDocId,
+} from './scrumModel.js'
 
 export const SCRUM_CONDUCTOR_DOC_ID = 'current'
 
@@ -100,28 +107,44 @@ function conductorFromData(data) {
   }
 }
 
+function conductorPayload(employee) {
+  return {
+    employeeId: employee.id,
+    employeeName: employee.name || '',
+    employeeEmail: employee.email || '',
+    identityIds: collectIdentityIds(employee),
+  }
+}
+
 export async function getScrumConductor() {
   const snap = await getDoc(doc(db, 'scrumConductor', SCRUM_CONDUCTOR_DOC_ID))
   if (!snap.exists()) return null
-  return conductorFromData(snap.data() || {})
+  const data = snap.data() || {}
+  const employees = conductorList(data).map((row) => conductorFromData(row)).filter(Boolean)
+  if (!employees.length) return null
+  return { ...employees[0], employees }
 }
 
-/** Replace the one current conductor. Pass null to clear it. Daily notes are not touched. */
+/** Replace the employees who can open Scrum. Daily notes are not touched. */
+export async function saveScrumConductors(employees) {
+  const list = (employees || []).filter(Boolean).map(conductorPayload)
+  const first = list[0]
+  const identityIds = [...new Set(list.flatMap((row) => row.identityIds))]
+  await setDoc(
+    doc(db, 'scrumConductor', SCRUM_CONDUCTOR_DOC_ID),
+    {
+      employeeId: first?.employeeId || '',
+      employeeName: first?.employeeName || '',
+      employeeEmail: first?.employeeEmail || '',
+      identityIds,
+      employees: list,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+}
+
+/** Replace the selected scrum employees with one person. Pass null to clear them. */
 export async function saveScrumConductor(employee) {
-  const payload = employee
-    ? {
-        employeeId: employee.id,
-        employeeName: employee.name || '',
-        employeeEmail: employee.email || '',
-        identityIds: collectIdentityIds(employee),
-        updatedAt: serverTimestamp(),
-      }
-    : {
-        employeeId: '',
-        employeeName: '',
-        employeeEmail: '',
-        identityIds: [],
-        updatedAt: serverTimestamp(),
-      }
-  await setDoc(doc(db, 'scrumConductor', SCRUM_CONDUCTOR_DOC_ID), payload, { merge: true })
+  await saveScrumConductors(employee ? [employee] : [])
 }

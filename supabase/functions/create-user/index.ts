@@ -6,8 +6,11 @@ const cors = {
 }
 
 const CLIENT_AUTH_EMAIL_DOMAIN = 'client.halo.local'
-const JOINING_AUTH_EMAIL_DOMAIN = 'joining.halo.local'
-const JOINING_ROLE = 'employee_onboarding'
+const JOINING_AUTH_EMAIL_DOMAIN = 'join.halo.local'
+const FIXED_KRAS = [
+  { keyResultArea: 'THEC Portal Compliance', kpi: 'Portal compliance', weight: 10, locked: true },
+  { keyResultArea: 'Client Satisfaction', kpi: 'Client satisfaction', weight: 10, locked: true },
+]
 
 function normalizeUsername(raw: string) {
   return String(raw || '').trim().toLowerCase().replace(/\s+/g, '')
@@ -21,58 +24,112 @@ function usernameToAuthEmail(username: string) {
   return `${normalizeUsername(username)}@${CLIENT_AUTH_EMAIL_DOMAIN}`
 }
 
-function joiningAuthEmail(username: string) {
+function joiningUsernameToAuthEmail(username: string) {
   return `${normalizeUsername(username)}@${JOINING_AUTH_EMAIL_DOMAIN}`
 }
 
-async function findAuthUserByEmail(admin, email: string) {
-  if (typeof admin.auth.admin.getUserByEmail === 'function') {
-    const found = await admin.auth.admin.getUserByEmail(email)
-    if (!found.error && found.data?.user) return found.data.user
-  }
-  for (let page = 1; page <= 20; page += 1) {
-    const listed = await admin.auth.admin.listUsers({ page, perPage: 200 })
-    if (listed.error) throw new Error(listed.error.message)
-    const users = listed.data?.users || []
-    const match = users.find((user) => String(user.email || '').toLowerCase() === email)
-    if (match) return match
-    if (users.length < 200) return null
-  }
-  return null
+function textField(value: unknown) {
+  return String(value || '').trim()
 }
 
-async function upsertJoiningAuth(admin, { username, password, displayName, orgId }) {
-  const email = joiningAuthEmail(username)
-  const metadata = {
-    app_metadata: { role: JOINING_ROLE, orgId },
-    user_metadata: { username, displayName: displayName || username },
+function sanitizeEmployment(raw: Record<string, unknown> | undefined) {
+  const source = raw || {}
+  return {
+    employeeId: textField(source.employeeId),
+    fullName: textField(source.fullName),
+    designation: textField(source.designation),
+    department: textField(source.department),
+    reportingManager: textField(source.reportingManager),
+    dateOfJoining: textField(source.dateOfJoining),
+    workMode: textField(source.workMode),
+    monthlyCtc: textField(source.monthlyCtc),
+    probationPeriod: textField(source.probationPeriod),
+    workLocation: textField(source.workLocation),
+    assets: textField(source.assets),
+    issueDate: textField(source.issueDate),
   }
-  const created = await admin.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-    ...metadata,
-  })
-  if (!created.error) {
-    const uid = created.data.user.id
-    const confirmed = await admin.auth.admin.updateUserById(uid, { password, email_confirm: true })
-    if (confirmed.error) throw new Error(confirmed.error.message)
-    return { user: confirmed.data.user || created.data.user, email }
-  }
+}
 
-  if (!/already|registered|exists/i.test(created.error.message || '')) {
-    throw new Error(created.error.message)
+function requiredEmploymentError(employment: ReturnType<typeof sanitizeEmployment>) {
+  const required = [
+    ['employeeId', 'Employee ID'],
+    ['fullName', 'Full name'],
+    ['designation', 'Designation'],
+    ['department', 'Department'],
+    ['reportingManager', 'Reporting manager'],
+    ['dateOfJoining', 'Date of joining'],
+    ['workMode', 'Work mode'],
+    ['monthlyCtc', 'Monthly CTC'],
+  ]
+  for (const [key, label] of required) {
+    if (!employment[key as keyof typeof employment]) return `${label} is required`
   }
-  const existing = await findAuthUserByEmail(admin, email)
-  if (!existing) throw new Error(created.error.message)
-  const updated = await admin.auth.admin.updateUserById(existing.id, {
-    password,
-    email_confirm: true,
-    app_metadata: { ...(existing.app_metadata || {}), role: JOINING_ROLE, orgId },
-    user_metadata: { ...(existing.user_metadata || {}), username, displayName: displayName || username },
-  })
-  if (updated.error) throw new Error(updated.error.message)
-  return { user: updated.data.user, email }
+  return ''
+}
+
+function sanitizeLearningPlan(raw: unknown) {
+  if (!Array.isArray(raw)) return []
+  return raw.map((item) => {
+    const row = item as { id?: string; label?: string; title?: string; points?: unknown }
+    const points = Array.isArray(row.points)
+      ? row.points.map((point) => String(point || '').trim()).filter(Boolean)
+      : String(row.points || '').split(/\n+/).map((point) => point.trim()).filter(Boolean)
+    return {
+      id: String(row.id || ''),
+      label: String(row.label || '').trim(),
+      title: String(row.title || '').trim(),
+      points,
+    }
+  }).filter((row) => row.label || row.title)
+}
+
+function sanitizeReviews(raw: unknown) {
+  if (!Array.isArray(raw)) return []
+  return raw.map((item) => {
+    const row = item as { id?: string; review?: string; date?: string; reviewer?: string; focus?: string }
+    return {
+      id: String(row.id || ''),
+      review: String(row.review || '').trim(),
+      date: String(row.date || '').trim(),
+      reviewer: String(row.reviewer || '').trim(),
+      focus: String(row.focus || '').trim(),
+    }
+  }).filter((row) => row.review)
+}
+
+function kraError(rows: unknown) {
+  if (!Array.isArray(rows) || rows.length === 0) return 'Add at least one KRA row'
+  let total = 0
+  for (const raw of rows) {
+    const row = raw as { keyResultArea?: string; kpi?: string; weight?: number }
+    const area = String(row.keyResultArea || '').trim()
+    const kpi = String(row.kpi || '').trim()
+    const weight = Number(row.weight)
+    if (!area || !kpi) return 'Each KRA needs an area and a metric'
+    if (!Number.isFinite(weight) || weight <= 0) return 'Each KRA weight must be greater than 0'
+    total += weight
+  }
+  if (Math.abs(total - 80) > 0.001) return 'KRA weights must total 80%'
+  return ''
+}
+
+function isJoiningLoginEmail(email: string) {
+  const value = String(email || '').trim().toLowerCase()
+  return value.endsWith('@join.halo.local') || value.endsWith('@joining.halo.local')
+}
+
+async function rememberJoiningPassword(admin, uid: string, password: string) {
+  if (!uid || password.length < 6) return
+  await admin.from('employee_onboarding').update({ login_password: password }).eq('auth_id', uid)
+  const { data: profile } = await admin.from('profiles').select('id, data').eq('id', uid).maybeSingle()
+  if (!profile) return
+  const role = String(profile.data?.role || '').toLowerCase()
+  const email = String(profile.data?.email || '')
+  if (role !== 'employee_onboarding' && !isJoiningLoginEmail(email)) return
+  await admin.from('profiles').update({
+    data: { ...(profile.data || {}), loginPassword: password },
+    updated_at: new Date().toISOString(),
+  }).eq('id', profile.id)
 }
 
 Deno.serve(async (req) => {
@@ -112,22 +169,14 @@ Deno.serve(async (req) => {
   const kind = body.type || 'employee'
 
   if (body.action === 'set-password') {
-    let uid = String(body.uid || '').trim()
-    const email = String(body.email || '').trim().toLowerCase()
-    if (!uid && email) {
-      const existing = await findAuthUserByEmail(admin, email)
-      if (!existing) return json({ error: 'No sign-in exists for this username' }, 400)
-      uid = existing.id
-    }
+    const uid = String(body.uid || '').trim()
     if (!uid || password.length < 6) {
       return json({ error: 'uid and a password of at least 6 characters are required' }, 400)
     }
-    const { error: updateErr } = await admin.auth.admin.updateUserById(uid, {
-      password,
-      email_confirm: true,
-    })
+    const { error: updateErr } = await admin.auth.admin.updateUserById(uid, { password })
     if (updateErr) return json({ error: updateErr.message }, 400)
-    return json({ ok: true, uid })
+    await rememberJoiningPassword(admin, uid, password)
+    return json({ ok: true })
   }
 
   if (body.action === 'delete-user') {
@@ -144,7 +193,7 @@ Deno.serve(async (req) => {
       target = byAuth
     }
     const targetRole = String(target?.data?.role || '').toLowerCase()
-    if (target && targetRole && targetRole !== 'client' && targetRole !== 'employee_onboarding') {
+    if (target && targetRole && targetRole !== 'client') {
       return json({ error: 'Only client portal users can be deleted here' }, 400)
     }
 
@@ -165,75 +214,140 @@ Deno.serve(async (req) => {
     return json({ ok: true })
   }
 
-  if (kind === 'employee_onboarding' || body.action === 'ensure-joining-login') {
+  if (body.action === 'delete-onboarding') {
+    const id = String(body.id || '').trim()
+    const username = normalizeUsername(body.username || '')
+    const authIdHint = String(body.authId || body.uid || '').trim()
+    if ((!id || id.length > 80) && !username) return json({ error: 'A valid onboarding id is required' }, 400)
+
+    let row = null
+    if (id) {
+      const byId = await admin.from('employee_onboarding').select('id, auth_id, org_id, username').eq('id', id).maybeSingle()
+      if (byId.error) return json({ error: byId.error.message }, 400)
+      row = byId.data
+    }
+    if (!row && username) {
+      const byName = await admin.from('employee_onboarding').select('id, auth_id, org_id, username').eq('username', username).maybeSingle()
+      if (byName.error) return json({ error: byName.error.message }, 400)
+      row = byName.data
+    }
+    if (row && String(row.org_id || '') !== orgId) return json({ error: 'permission-denied' }, 403)
+
+    const login = normalizeUsername(row?.username || username)
+    const authIds = new Set<string>()
+    const profileIds = new Set<string>()
+    if (row?.auth_id) authIds.add(String(row.auth_id))
+    if (authIdHint && authIdHint !== authData.user.id) authIds.add(authIdHint)
+
+    const considerProfile = (profile) => {
+      if (!profile?.id) return
+      const targetRole = String(profile.data?.role || '').toLowerCase()
+      const email = String(profile.data?.email || '')
+      const joining = targetRole === 'employee_onboarding' || isJoiningLoginEmail(email) || (!targetRole && authIds.has(String(profile.id)))
+      if (!joining || targetRole === 'admin' || targetRole === 'employee' || targetRole === 'client') return
+      profileIds.add(String(profile.id))
+      if (profile.auth_id) authIds.add(String(profile.auth_id))
+    }
+
+    if (login) {
+      const named = await admin.from('profiles').select('id, auth_id, data').eq('data->>username', login)
+      if (named.error) return json({ error: named.error.message }, 400)
+      for (const profile of named.data || []) considerProfile(profile)
+    }
+    if (id) {
+      const byProfileId = await admin.from('profiles').select('id, auth_id, data').eq('id', id).maybeSingle()
+      if (byProfileId.error) return json({ error: byProfileId.error.message }, 400)
+      considerProfile(byProfileId.data)
+    }
+    for (const authId of [...authIds]) {
+      const byAuth = await admin.from('profiles').select('id, auth_id, data').eq('id', authId).maybeSingle()
+      if (byAuth.error) return json({ error: byAuth.error.message }, 400)
+      considerProfile(byAuth.data)
+    }
+
+    if (!row && profileIds.size === 0) return json({ error: 'Onboarding record not found' }, 404)
+
+    for (const profileId of profileIds) {
+      const employee = await admin.from('employees').select('id, data').eq('id', profileId).maybeSingle()
+      const employeeEmail = String(employee.data?.data?.email || '').toLowerCase()
+      if (isJoiningLoginEmail(employeeEmail)) {
+        const { error: employeeErr } = await admin.from('employees').delete().eq('id', profileId)
+        if (employeeErr) return json({ error: employeeErr.message }, 400)
+      }
+      const { error: profileErr } = await admin.from('profiles').delete().eq('id', profileId)
+      if (profileErr) return json({ error: profileErr.message }, 400)
+    }
+    if (row) {
+      const { error: deleteErr } = await admin.from('employee_onboarding').delete().eq('id', row.id)
+      if (deleteErr) return json({ error: deleteErr.message }, 400)
+    }
+    for (const authId of authIds) {
+      if (!authId || authId === authData.user.id) continue
+      const { error: authDeleteErr } = await admin.auth.admin.deleteUser(authId)
+      if (authDeleteErr && !/not found/i.test(authDeleteErr.message || '')) {
+        return json({ ok: true, authWarning: authDeleteErr.message })
+      }
+    }
+    return json({ ok: true })
+  }
+
+  if (kind === 'employee_onboarding') {
     const username = normalizeUsername(body.username)
     if (!isValidUsername(username)) {
       return json({ error: 'username must be 3–32 characters: letters, numbers, dots, underscores, or hyphens' }, 400)
     }
     if (password.length < 6) {
-      return json({ error: 'Password must be at least 6 characters' }, 400)
+      return json({ error: 'password must be at least 6 characters' }, 400)
     }
-    const employment = body.employment && typeof body.employment === 'object' ? body.employment : {}
-    const displayName = String(employment.fullName || body.displayName || username).trim()
-    try {
-      const { user, email } = await upsertJoiningAuth(admin, { username, password, displayName, orgId })
-      const uid = user.id
-      const now = new Date().toISOString()
-      const onboardingId = String(body.onboardingId || '').trim()
-      let existing = null
-      if (onboardingId) {
-        const byId = await admin.from('employee_onboarding').select('id').eq('id', onboardingId).maybeSingle()
-        existing = byId.data
-      }
-      if (!existing) {
-        const byName = await admin.from('employee_onboarding').select('id').eq('username', username).maybeSingle()
-        existing = byName.data
-      }
-      const kras = Array.isArray(body.kras)
-        ? { custom: body.kras, fixed: [
-          { keyResultArea: 'THEC Portal Compliance', kpi: 'Daily submission rate at least 95%', weight: 10 },
-          { keyResultArea: 'Client Satisfaction & Professional Conduct', kpi: 'No escalations; positive manager feedback', weight: 10 },
-        ] }
-        : null
-      if (existing) {
-        const patch: Record<string, unknown> = { auth_id: uid, username }
-        if (Object.keys(employment).length) patch.employment = employment
-        if (kras) patch.kras = kras
-        const { error: updateErr } = await admin.from('employee_onboarding').update(patch).eq('id', existing.id)
-        if (updateErr) return json({ error: updateErr.message }, 400)
-      } else {
-        const { error: insertErr } = await admin.from('employee_onboarding').insert({
-          id: uid,
-          auth_id: uid,
-          username,
-          status: 'draft',
-          employment,
-          kras,
-          created_at: now,
-        })
-        if (insertErr) return json({ error: insertErr.message }, 400)
-      }
-      await admin.from('profiles').upsert({
-        id: uid,
-        auth_id: uid,
-        org_id: orgId,
-        data: {
-          uid,
-          username,
-          email,
-          displayName,
-          role: JOINING_ROLE,
-          tier: 'company',
-          status: 'active',
-          orgId,
-          updatedAt: now,
-        },
-        updated_at: now,
-      })
-      return json({ id: existing?.id || uid, uid, username, email })
-    } catch (err) {
-      return json({ error: err instanceof Error ? err.message : 'Could not save the joining login' }, 400)
+    const employment = sanitizeEmployment(body.employment)
+    const employmentError = requiredEmploymentError(employment)
+    if (employmentError) return json({ error: employmentError }, 400)
+    const customKras = Array.isArray(body.kras) ? body.kras : []
+    const weightError = kraError(customKras)
+    if (weightError) return json({ error: weightError }, 400)
+    const learningPlan = sanitizeLearningPlan(body.learningPlan)
+    const reviews = sanitizeReviews(body.reviews)
+
+    const email = joiningUsernameToAuthEmail(username)
+    const displayName = String(employment.fullName || username).trim()
+    const { data: created, error: createErr } = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      app_metadata: { role: 'employee_onboarding', orgId, tier: 'joining' },
+      user_metadata: { displayName, username },
+    })
+    if (createErr) return json({ error: createErr.message }, 400)
+
+    const uid = created.user.id
+    const now = new Date().toISOString()
+    const { data: row, error: insertErr } = await admin.from('employee_onboarding').insert({
+      org_id: orgId,
+      auth_id: uid,
+      username,
+      status: 'awaiting_answers',
+      login_password: password,
+      employment,
+      kras: {
+        custom: customKras.map((row) => ({
+          keyResultArea: String(row.keyResultArea || '').trim(),
+          kpi: String(row.kpi || '').trim(),
+          weight: Number(row.weight),
+        })),
+        fixed: FIXED_KRAS,
+        learningPlan,
+        reviews,
+      },
+      answers: {},
+      documents: [],
+      updated_at: now,
+    }).select('id, username, status').single()
+
+    if (insertErr) {
+      await admin.auth.admin.deleteUser(uid)
+      return json({ error: insertErr.message }, 400)
     }
+    return json({ id: row.id, username: row.username, status: row.status, joiningPath: '/joining' })
   }
 
   let email = String(body.email || '').trim().toLowerCase()

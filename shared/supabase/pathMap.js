@@ -92,13 +92,13 @@ export function resolveCollection(parts) {
   if (parts[0] === 'notifications' && parts[2] === 'items') {
     return { table: 'notification_items', org_id: null, user_id: parts[1], parent_id: null, collection_name: null }
   }
-  if (parts[0] === 'socialPostReminders' && parts[2] === 'items') {
+  if (parts[0] === 'socialPostReminders' && parts.length === 1) {
     return {
-      table: 'app_docs',
+      table: 'social_post_reminder_items',
       org_id: null,
-      user_id: parts[1],
+      user_id: null,
       parent_id: null,
-      collection_name: 'socialPostReminders',
+      collection_name: null,
     }
   }
   if (parts[0] === 'workReminders' && parts[2] === 'items') {

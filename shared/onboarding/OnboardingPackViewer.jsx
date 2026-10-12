@@ -812,23 +812,27 @@ function HandbookBody({ ctx, logo, tab }) {
         />
         <p className="pack-note">KRAs mutually agreed and signed within 2 weeks of joining. Targets set by the Reporting Manager in the first review.</p>
         <h4 className="pack-sub">30/60/90-day learning plan</h4>
-        <p className="pack-p"><span className="pack-pill">Day 1–30</span> <strong>Understand &amp; Absorb</strong></p>
-        <p className="pack-p">Complete onboarding pack review. Log all daily scrum and EOD reports on THEC Portal from Day 1.</p>
-        <p className="pack-p"><span className="pack-pill">Day 31–60</span> <strong>Apply &amp; Contribute</strong></p>
-        <p className="pack-p">Deliver first independently-reviewed work output. Log all upskilling activities daily on THEC Portal.</p>
-        <p className="pack-p"><span className="pack-pill">Day 61–90</span> <strong>Perform &amp; Improve</strong></p>
-        <p className="pack-p">Propose one process improvement. Achieve all KPIs set in 30-day review.</p>
+        {ctx.learningPlan.map((phase) => (
+          <div key={phase.id || phase.label}>
+            <p className="pack-p"><span className="pack-pill">{phase.label}</span> <strong>{phase.title}</strong></p>
+            {phase.points.length > 0 && (
+              <ul className="pack-list">
+                {phase.points.map((point, index) => <li key={`${phase.id}-${index}`}>{point}</li>)}
+              </ul>
+            )}
+          </div>
+        ))}
         <h4 className="pack-sub">Training &amp; upskilling commitment</h4>
         <p className="pack-p">Minimum <strong>2 hours of structured learning per week</strong>. All learning must be logged daily on the THEC Employee Portal — mandatory employment obligation. Company-sponsored certifications: 50% reimbursement if leaving within 12 months; 100% within 6 months of completion.</p>
         <h4 className="pack-sub">Review schedule</h4>
         <DataTable
           headers={['Review', 'Target Date', 'Reviewer', 'Focus']}
-          rows={[
-            ['30-Day Review', <Fill>{ctx.review30}</Fill>, <Fill>{ctx.manager}</Fill>, 'Culture fit, tool adoption, portal compliance, initial output'],
-            ['60-Day Review', <Fill>{ctx.review60}</Fill>, <Fill>{ctx.manager}</Fill>, 'Skill application, KPI progress, client readiness'],
-            ['90-Day Review', <Fill>{ctx.review90}</Fill>, 'Manager + Senior Mgmt', 'Overall performance, confirmation path decision'],
-            ['End of Probation', <Fill>{ctx.probationEnd}</Fill>, 'Manager + Co-Founder', 'Formal confirmation decision'],
-          ]}
+          rows={ctx.reviews.map((review) => [
+            review.review,
+            <Fill key={`${review.id}-date`}>{review.date}</Fill>,
+            <Fill key={`${review.id}-reviewer`}>{review.reviewer}</Fill>,
+            review.focus,
+          ])}
         />
       </Page>
 

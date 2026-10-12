@@ -6,7 +6,7 @@ import { Button } from '../../components/ui/Button'
 import { Badge } from '../../components/ui/Badge'
 import { Modal } from '../../components/ui/Modal'
 import { TeamSubNav } from './components/TeamSubNav'
-import { deleteEmployeeOnboarding, listEmployeeOnboarding, resetJoiningLogin } from './services/employeeOnboardingService'
+import { deleteEmployeeOnboarding, listEmployeeOnboarding } from './services/employeeOnboardingService'
 import { EmployeeOnboardingSetup } from './EmployeeOnboardingSetup'
 import { ONBOARDING_STATUS, joiningPageUrl } from '../../../../shared/supabase/employeeOnboarding.js'
 import { Trash2, UserPlus } from 'lucide-react'
@@ -20,10 +20,6 @@ export const EmployeeOnboardingList = () => {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [passwords, setPasswords] = useState({})
-  const [resettingId, setResettingId] = useState('')
-  const [savingId, setSavingId] = useState('')
-  const [savedId, setSavedId] = useState('')
   const [pending, setPending] = useState(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
@@ -41,32 +37,6 @@ export const EmployeeOnboardingList = () => {
         setError(err.message || 'Could not load onboarding records.')
       })
   }, [])
-
-  const saveLogin = async (row) => {
-    const password = String(passwords[row.id] || '')
-    if (password.length < 6) {
-      setError('Reset password must be at least 6 characters.')
-      return
-    }
-    setError('')
-    setSavingId(row.id)
-    try {
-      await resetJoiningLogin({
-        id: row.id,
-        username: row.username,
-        password,
-        displayName: row.employment?.fullName,
-        employment: row.employment,
-      })
-      setSavedId(row.id)
-      setResettingId('')
-      setPasswords((current) => ({ ...current, [row.id]: '' }))
-    } catch (err) {
-      setError(err.message || 'Could not reset this joining password.')
-    } finally {
-      setSavingId('')
-    }
-  }
 
   useEffect(() => {
     let cancelled = false
@@ -133,7 +103,7 @@ export const EmployeeOnboardingList = () => {
     <div className="space-y-6">
       <PageHeader
         title="Employee Onboarding"
-        description="Username and password are created in Setup new employee. This list is only for status. The hire signs in at the joining page with that same login."
+        description="Username and password are created in Setup new employee. The hire signs in at the joining page with that same login."
         actions={
           <Button icon={UserPlus} onClick={openSetup}>Setup new employee</Button>
         }
@@ -164,18 +134,19 @@ export const EmployeeOnboardingList = () => {
               <th className="px-4 py-3 font-semibold">Department</th>
               <th className="px-4 py-3 font-semibold">Joining username</th>
               <th className="px-4 py-3 font-semibold">Status</th>
+              <th className="px-4 py-3 font-semibold">Password</th>
               <th className="px-4 py-3 font-semibold text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-muted">Loading onboarding records…</td>
+                <td colSpan={6} className="px-4 py-8 text-muted">Loading onboarding records…</td>
               </tr>
             )}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-10">
+                <td colSpan={6} className="px-4 py-10">
                   <div className="flex flex-col items-center gap-3 text-center">
                     <p className="text-sm text-muted">No onboarding records yet.</p>
                     <Button icon={UserPlus} onClick={openSetup}>Setup new employee</Button>
@@ -186,7 +157,7 @@ export const EmployeeOnboardingList = () => {
             {rows.map((row) => {
               const employment = row.employment || {}
               const submitted = row.status === ONBOARDING_STATUS.SUBMITTED
-              const resetting = resettingId === row.id
+              const password = row.login_password || ''
               return (
                 <tr key={row.id} className="border-t border-border">
                   <td className="px-4 py-3">
@@ -204,32 +175,10 @@ export const EmployeeOnboardingList = () => {
                     {submitted && (
                       <p className="text-[11px] text-muted mt-1">Click the name to open answers and PDFs</p>
                     )}
-                    {savedId === row.id && (
-                      <p className="text-[11px] text-emerald-700 mt-1">Password reset. Hire can use the new password on the joining page.</p>
-                    )}
                   </td>
+                  <td className="px-4 py-3 font-mono text-sm text-fg break-all">{password || 'Not saved'}</td>
                   <td className="px-4 py-3">
                     <div className="flex flex-col items-end gap-2">
-                      {resetting ? (
-                        <div className="flex flex-wrap items-center justify-end gap-2">
-                          <input
-                            type="password"
-                            className="w-36 rounded-lg border border-border bg-surface px-2 py-1.5 text-sm"
-                            placeholder="New password"
-                            value={passwords[row.id] || ''}
-                            onChange={(event) => setPasswords((current) => ({ ...current, [row.id]: event.target.value }))}
-                            autoComplete="new-password"
-                          />
-                          <Button type="button" size="sm" variant="secondary" disabled={savingId === row.id} onClick={() => saveLogin(row)}>
-                            {savingId === row.id ? 'Saving…' : 'Save new password'}
-                          </Button>
-                          <Button type="button" size="sm" variant="ghost" onClick={() => setResettingId('')}>Cancel</Button>
-                        </div>
-                      ) : (
-                        <Button type="button" size="sm" variant="ghost" onClick={() => setResettingId(row.id)}>
-                          Forgot password?
-                        </Button>
-                      )}
                       <Button
                         type="button"
                         variant="danger"

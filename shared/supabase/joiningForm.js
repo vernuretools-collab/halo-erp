@@ -6,6 +6,7 @@ export const JOINING_STEPS = [
   { id: 'emergency', label: 'Emergency' },
   { id: 'policies', label: 'Policies' },
   { id: 'signature', label: 'Sign' },
+  { id: 'preview', label: 'Review' },
 ]
 
 export const GENDER_OPTIONS = ['Male', 'Female', 'Other']

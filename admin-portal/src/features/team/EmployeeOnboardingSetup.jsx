@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Card } from '../../components/ui/Card'
@@ -9,12 +9,15 @@ import { getDepartments } from './services/teamService'
 import { createEmployeeOnboarding } from './services/employeeOnboardingService'
 import {
   CUSTOM_KRA_TARGET,
+  DEFAULT_LEARNING_PLAN,
   FIXED_KRAS,
   PROBATION_PERIODS,
   WORK_MODES,
   customKraWeight,
+  defaultReviews,
   isValidJoiningUsername,
   joiningPageUrl,
+  learningPoints,
   normalizeJoiningUsername,
 } from '../../../../shared/supabase/employeeOnboarding.js'
 import { Plus, Trash2 } from 'lucide-react'
@@ -42,6 +45,9 @@ export const EmployeeOnboardingSetup = ({ embedded = false, onClose, onCreated }
   const [kras, setKras] = useState([emptyKra(40), emptyKra(20), emptyKra(20)])
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [learningPlan, setLearningPlan] = useState(() => DEFAULT_LEARNING_PLAN.map((row) => ({ ...row })))
+  const [reviews, setReviews] = useState(() => defaultReviews())
+  const reviewTouched = useRef({})
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [created, setCreated] = useState(null)
@@ -58,6 +64,18 @@ export const EmployeeOnboardingSetup = ({ embedded = false, onClose, onCreated }
   }, [])
 
   const weight = useMemo(() => customKraWeight(kras), [kras])
+
+  useEffect(() => {
+    const next = defaultReviews(employment)
+    setReviews((current) => current.map((row) => {
+      const fresh = next.find((item) => item.id === row.id) || row
+      return {
+        ...row,
+        date: reviewTouched.current[`${row.id}:date`] ? row.date : fresh.date,
+        reviewer: reviewTouched.current[`${row.id}:reviewer`] ? row.reviewer : fresh.reviewer,
+      }
+    }))
+  }, [employment.dateOfJoining, employment.probationPeriod, employment.reportingManager])
 
   const setField = (key, value) => setEmployment((current) => ({ ...current, [key]: value }))
 
@@ -77,6 +95,16 @@ export const EmployeeOnboardingSetup = ({ embedded = false, onClose, onCreated }
       setError('Password must be at least 6 characters.')
       return
     }
+    const incompletePhase = learningPlan.find((phase) => !phase.title.trim() || learningPoints(phase.points).length === 0)
+    if (incompletePhase) {
+      setError(`Add a title and at least one task for ${incompletePhase.label}. Put each task on its own line.`)
+      return
+    }
+    const incompleteReview = reviews.find((review) => !String(review.focus || '').trim())
+    if (incompleteReview) {
+      setError(`Add the focus for ${incompleteReview.review}.`)
+      return
+    }
     if (Math.abs(weight - CUSTOM_KRA_TARGET) > 0.001) {
       const gap = Math.abs(weight - CUSTOM_KRA_TARGET)
       const direction = weight > CUSTOM_KRA_TARGET ? 'Reduce' : 'Increase'
@@ -93,6 +121,17 @@ export const EmployeeOnboardingSetup = ({ embedded = false, onClose, onCreated }
           keyResultArea: row.keyResultArea.trim(),
           kpi: row.kpi.trim(),
           weight: Number(row.weight),
+        })),
+        learningPlan: learningPlan.map((phase) => ({
+          ...phase,
+          title: phase.title.trim(),
+          points: learningPoints(phase.points),
+        })),
+        reviews: reviews.map((review) => ({
+          ...review,
+          review: review.review.trim(),
+          reviewer: review.reviewer.trim(),
+          focus: review.focus.trim(),
         })),
       })
       const createdRow = { ...result, username: login, password, url: joiningPageUrl() }
@@ -111,7 +150,7 @@ export const EmployeeOnboardingSetup = ({ embedded = false, onClose, onCreated }
           <p className="text-sm text-fg"><span className="text-muted">Joining page</span><br />{created.url}</p>
           <p className="text-sm text-fg"><span className="text-muted">Username</span><br />{created.username}</p>
           <p className="text-sm text-fg"><span className="text-muted">Password</span><br />{created.password}</p>
-          <p className="text-xs text-muted">The password is not stored in the onboarding record. Copy it now.</p>
+          <p className="text-xs text-muted">This password stays on the onboarding list so you can share the joining login.</p>
           <div className="flex gap-3 pt-2">
             <Button
               type="button"
@@ -282,6 +321,102 @@ export const EmployeeOnboardingSetup = ({ embedded = false, onClose, onCreated }
                 ? `Editable rows total ${weight}%. With the two locked 10% rows, the scorecard is 100%.`
                 : `Editable rows total ${weight}%. They need to total ${CUSTOM_KRA_TARGET}% (${weight > CUSTOM_KRA_TARGET ? `${weight - CUSTOM_KRA_TARGET}% too high` : `${CUSTOM_KRA_TARGET - weight}% too low`}). The locked rows already use 20%.`}
             </p>
+          </div>
+        </Card>
+
+        <Card>
+          <p className="text-xs font-semibold uppercase tracking-wide text-accent mb-1">30/60/90-day learning plan</p>
+          <p className="text-sm text-muted mb-4">These tasks appear in the handbook under the learning plan. Put one task on each line.</p>
+          <div className="space-y-4">
+            {learningPlan.map((phase, index) => (
+              <div key={phase.id} className="rounded-xl border border-border p-3 space-y-2">
+                <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2">
+                  <input
+                    className="w-full rounded-lg border border-border bg-surface px-2 py-1.5 text-sm"
+                    value={phase.label}
+                    onChange={(e) => setLearningPlan((current) => current.map((row, i) => (i === index ? { ...row, label: e.target.value } : row)))}
+                    required
+                  />
+                  <input
+                    className="w-full rounded-lg border border-border bg-surface px-2 py-1.5 text-sm"
+                    placeholder="Phase title"
+                    value={phase.title}
+                    onChange={(e) => setLearningPlan((current) => current.map((row, i) => (i === index ? { ...row, title: e.target.value } : row)))}
+                    required
+                  />
+                </div>
+                <textarea
+                  className="w-full min-h-24 rounded-lg border border-border bg-surface px-2 py-1.5 text-sm"
+                  placeholder={'One task per line\nReview the current projects and tech stack'}
+                  value={phase.points}
+                  onChange={(e) => setLearningPlan((current) => current.map((row, i) => (i === index ? { ...row, points: e.target.value } : row)))}
+                  required
+                />
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <Card>
+          <p className="text-xs font-semibold uppercase tracking-wide text-accent mb-1">Review schedule</p>
+          <p className="text-sm text-muted mb-4">Dates follow the joining date and probation until you change them. This table is printed in the handbook.</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-accent text-white text-xs">
+                <tr>
+                  <th className="text-left px-3 py-2 font-semibold">Review</th>
+                  <th className="text-left px-3 py-2 font-semibold">Target date</th>
+                  <th className="text-left px-3 py-2 font-semibold">Reviewer</th>
+                  <th className="text-left px-3 py-2 font-semibold">Focus</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reviews.map((review, index) => (
+                  <tr key={review.id} className="border-t border-border align-top">
+                    <td className="p-2">
+                      <input
+                        className="w-full min-w-36 rounded-lg border border-border bg-surface px-2 py-1.5"
+                        value={review.review}
+                        onChange={(e) => setReviews((current) => current.map((row, i) => (i === index ? { ...row, review: e.target.value } : row)))}
+                        required
+                      />
+                    </td>
+                    <td className="p-2">
+                      <input
+                        type="date"
+                        className="w-full rounded-lg border border-border bg-surface px-2 py-1.5"
+                        value={review.date}
+                        onChange={(e) => {
+                          reviewTouched.current[`${review.id}:date`] = true
+                          setReviews((current) => current.map((row, i) => (i === index ? { ...row, date: e.target.value } : row)))
+                        }}
+                        required
+                      />
+                    </td>
+                    <td className="p-2">
+                      <input
+                        className="w-full min-w-40 rounded-lg border border-border bg-surface px-2 py-1.5"
+                        value={review.reviewer}
+                        onChange={(e) => {
+                          reviewTouched.current[`${review.id}:reviewer`] = true
+                          setReviews((current) => current.map((row, i) => (i === index ? { ...row, reviewer: e.target.value } : row)))
+                        }}
+                        required
+                      />
+                    </td>
+                    <td className="p-2">
+                      <textarea
+                        className="w-full min-w-52 min-h-16 rounded-lg border border-border bg-surface px-2 py-1.5"
+                        placeholder="What this review covers"
+                        value={review.focus}
+                        onChange={(e) => setReviews((current) => current.map((row, i) => (i === index ? { ...row, focus: e.target.value } : row)))}
+                        required
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </Card>
 

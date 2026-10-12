@@ -5,6 +5,7 @@ import {
   hasScrumNotes,
   isActiveEmployee,
   isFutureDay,
+  conductorList,
   isCurrentConductor,
   matchesEmployeeSearch,
   scrumDocId,
@@ -69,5 +70,27 @@ assert.equal(
 )
 assert.equal(isCurrentConductor(null, { user: { uid: 'uid_deepan' } }), false)
 assert.equal(isCurrentConductor({ employeeId: '' }, { user: { email: 'deepan@example.com' } }), false)
+
+const jai = {
+  employeeId: 'emp_jai',
+  employeeName: 'Jai',
+  employeeEmail: 'jai@example.com',
+  identityIds: ['emp_jai', 'uid_jai'],
+}
+const team = { employees: [deepan, jai] }
+assert.equal(conductorList(team).length, 2)
+assert.equal(conductorList({ employees: [] }).length, 0)
+assert.equal(
+  isCurrentConductor(team, { user: { uid: 'uid_jai', email: 'someone@example.com' }, userDoc: {} }),
+  true,
+)
+assert.equal(
+  isCurrentConductor(team, { user: { uid: 'uid_other', email: 'jai@example.com' }, userDoc: {} }),
+  true,
+)
+assert.equal(
+  isCurrentConductor(team, { user: { uid: 'uid_other', email: 'other@example.com' }, userDoc: { employeeId: 'emp_other' } }),
+  false,
+)
 
 console.log('scrumModel tests passed')

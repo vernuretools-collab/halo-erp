@@ -8,8 +8,6 @@ import { useUserStore } from '../../stores/userStore'
 import { useLiveAuthSession } from '../../../../shared/supabase/useLiveAuthSession.js'
 import { ONBOARDING_STATUS, isJoiningAccount, onboardingFromProfile } from '../../../../shared/supabase/employeeOnboarding.js'
 import { JOINING_STEPS, mergeJoiningAnswers, validateJoiningStep } from '../../../../shared/supabase/joiningForm.js'
-import { downloadAllOnboardingPacks, downloadEmploymentPack, downloadHandbookPack, downloadLegalPack } from '../../../../admin-portal/src/features/team/services/onboardingPacks.js'
-import { OnboardingPackViewer } from '../../../../shared/onboarding/OnboardingPackViewer.jsx'
 import { JoiningWizard } from './JoiningWizard'
 
 export const JoiningFormPage = () => {
@@ -22,7 +20,13 @@ export const JoiningFormPage = () => {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [blocked, setBlocked] = useState(false)
-  const [reviewingDocs, setReviewingDocs] = useState(false)
+  const [detailsConfirmed, setDetailsConfirmed] = useState(false)
+  const [submittedPopup, setSubmittedPopup] = useState(false)
+  const [returnToPreview, setReturnToPreview] = useState(false)
+
+  useEffect(() => {
+    setDetailsConfirmed(false)
+  }, [answers])
 
   useEffect(() => {
     if (!sessionReady || !user) return undefined
@@ -45,7 +49,6 @@ export const JoiningFormPage = () => {
         if (cancelled) return
         setRow(data)
         setAnswers(mergeJoiningAnswers(data?.answers))
-        if (data?.status === ONBOARDING_STATUS.SUBMITTED) setReviewingDocs(true)
       })
       .catch((loadError) => {
         if (!cancelled) setError(loadError.message)
@@ -80,6 +83,15 @@ export const JoiningFormPage = () => {
       return
     }
     setError('')
+    const stepId = JOINING_STEPS[step].id
+    if (stepId === 'preview') {
+      if (!detailsConfirmed) {
+        setError('Please confirm that all the details you have given are correct.')
+        return
+      }
+      await submit()
+      return
+    }
     if (!submitted) {
       setSaving(true)
       try {
@@ -91,8 +103,9 @@ export const JoiningFormPage = () => {
       }
       setSaving(false)
     }
-    if (JOINING_STEPS[step].id === 'signature') {
-      setReviewingDocs(true)
+    if (returnToPreview) {
+      setReturnToPreview(false)
+      setStep(JOINING_STEPS.findIndex((item) => item.id === 'preview'))
       return
     }
     setStep((current) => Math.min(current + 1, JOINING_STEPS.length - 1))
@@ -118,13 +131,8 @@ export const JoiningFormPage = () => {
         }).eq('id', user.uid)
         if (updateError) throw updateError
       }
-      const submittedRow = { ...row, status: ONBOARDING_STATUS.SUBMITTED, answers }
-      setRow(submittedRow)
-      try {
-        await downloadAllOnboardingPacks(submittedRow)
-      } catch {
-        setError('Form submitted. If the 3 PDFs did not download, use the buttons below.')
-      }
+      setRow({ ...row, status: ONBOARDING_STATUS.SUBMITTED, answers })
+      setSubmittedPopup(true)
     } catch (err) {
       setError(err.message || 'Could not submit the form.')
     } finally {
@@ -144,15 +152,16 @@ export const JoiningFormPage = () => {
     'Next: Emergency Contact',
     'Next: Policy Acknowledgement',
     'Next: Sign Documents',
-    'Next: Review 3 documents',
+    'Next: Review',
+    'Submit',
   ][step]
 
-  const packRow = { ...row, answers }
-  const showPacks = reviewingDocs || submitted
   const hireName = answers.personal?.fullName || row?.employment?.fullName || ''
+  const onPreview = JOINING_STEPS[step]?.id === 'preview'
+  const primaryLabel = returnToPreview && !onPreview ? 'Save and return to preview' : `${nextLabel} →`
 
   return (
-    <div className={`min-h-screen text-slate-900 ${showPacks ? 'bg-[#d6d6d6]' : 'bg-slate-100'}`}>
+    <div className="min-h-screen text-slate-900 bg-slate-100">
       <header className="bg-slate-950 text-white px-6 py-4 flex items-center gap-3">
         <img src={haloLogo} alt="" className="w-10 h-10 rounded-full bg-white p-1 object-contain" />
         <div>
@@ -163,63 +172,47 @@ export const JoiningFormPage = () => {
         <button type="button" className="text-xs text-slate-300" onClick={() => logoutUser()}>Sign out</button>
       </header>
 
-      <main className={showPacks ? 'w-full p-0' : 'max-w-4xl mx-auto p-4 md:p-6'}>
+      <main className="max-w-4xl mx-auto p-4 md:p-6">
         {loading && <p className="text-sm text-slate-500">Loading your form…</p>}
         {!loading && !row && !error && <p className="text-sm text-slate-500">No joining form is linked to this login.</p>}
         {row && (
           <>
-            {showPacks ? (
-              <OnboardingPackViewer
-                row={packRow}
-                logo={haloLogo}
-                footer={(
-                  <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-                    <p className="text-xs text-slate-500">
-                      {submitted
-                        ? 'Download your filled packs anytime. Admin can also download them from Employee Onboarding.'
-                        : 'These three packs are filled from your onboarding answers. Read the rules, then submit. You can download PDFs after submit.'}
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" className="rounded-lg bg-teal-700 px-3 py-1.5 text-xs text-white" onClick={() => downloadEmploymentPack(packRow)}>Download Employment Agreement Pack</button>
-                      <button type="button" className="rounded-lg bg-teal-700 px-3 py-1.5 text-xs text-white" onClick={() => downloadLegalPack(packRow)}>Download Legal Agreements & HR Records</button>
-                      <button type="button" className="rounded-lg bg-teal-700 px-3 py-1.5 text-xs text-white" onClick={() => downloadHandbookPack(packRow)}>Download Employee Handbook & Performance Pack</button>
-                    </div>
-                  </div>
-                )}
-              />
-            ) : (
+            {!submitted && (
               <JoiningWizard
                 step={step}
                 answers={answers}
                 setAnswers={setAnswers}
                 employment={row.employment || {}}
                 readOnly={submitted}
+                detailsConfirmed={detailsConfirmed}
+                setDetailsConfirmed={setDetailsConfirmed}
+                onEditStep={(index) => {
+                  setError('')
+                  setReturnToPreview(true)
+                  setStep(index)
+                }}
               />
             )}
-            {error && <p className={`${showPacks ? 'max-w-[760px] mx-auto px-4' : ''} mt-4 text-sm text-rose-600`}>{error}</p>}
+            {error && <p className="mt-4 text-sm text-rose-600">{error}</p>}
             {submitted && (
-              <div className="max-w-[760px] mx-auto mt-4 mb-8 rounded-2xl bg-white border border-emerald-200 shadow-sm px-6 py-8 text-center">
+              <div className="mt-4 mb-8 rounded-2xl bg-white border border-emerald-200 shadow-sm px-6 py-8 text-center">
                 <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
                   <Check className="w-6 h-6" />
                 </div>
                 <h2 className="text-2xl font-semibold text-teal-800">Thank you{hireName ? `, ${hireName}` : ''}</h2>
                 <p className="mt-2 text-sm text-slate-600">
-                  Your onboarding form has been submitted successfully. HR has received your documents. You can download the 3 filled PDF packs above anytime.
+                  Your onboarding form has been submitted successfully. HR has received your details.
                 </p>
               </div>
             )}
             {!submitted && (
-            <div className={`${showPacks ? 'max-w-[760px] mx-auto px-4 pb-6' : ''} mt-4 flex items-center justify-between gap-3`}>
+            <div className="mt-4 flex items-center justify-between gap-3">
               <button
                 type="button"
                 className="rounded-lg border border-teal-700 px-4 py-2 text-sm text-teal-800 disabled:opacity-40"
-                disabled={saving || (!showPacks && step === 0)}
+                disabled={saving || step === 0}
                 onClick={async () => {
                   setError('')
-                  if (showPacks) {
-                    setReviewingDocs(false)
-                    return
-                  }
                   setSaving(true)
                   try {
                     await persistDraft(answers)
@@ -234,31 +227,38 @@ export const JoiningFormPage = () => {
               >
                 ← Back
               </button>
-              {showPacks ? (
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={submit}
-                  className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                >
-                  <Check className="w-4 h-4" />
-                  {saving ? 'Submitting…' : 'I have read these rules — Submit'}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={goNext}
-                  className="rounded-lg bg-teal-700 px-4 py-2 text-sm text-white disabled:opacity-50"
-                >
-                  {saving ? 'Saving…' : `${nextLabel} →`}
-                </button>
-              )}
+              <button
+                type="button"
+                disabled={saving || (onPreview && !detailsConfirmed)}
+                onClick={goNext}
+                className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm text-white disabled:opacity-50 ${onPreview ? 'bg-amber-500 font-medium' : 'bg-teal-700'}`}
+              >
+                {onPreview && <Check className="w-4 h-4" />}
+                {saving ? (onPreview ? 'Submitting…' : 'Saving…') : primaryLabel}
+              </button>
             </div>
             )}
           </>
         )}
       </main>
+      {submittedPopup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white px-6 py-8 text-center shadow-xl" role="dialog" aria-modal="true" aria-labelledby="joining-submitted-title">
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+              <Check className="w-6 h-6" />
+            </div>
+            <h2 id="joining-submitted-title" className="text-xl font-semibold text-teal-800">Your form is submitted</h2>
+            <p className="mt-2 text-sm text-slate-600">HR has received your details.</p>
+            <button
+              type="button"
+              className="mt-5 rounded-lg bg-teal-700 px-4 py-2 text-sm text-white"
+              onClick={() => setSubmittedPopup(false)}
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -11,7 +11,7 @@ import { supabase } from '../../shared/services/firebaseService'
 import {
   isJoiningAccount,
   isValidJoiningUsername,
-  joiningUsernameToAuthEmail,
+  joiningAuthEmails,
   normalizeJoiningUsername,
 } from '../../../../shared/supabase/employeeOnboarding.js'
 
@@ -50,7 +50,21 @@ export const JoiningLoginPage = () => {
     setLoading(true)
     setError('')
     try {
-      const user = await loginWithEmail(joiningUsernameToAuthEmail(login), password)
+      const emails = joiningAuthEmails(login)
+      let user = null
+      let lastError = null
+      for (const email of emails) {
+        try {
+          user = await loginWithEmail(email, password)
+          lastError = null
+          break
+        } catch (signInError) {
+          lastError = signInError
+          const message = String(signInError?.message || '')
+          if (!/invalid|credential|password/i.test(message)) throw signInError
+        }
+      }
+      if (!user) throw lastError || new Error('Could not sign in.')
       const claims = await fetchCustomClaims(user, true)
       if (!isJoiningAccount({ role: claims?.role, email: user?.email })) {
         await logoutUser()

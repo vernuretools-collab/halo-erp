@@ -4,12 +4,15 @@ import { loginIdentifierToEmail } from './clientLogin.js'
 const ADMIN_ROLES = new Set(['admin', 'owner', 'superadmin'])
 
 function claimsFromUser(user, profile) {
-  const meta = { ...(user?.app_metadata || {}), ...(user?.user_metadata || {}) }
+  const appMeta = user?.app_metadata || {}
+  const meta = { ...appMeta, ...(user?.user_metadata || {}) }
   const data = profile?.data || {}
+  const appRole = String(appMeta.role || '').toLowerCase()
+  const joining = appRole === 'employee_onboarding'
   return {
     orgId: meta.orgId || data.orgId || profile?.org_id || 'org_demo',
-    role: data.role || meta.role || 'employee',
-    tier: data.tier || meta.tier || 'company',
+    role: joining ? 'employee_onboarding' : (data.role || meta.role || 'employee'),
+    tier: joining ? 'joining' : (data.tier || meta.tier || 'company'),
     business_uid: meta.business_uid || profile?.id || user?.id,
   }
 }

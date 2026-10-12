@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Loader2, Save, Search } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Loader2, Save, Search } from 'lucide-react'
 import {
   getScrumConductor,
   listActiveEmployees,
   listMarkedScrumDays,
   listScrumForDate,
   saveEmployeeScrumDay,
-  saveScrumConductor,
+  saveScrumConductors,
 } from './scrumService.js'
 import {
   calendarCells,
@@ -17,7 +17,6 @@ import {
   matchesEmployeeSearch,
   scrumHasStarted,
   todayISO,
-  yesterdayISO,
 } from './scrumModel.js'
 
 const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
@@ -60,7 +59,8 @@ export function ScrumPage({ canAssignConductor = true }) {
   const [dayLoading, setDayLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [savingAll, setSavingAll] = useState(false)
-  const [conductorId, setConductorId] = useState('')
+  const [conductorIds, setConductorIds] = useState([])
+  const [conductorOpen, setConductorOpen] = useState(false)
   const [savingConductor, setSavingConductor] = useState(false)
   const [conductorError, setConductorError] = useState('')
 
@@ -69,6 +69,7 @@ export function ScrumPage({ canAssignConductor = true }) {
   const selectedDateRef = useRef(selectedDate)
   const followTodayRef = useRef(followToday)
   const dayRequestRef = useRef(0)
+  const conductorPickerRef = useRef(null)
 
   useEffect(() => {
     draftsRef.current = drafts
@@ -83,6 +84,15 @@ export function ScrumPage({ canAssignConductor = true }) {
     followTodayRef.current = followToday
   }, [followToday])
 
+  useEffect(() => {
+    if (!conductorOpen) return undefined
+    function closeOnOutside(event) {
+      if (!conductorPickerRef.current?.contains(event.target)) setConductorOpen(false)
+    }
+    document.addEventListener('mousedown', closeOnOutside)
+    return () => document.removeEventListener('mousedown', closeOnOutside)
+  }, [conductorOpen])
+
   const refreshMarks = useCallback(async (year, monthIndex) => {
     const marked = await listMarkedScrumDays(year, monthIndex)
     setMarkedDays(marked)
@@ -93,10 +103,14 @@ export function ScrumPage({ canAssignConductor = true }) {
     let cancelled = false
     getScrumConductor()
       .then((conductor) => {
-        if (!cancelled) setConductorId(conductor?.employeeId || '')
+        if (cancelled) return
+        const ids = (conductor?.employees || [])
+          .map((row) => row.employeeId)
+          .filter(Boolean)
+        setConductorIds(ids.length ? ids : conductor?.employeeId ? [conductor.employeeId] : [])
       })
       .catch(() => {
-        if (!cancelled) setConductorId('')
+        if (!cancelled) setConductorIds([])
       })
     return () => {
       cancelled = true
@@ -268,7 +282,6 @@ export function ScrumPage({ canAssignConductor = true }) {
 
   const dirtyCount = visibleEmployees.filter((employee) => drafts[employee.id]?.dirty).length
   const today = todayISO(now)
-  const yesterday = yesterdayISO(now)
   const cells = calendarCells(viewYear, viewMonth)
   const started = scrumHasStarted(now)
   const viewingToday = selectedDate === today
@@ -306,17 +319,19 @@ export function ScrumPage({ canAssignConductor = true }) {
     }
   }
 
-  async function changeConductor(nextId) {
-    const previous = conductorId
-    setConductorId(nextId)
+  async function persistConductors(nextIds) {
+    const previous = conductorIds
+    setConductorIds(nextIds)
     setSavingConductor(true)
     setConductorError('')
     try {
-      const employee = employees.find((row) => row.id === nextId) || null
-      await saveScrumConductor(employee)
+      const selected = nextIds
+        .map((id) => employees.find((row) => row.id === id))
+        .filter(Boolean)
+      await saveScrumConductors(selected)
     } catch (err) {
-      setConductorId(previous)
-      setConductorError(err?.message || 'Could not update who conducts scrum.')
+      setConductorIds(previous)
+      setConductorError(err?.message || 'Could not update who can use scrum.')
     } finally {
       setSavingConductor(false)
     }
@@ -330,98 +345,134 @@ export function ScrumPage({ canAssignConductor = true }) {
 
   return (
     <div className="text-left">
-      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-6">
-        <div>
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="min-w-0">
           <h1 className="text-2xl font-bold text-fg tracking-tight">Scrum</h1>
           <p className="text-sm text-muted mt-1 max-w-2xl">
             One row per active employee. Morning scrum starts at 10:30 AM. At 12:00 AM the board
             opens a new day with empty notes. Earlier days stay saved.
           </p>
-          {canAssignConductor ? (
-            <label className="block mt-3 max-w-sm">
+        </div>
+        <div className="flex flex-col items-end gap-3 shrink-0 w-full max-w-sm">
+          <button
+            type="button"
+            onClick={saveVisible}
+            disabled={savingAll || dirtyCount === 0 || dayLoading}
+            className="self-end shrink-0 inline-flex items-center justify-center gap-2 h-9 px-3 text-sm font-medium rounded-lg bg-accent text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            {savingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Save day
+          </button>
+          {canAssignConductor && (
+            <div className="relative w-full" ref={conductorPickerRef}>
               <span className="block text-xs font-semibold text-fg mb-1.5">Conduct scrum</span>
-              <select
-                value={conductorId}
+              <button
+                type="button"
                 disabled={!employeesReady || savingConductor}
-                onChange={(event) => changeConductor(event.target.value)}
-                className="w-full px-3 py-2 text-sm rounded-xl bg-canvas border border-border text-fg focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
+                onClick={() => setConductorOpen((open) => !open)}
+                className="w-full h-9 px-3 text-sm rounded-xl bg-canvas border border-border text-fg inline-flex items-center justify-between gap-2 disabled:opacity-50 cursor-pointer"
               >
-                <option value="">None</option>
-                {employees.map((employee) => (
-                  <option key={employee.id} value={employee.id}>
-                    {employee.name}{employee.email ? ` · ${employee.email}` : ''}
-                  </option>
-                ))}
-              </select>
-              <span className="block text-[11px] text-muted mt-1">
-                {conductorId
-                  ? 'Only this employee sees Scrum in their portal. Choose someone else when they are absent.'
-                  : 'Choose an employee to conduct scrum while admin is absent.'}
-              </span>
+                <span className={`truncate ${conductorIds.length ? '' : 'text-muted'}`}>
+                  {conductorIds.length
+                    ? conductorIds
+                        .map((id) => employees.find((row) => row.id === id)?.name || 'Employee')
+                        .join(', ')
+                    : 'Select employees'}
+                </span>
+                <ChevronDown className="w-4 h-4 text-muted shrink-0" />
+              </button>
+              {conductorOpen && (
+                <div className="absolute z-20 left-0 right-0 mt-1 max-h-56 overflow-y-auto rounded-xl border border-border bg-surface shadow-lg p-1">
+                  {employees.length === 0 ? (
+                    <p className="px-2 py-2 text-sm text-muted">No active employees.</p>
+                  ) : (
+                    employees.map((employee) => {
+                      const checked = conductorIds.includes(employee.id)
+                      return (
+                        <label
+                          key={employee.id}
+                          className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm text-fg hover:bg-canvas cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={savingConductor}
+                            onChange={() => {
+                              const next = checked
+                                ? conductorIds.filter((id) => id !== employee.id)
+                                : [...conductorIds, employee.id]
+                              persistConductors(next)
+                            }}
+                            className="accent-accent"
+                          />
+                          <span className="truncate">{employee.name}</span>
+                        </label>
+                      )
+                    })
+                  )}
+                </div>
+              )}
               {conductorError && (
                 <span className="block text-[11px] text-rose-600 dark:text-rose-400 mt-1">{conductorError}</span>
               )}
-            </label>
-          ) : (
-            <p className="text-xs text-muted mt-2">You are conducting scrum for the team.</p>
+            </div>
           )}
         </div>
-        <button
-          type="button"
-          onClick={saveVisible}
-          disabled={savingAll || dirtyCount === 0 || dayLoading}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl bg-accent text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-        >
-          {savingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-          Save day
-        </button>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[320px_minmax(0,1fr)] gap-4 mb-4">
-        <section className="bg-surface border border-border rounded-2xl p-4 shadow-sm">
-          <div className="flex items-center justify-between gap-2 mb-3">
+      <div className="mb-4">
+        <section className="bg-surface border border-border rounded-2xl p-4 shadow-sm flex flex-col gap-3">
+          <div className="flex flex-row items-center justify-between gap-4">
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold text-fg">{formatLongDate(selectedDate)}</h2>
+              <p className="text-xs text-muted mt-1">
+                {viewingToday
+                  ? started
+                    ? 'Morning scrum started at 10:30 AM. This day is open for notes.'
+                    : 'Morning scrum starts at 10:30 AM. This day is open, and notes are still empty until you save them.'
+                  : 'Showing this day’s morning scrum and end-of-day update only.'}
+              </p>
+              <label className="relative mt-3 block w-full max-w-sm">
+                <Search className="w-4 h-4 text-slate-100 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search by name or email"
+                  className="w-full pl-10 pr-3 py-2 text-sm rounded-xl bg-[#12151e] border border-slate-500 text-slate-100 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
+                />
+              </label>
+            </div>
+            <section
+              className="bg-canvas border border-border rounded-xl p-1.5 shadow-sm shrink-0 ml-auto"
+              style={{ width: 220, maxWidth: '100%' }}
+            >
+          <div className="flex items-center justify-between gap-1 mb-1">
             <button
               type="button"
               onClick={() => shiftMonth(-1)}
-              className="w-8 h-8 rounded-lg border border-border text-muted hover:text-fg hover:bg-canvas cursor-pointer inline-flex items-center justify-center"
+              className="w-6 h-6 rounded-md border border-border text-muted hover:text-fg hover:bg-canvas cursor-pointer inline-flex items-center justify-center"
               aria-label="Previous month"
             >
-              <ChevronLeft className="w-4 h-4" />
+              <ChevronLeft className="w-3 h-3" />
             </button>
-            <h2 className="text-sm font-semibold text-fg">{formatMonthLabel(viewYear, viewMonth)}</h2>
+            <h2 className="text-[11px] font-semibold text-fg">{formatMonthLabel(viewYear, viewMonth)}</h2>
             <button
               type="button"
               onClick={() => shiftMonth(1)}
-              className="w-8 h-8 rounded-lg border border-border text-muted hover:text-fg hover:bg-canvas cursor-pointer inline-flex items-center justify-center"
+              className="w-6 h-6 rounded-md border border-border text-muted hover:text-fg hover:bg-canvas cursor-pointer inline-flex items-center justify-center"
               aria-label="Next month"
             >
-              <ChevronRight className="w-4 h-4" />
+              <ChevronRight className="w-3 h-3" />
             </button>
           </div>
-          <div className="flex gap-2 mb-3">
-            <button
-              type="button"
-              onClick={() => openDay(yesterday)}
-              className="flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold border border-border text-muted hover:text-fg hover:bg-canvas cursor-pointer"
-            >
-              Yesterday
-            </button>
-            <button
-              type="button"
-              onClick={() => openDay(today, { follow: true })}
-              className="flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold bg-accent-soft text-accent border border-accent/30 cursor-pointer"
-            >
-              Today
-            </button>
-          </div>
-          <div className="grid grid-cols-7 gap-1 text-center">
+          <div className="grid grid-cols-7 gap-px text-center">
             {WEEKDAYS.map((label) => (
-              <div key={label} className="text-[10px] font-semibold uppercase tracking-wide text-muted py-1">
+              <div key={label} className="text-[9px] font-semibold uppercase tracking-wide text-muted py-0.5">
                 {label}
               </div>
             ))}
             {cells.map((cell, index) => {
-              if (!cell) return <div key={`empty-${index}`} />
+              if (!cell) return <div key={`empty-${index}`} className="h-6" />
               const future = isFutureDay(cell.iso, now)
               const selected = cell.iso === selectedDate
               const isToday = cell.iso === today
@@ -433,7 +484,7 @@ export function ScrumPage({ canAssignConductor = true }) {
                   disabled={future}
                   onClick={() => openDay(cell.iso)}
                   aria-label={`${future ? 'Closed' : 'Open'} ${formatLongDate(cell.iso)}`}
-                  className={`relative h-9 rounded-lg text-xs font-semibold transition-colors ${
+                  className={`relative h-6 rounded-md text-[11px] font-semibold transition-colors ${
                     future
                       ? 'text-muted/40 cursor-not-allowed'
                       : selected
@@ -446,7 +497,7 @@ export function ScrumPage({ canAssignConductor = true }) {
                   {cell.day}
                   {marked && (
                     <span
-                      className={`absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full ${
+                      className={`absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full ${
                         selected ? 'bg-white' : 'bg-accent'
                       }`}
                     />
@@ -455,32 +506,7 @@ export function ScrumPage({ canAssignConductor = true }) {
               )
             })}
           </div>
-          <p className="text-[11px] text-muted mt-3">
-            Days with notes are marked. Future days stay closed.
-          </p>
         </section>
-
-        <section className="bg-surface border border-border rounded-2xl p-4 shadow-sm flex flex-col gap-3">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold text-fg">{formatLongDate(selectedDate)}</h2>
-              <p className="text-xs text-muted mt-1">
-                {viewingToday
-                  ? started
-                    ? 'Morning scrum started at 10:30 AM. This day is open for notes.'
-                    : 'Morning scrum starts at 10:30 AM. This day is open, and notes are still empty until you save them.'
-                  : 'Showing this day’s morning scrum and end-of-day update only.'}
-              </p>
-            </div>
-            <label className="relative block w-full md:w-72">
-              <Search className="w-4 h-4 text-muted absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search by name or email"
-                className="w-full pl-9 pr-3 py-2 text-sm rounded-xl bg-canvas border border-border text-fg placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
-              />
-            </label>
           </div>
           {loadError && (
             <p className="text-sm text-rose-600 dark:text-rose-400">{loadError}</p>

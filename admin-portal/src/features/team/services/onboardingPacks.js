@@ -1,4 +1,4 @@
-import { FIXED_KRAS } from '../../../../../shared/supabase/employeeOnboarding.js'
+import { DEFAULT_LEARNING_PLAN, FIXED_KRAS, defaultReviews, learningPoints } from '../../../../../shared/supabase/employeeOnboarding.js'
 import {
   addDays,
   createPack,
@@ -59,11 +59,52 @@ export function buildOnboardingPackContext(row) {
     signature: answers.signature || '',
     kras,
     fixed,
+    learningPlan: handbookLearningPlan(row),
+    reviews: handbookReviews(row, employment),
     review30: addDays(employment.dateOfJoining, 30),
     review60: addDays(employment.dateOfJoining, 60),
     review90: addDays(employment.dateOfJoining, 90),
     probationEnd: probationEndDate(employment.dateOfJoining, employment.probationPeriod),
   }
+}
+
+const FALLBACK_PLAN_POINTS = {
+  d30: ['Complete the onboarding pack review. Log all daily scrum and EOD reports on the THEC Portal from Day 1.'],
+  d60: ['Deliver the first independently reviewed work output. Log all upskilling activities daily on the THEC Portal.'],
+  d90: ['Propose one process improvement. Achieve all KPIs set in the 30-day review.'],
+}
+
+const FALLBACK_REVIEW_FOCUS = {
+  r30: 'Culture fit, tool adoption, portal compliance, initial output',
+  r60: 'Skill application, KPI progress, client readiness',
+  r90: 'Overall performance, confirmation path decision',
+  probation: 'Formal confirmation decision',
+}
+
+function handbookLearningPlan(row) {
+  const stored = Array.isArray(row?.kras?.learningPlan) ? row.kras.learningPlan : []
+  const source = stored.length ? stored : DEFAULT_LEARNING_PLAN
+  return source.map((phase) => {
+    const points = learningPoints(phase.points)
+    return {
+      id: phase.id,
+      label: phase.label || '',
+      title: phase.title || '',
+      points: points.length ? points : (FALLBACK_PLAN_POINTS[phase.id] || []),
+    }
+  })
+}
+
+function handbookReviews(row, employment) {
+  const stored = Array.isArray(row?.kras?.reviews) ? row.kras.reviews : []
+  const source = stored.length ? stored : defaultReviews(employment)
+  return source.map((review) => ({
+    id: review.id,
+    review: review.review || '',
+    date: formatPackDate(review.date) || review.date || '',
+    reviewer: review.reviewer || '',
+    focus: review.focus || FALLBACK_REVIEW_FOCUS[review.id] || '',
+  }))
 }
 
 function cover(pack, docNo, title, subtitle) {
@@ -530,19 +571,14 @@ export function downloadHandbookPack(row, options = {}) {
   pack.rows(kraRows)
   pack.note('KRAs are mutually agreed and signed within 2 weeks of joining. Targets are set by the reporting manager in the first review.')
   pack.h2('30/60/90-day learning plan')
-  pack.p('Day 1–30 · Understand and absorb. Complete the onboarding pack review. Log all daily scrum and EOD reports on the THEC Portal from Day 1.')
-  pack.p('Day 31–60 · Apply and contribute. Deliver the first independently reviewed work output. Log all upskilling activities daily on the THEC Portal.')
-  pack.p('Day 81–90 · Perform and improve. Propose one process improvement. Achieve all KPIs set in the 30-day review.')
-  pack.note('The extra learning-line placeholders are left blank. They are not collected on the joining form.')
+  ctx.learningPlan.forEach((phase) => {
+    pack.p(`${phase.label} · ${phase.title}`)
+    if (phase.points.length) pack.bullets(phase.points)
+  })
   pack.h2('Training and upskilling commitment')
   pack.p('Minimum 2 hours of structured learning per week. All learning must be logged daily on the THEC Employee Portal — a mandatory employment obligation. Company-sponsored certifications: 50% reimbursement if leaving within 12 months; 100% within 6 months of completion.')
   pack.h2('Review schedule')
-  pack.rows([
-    ['30-day review', `${ctx.review30} · ${ctx.manager} · Culture fit, tool adoption, portal compliance, initial output`],
-    ['60-day review', `${ctx.review60} · ${ctx.manager} · Skill application, KPI progress, client readiness`],
-    ['90-day review', `${ctx.review90} · Manager + Senior Mgmt · Overall performance, confirmation path`],
-    ['End of probation', `${ctx.probationEnd} · Manager + Co-Founder · Formal confirmation decision`],
-  ])
+  pack.rows(ctx.reviews.map((review) => [review.review, `${review.date} · ${review.reviewer} · ${review.focus}`]))
 
   pack.brand()
   pack.badge('SECTION V — PERFORMANCE TEMPLATES')

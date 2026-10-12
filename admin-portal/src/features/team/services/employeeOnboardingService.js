@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { supabase } from '../../../shared/services/firebaseService'
-import { FIXED_KRAS, JOINING_ROLE, joiningUsernameToAuthEmail, onboardingFromProfile } from '../../../../../shared/supabase/employeeOnboarding.js'
+import { FIXED_KRAS, JOINING_ROLE, joiningUsernameToAuthEmail, learningPoints, onboardingFromProfile } from '../../../../../shared/supabase/employeeOnboarding.js'
 
 async function invokeCreateUser(body) {
   if (!supabase) throw new Error('Supabase is not configured')
@@ -35,6 +35,26 @@ function savedKraRows(kras) {
   return rows.filter((row) => row && typeof row === 'object')
 }
 
+function handbookKras({ kras, learningPlan, reviews }) {
+  return {
+    custom: savedKraRows(kras),
+    fixed: FIXED_KRAS,
+    learningPlan: (learningPlan || []).map((phase) => ({
+      id: phase.id || '',
+      label: String(phase.label || '').trim(),
+      title: String(phase.title || '').trim(),
+      points: learningPoints(phase.points),
+    })),
+    reviews: (reviews || []).map((review) => ({
+      id: review.id || '',
+      review: String(review.review || '').trim(),
+      date: String(review.date || '').trim(),
+      reviewer: String(review.reviewer || '').trim(),
+      focus: String(review.focus || '').trim(),
+    })),
+  }
+}
+
 function alreadyRegistered(error) {
   return /already been registered/i.test(String(error?.message || error || ''))
 }
@@ -59,6 +79,17 @@ async function findJoiningAuthId(email) {
   const { data: employees } = await supabase.from('employees').select('id, auth_id, user_id, data').limit(500)
   const employee = (employees || []).find((row) => sameEmail(row, email))
   return employee?.auth_id || employee?.user_id || employee?.id || ''
+}
+
+async function rememberJoiningPassword({ id, authId, password }) {
+  const value = String(password || '')
+  if (value.length < 6) return
+  const patch = { login_password: value }
+  if (id) {
+    const { data, error } = await supabase.from('employee_onboarding').update(patch).eq('id', id).select('id')
+    if (!error && data?.length) return
+  }
+  if (authId) await supabase.from('employee_onboarding').update(patch).eq('auth_id', authId)
 }
 
 async function linkJoiningAuth(onboardingId, authId) {
@@ -98,7 +129,16 @@ async function createJoiningAuthUser({ username, password, email, displayName, e
   }
 }
 
-async function markJoiningProfile(authId, { username, email, displayName, employment, kras }) {
+async function saveHandbookKras({ id, authId, kras }) {
+  if (!kras) return
+  if (id) {
+    const { data, error } = await supabase.from('employee_onboarding').update({ kras }).eq('id', id).select('id')
+    if (!error && data?.length) return
+  }
+  if (authId) await supabase.from('employee_onboarding').update({ kras }).eq('auth_id', authId)
+}
+
+async function markJoiningProfile(authId, { username, email, displayName, employment, kras, password }) {
   if (!authId) return
   const { data: profile } = await supabase.from('profiles').select('id, data').eq('id', authId).maybeSingle()
   const current = profile?.data && typeof profile.data === 'object' ? profile.data : {}
@@ -113,9 +153,17 @@ async function markJoiningProfile(authId, { username, email, displayName, employ
       displayName: displayName || current.displayName || username,
       role: JOINING_ROLE,
       status: 'active',
+      loginPassword: password || current.loginPassword || '',
       joiningStatus: current.joiningStatus === 'submitted' ? 'submitted' : 'draft',
       employment: employment || current.employment || {},
-      kras: { custom: savedKraRows(kras || current.kras), fixed: FIXED_KRAS },
+      kras: kras?.learningPlan || kras?.reviews
+        ? kras
+        : {
+          custom: savedKraRows(kras || current.kras),
+          fixed: FIXED_KRAS,
+          learningPlan: current.kras?.learningPlan || [],
+          reviews: current.kras?.reviews || [],
+        },
       answers: current.answers || {},
     },
     updated_at: new Date().toISOString(),
@@ -123,7 +171,7 @@ async function markJoiningProfile(authId, { username, email, displayName, employ
   if (error) throw error
 }
 
-async function saveOnboardingViaFunction({ username, password, email, displayName, employment, kras, onboardingId }) {
+async function saveOnboardingViaFunction({ username, password, email, displayName, employment, kras, learningPlan, reviews, onboardingId }) {
   try {
     return await invokeCreateUser({
       action: 'ensure-joining-login',
@@ -135,6 +183,8 @@ async function saveOnboardingViaFunction({ username, password, email, displayNam
       displayName,
       employment,
       kras: savedKraRows(kras),
+      learningPlan,
+      reviews,
     })
   } catch {
     return null
@@ -171,12 +221,14 @@ export async function resetJoiningLogin({ id, username, password, displayName, e
   })
   const authId = created.uid || await findJoiningAuthId(email)
   await ensureJoiningPassword(email, password, authId)
+  await rememberJoiningPassword({ id, authId, password })
   await markJoiningProfile(authId, {
     username: login,
     email,
     displayName: displayName || savedEmployment.fullName,
     employment: savedEmployment,
     kras: record?.kras,
+    password,
   })
   try {
     await linkJoiningAuth(id, authId)
@@ -195,8 +247,9 @@ export async function resetJoiningLogin({ id, username, password, displayName, e
   return { uid: authId, email, username: login }
 }
 
-export async function createEmployeeOnboarding({ username, password, employment, kras }) {
+export async function createEmployeeOnboarding({ username, password, employment, kras, learningPlan, reviews }) {
   const email = joiningUsernameToAuthEmail(username)
+  const handbook = handbookKras({ kras, learningPlan, reviews })
   const created = await createJoiningAuthUser({
     username,
     password,
@@ -212,7 +265,8 @@ export async function createEmployeeOnboarding({ username, password, employment,
     email,
     displayName: employment?.fullName || username,
     employment,
-    kras,
+    kras: handbook,
+    password,
   })
   const viaFunction = await saveOnboardingViaFunction({
     username,
@@ -221,22 +275,38 @@ export async function createEmployeeOnboarding({ username, password, employment,
     displayName: employment?.fullName || username,
     employment,
     kras,
+    learningPlan: handbook.learningPlan,
+    reviews: handbook.reviews,
     onboardingId: authId,
   })
-  return { ...created, ...viaFunction, id: viaFunction?.id || authId, uid: authId, username, email }
+  const recordId = viaFunction?.id || authId
+  await rememberJoiningPassword({ id: recordId, authId, password })
+  await saveHandbookKras({ id: recordId, authId, kras: handbook })
+  return { ...created, ...viaFunction, id: recordId, uid: authId, username, email, kras: handbook }
 }
 
 export async function deleteEmployeeOnboarding(id) {
   const record = await getEmployeeOnboarding(id)
-  const authId = record?.auth_id
-  if (authId) {
-    try {
-      await invokeCreateUser({ action: 'delete-user', uid: authId })
-    } catch {
-      /* Remove the onboarding row even if the sign-in cannot be deleted. */
-    }
+  if (!record) throw new Error('Onboarding record not found')
+  await invokeCreateUser({
+    action: 'delete-onboarding',
+    id: record.id || id,
+    username: record.username || '',
+    authId: record.auth_id || '',
+  })
+}
+
+function mergeKras(tableKras, profileKras) {
+  const table = tableKras && typeof tableKras === 'object' && !Array.isArray(tableKras) ? tableKras : {}
+  const profile = profileKras && typeof profileKras === 'object' && !Array.isArray(profileKras) ? profileKras : {}
+  return {
+    ...table,
+    ...profile,
+    custom: profile.custom?.length ? profile.custom : (table.custom || []),
+    fixed: profile.fixed?.length ? profile.fixed : (table.fixed || FIXED_KRAS),
+    learningPlan: profile.learningPlan?.length ? profile.learningPlan : (table.learningPlan || []),
+    reviews: profile.reviews?.length ? profile.reviews : (table.reviews || []),
   }
-  await supabase.from('employee_onboarding').delete().eq('id', id)
 }
 
 function mergeOnboarding(tableRow, profileRow) {
@@ -249,16 +319,17 @@ function mergeOnboarding(tableRow, profileRow) {
     status: submitted ? 'submitted' : tableRow.status,
     answers: fromProfile.answers && Object.keys(fromProfile.answers).length ? fromProfile.answers : tableRow.answers,
     employment: { ...(tableRow.employment || {}), ...(fromProfile.employment || {}) },
-    kras: fromProfile.kras?.custom?.length ? fromProfile.kras : tableRow.kras,
+    kras: mergeKras(tableRow.kras, fromProfile.kras),
     submitted_at: fromProfile.submitted_at || tableRow.submitted_at,
     auth_id: tableRow.auth_id || fromProfile.auth_id,
+    login_password: tableRow.login_password || fromProfile.login_password || '',
   }
 }
 
 export async function listEmployeeOnboarding() {
   const { data, error } = await supabase
     .from('employee_onboarding')
-    .select('id, username, status, employment, created_at, submitted_at, auth_id')
+    .select('id, username, status, employment, created_at, submitted_at, auth_id, login_password')
     .order('created_at', { ascending: false })
   const tableRows = error ? [] : data || []
   const { data: profiles } = await supabase.from('profiles').select('id, auth_id, data, created_at').eq('data->>role', JOINING_ROLE)
