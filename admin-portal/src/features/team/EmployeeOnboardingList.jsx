@@ -1,12 +1,15 @@
-import React, { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
+import { Badge } from '../../components/ui/Badge'
+import { Modal } from '../../components/ui/Modal'
 import { TeamSubNav } from './components/TeamSubNav'
 import { deleteEmployeeOnboarding, listEmployeeOnboarding, resetJoiningLogin } from './services/employeeOnboardingService'
+import { EmployeeOnboardingSetup } from './EmployeeOnboardingSetup'
 import { ONBOARDING_STATUS, joiningPageUrl } from '../../../../shared/supabase/employeeOnboarding.js'
-import { UserPlus } from 'lucide-react'
+import { Trash2, UserPlus } from 'lucide-react'
 
 function statusLabel(status) {
   if (status === ONBOARDING_STATUS.SUBMITTED) return 'Submitted'
@@ -21,9 +24,23 @@ export const EmployeeOnboardingList = () => {
   const [resettingId, setResettingId] = useState('')
   const [savingId, setSavingId] = useState('')
   const [savedId, setSavedId] = useState('')
-  const [confirmDeleteId, setConfirmDeleteId] = useState('')
-  const [deletingId, setDeletingId] = useState('')
+  const [pending, setPending] = useState(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [setupOpen, setSetupOpen] = useState(() => searchParams.get('setup') === '1')
   const joiningUrl = joiningPageUrl()
+
+  const loadRows = useCallback(() => {
+    return listEmployeeOnboarding()
+      .then((data) => {
+        setRows(data)
+        setError('')
+      })
+      .catch((err) => {
+        setError(err.message || 'Could not load onboarding records.')
+      })
+  }, [])
 
   const saveLogin = async (row) => {
     const password = String(passwords[row.id] || '')
@@ -51,24 +68,6 @@ export const EmployeeOnboardingList = () => {
     }
   }
 
-  const removeRow = async (row) => {
-    if (confirmDeleteId !== row.id) {
-      setConfirmDeleteId(row.id)
-      return
-    }
-    setError('')
-    setDeletingId(row.id)
-    try {
-      await deleteEmployeeOnboarding(row.id)
-      setRows((current) => current.filter((item) => item.id !== row.id))
-      setConfirmDeleteId('')
-    } catch (err) {
-      setError(err.message || 'Could not delete this joining record.')
-    } finally {
-      setDeletingId('')
-    }
-  }
-
   useEffect(() => {
     let cancelled = false
     listEmployeeOnboarding()
@@ -86,15 +85,57 @@ export const EmployeeOnboardingList = () => {
     }
   }, [])
 
+  useEffect(() => {
+    if (searchParams.get('setup') === '1') setSetupOpen(true)
+  }, [searchParams])
+
+  const openSetup = () => setSetupOpen(true)
+
+  const closeSetup = () => {
+    setSetupOpen(false)
+    if (searchParams.get('setup')) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('setup')
+      setSearchParams(next, { replace: true })
+    }
+  }
+
+  const counts = useMemo(() => {
+    const submitted = rows.filter((row) => row.status === ONBOARDING_STATUS.SUBMITTED).length
+    return { submitted, waiting: rows.length - submitted }
+  }, [rows])
+
+  const closeConfirm = () => {
+    if (deleting) return
+    setPending(null)
+    setDeleteError('')
+  }
+
+  const confirmDelete = async () => {
+    if (!pending || deleting) return
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      await deleteEmployeeOnboarding(pending.id)
+      setRows((current) => current.filter((row) => row.id !== pending.id))
+      setPending(null)
+    } catch (err) {
+      setDeleteError(err.message || 'Could not delete this onboarding record.')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const pendingName = pending?.employment?.fullName || 'this hire'
+  const pendingUsername = pending?.username || ''
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Employee Onboarding"
         description="Username and password are created in Setup new employee. This list is only for status. The hire signs in at the joining page with that same login."
         actions={
-          <Link to="/team/onboarding/new">
-            <Button icon={UserPlus}>Setup new employee</Button>
-          </Link>
+          <Button icon={UserPlus} onClick={openSetup}>Setup new employee</Button>
         }
       />
       <TeamSubNav />
@@ -103,6 +144,13 @@ export const EmployeeOnboardingList = () => {
         <p className="text-sm text-fg">Joining page for new hires: <span className="font-medium">{joiningUrl}</span></p>
         <p className="text-xs text-muted">Waiting for answers = hire has not submitted yet. Submitted = click the employee name to see the filled form and download the 3 PDF packs.</p>
       </Card>
+
+      {!loading && rows.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          <Badge variant="warning">{counts.waiting} waiting</Badge>
+          <Badge variant="success">{counts.submitted} submitted</Badge>
+        </div>
+      )}
 
       {error && (
         <p className="text-sm text-rose-600">{error}</p>
@@ -116,7 +164,7 @@ export const EmployeeOnboardingList = () => {
               <th className="px-4 py-3 font-semibold">Department</th>
               <th className="px-4 py-3 font-semibold">Joining username</th>
               <th className="px-4 py-3 font-semibold">Status</th>
-              <th className="px-4 py-3 font-semibold">Actions</th>
+              <th className="px-4 py-3 font-semibold text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -127,7 +175,12 @@ export const EmployeeOnboardingList = () => {
             )}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-muted">No onboarding records yet.</td>
+                <td colSpan={5} className="px-4 py-10">
+                  <div className="flex flex-col items-center gap-3 text-center">
+                    <p className="text-sm text-muted">No onboarding records yet.</p>
+                    <Button icon={UserPlus} onClick={openSetup}>Setup new employee</Button>
+                  </div>
+                </td>
               </tr>
             )}
             {rows.map((row) => {
@@ -137,17 +190,17 @@ export const EmployeeOnboardingList = () => {
               return (
                 <tr key={row.id} className="border-t border-border">
                   <td className="px-4 py-3">
-                    <Link to={`/team/onboarding/${row.id}`} className="font-medium text-fg hover:text-accent">
+                    <Link to={`/team/onboarding/${row.id}`} className="font-medium text-fg hover:text-accent cursor-pointer">
                       {employment.fullName || 'Unnamed hire'}
                     </Link>
-                    <p className="text-xs text-muted">{employment.employeeId}</p>
+                    <p className="text-xs text-muted">{employment.employeeId || '—'}</p>
                   </td>
                   <td className="px-4 py-3 text-muted">{employment.department || '—'}</td>
                   <td className="px-4 py-3">{row.username}</td>
                   <td className="px-4 py-3">
-                    <span className={`text-xs font-semibold px-2 py-1 rounded-lg ${submitted ? 'bg-emerald-500/10 text-emerald-700' : 'bg-amber-500/10 text-amber-700'}`}>
+                    <Badge variant={submitted ? 'success' : 'warning'}>
                       {statusLabel(row.status)}
-                    </span>
+                    </Badge>
                     {submitted && (
                       <p className="text-[11px] text-muted mt-1">Click the name to open answers and PDFs</p>
                     )}
@@ -156,9 +209,9 @@ export const EmployeeOnboardingList = () => {
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex flex-col items-start gap-2">
+                    <div className="flex flex-col items-end gap-2">
                       {resetting ? (
-                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex flex-wrap items-center justify-end gap-2">
                           <input
                             type="password"
                             className="w-36 rounded-lg border border-border bg-surface px-2 py-1.5 text-sm"
@@ -177,8 +230,18 @@ export const EmployeeOnboardingList = () => {
                           Forgot password?
                         </Button>
                       )}
-                      <Button type="button" size="sm" variant="danger" disabled={deletingId === row.id} onClick={() => removeRow(row)}>
-                        {deletingId === row.id ? 'Deleting…' : confirmDeleteId === row.id ? 'Confirm delete' : 'Delete'}
+                      <Button
+                        type="button"
+                        variant="danger"
+                        size="sm"
+                        icon={Trash2}
+                        disabled={deleting && pending?.id === row.id}
+                        onClick={() => {
+                          setDeleteError('')
+                          setPending(row)
+                        }}
+                      >
+                        Delete
                       </Button>
                     </div>
                   </td>
@@ -188,6 +251,37 @@ export const EmployeeOnboardingList = () => {
           </tbody>
         </table>
       </Card>
+
+      <Modal
+        open={setupOpen}
+        onClose={closeSetup}
+        title="Setup new employee"
+        size="xl"
+      >
+        <EmployeeOnboardingSetup embedded onClose={closeSetup} onCreated={() => { loadRows() }} />
+      </Modal>
+
+      <Modal
+        open={Boolean(pending)}
+        onClose={closeConfirm}
+        title="Delete onboarding record"
+        size="sm"
+        footer={
+          <>
+            <Button type="button" variant="secondary" onClick={closeConfirm} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button type="button" variant="danger" onClick={confirmDelete} disabled={deleting}>
+              {deleting ? 'Deleting…' : 'Delete'}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-fg">
+          Delete {pendingName}{pendingUsername ? ` (${pendingUsername})` : ''}? This removes the onboarding record and the joining login.
+        </p>
+        {deleteError && <p className="text-sm text-rose-600 mt-3">{deleteError}</p>}
+      </Modal>
     </div>
   )
 }

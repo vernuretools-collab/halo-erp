@@ -42,9 +42,6 @@ const EmployeeList = lazy(() =>
 const EmployeeOnboardingList = lazy(() =>
   import('./features/team/EmployeeOnboardingList').then((m) => ({ default: m.EmployeeOnboardingList }))
 )
-const EmployeeOnboardingSetup = lazy(() =>
-  import('./features/team/EmployeeOnboardingSetup').then((m) => ({ default: m.EmployeeOnboardingSetup }))
-)
 const EmployeeOnboardingDetail = lazy(() =>
   import('./features/team/EmployeeOnboardingDetail').then((m) => ({ default: m.EmployeeOnboardingDetail }))
 )
@@ -172,7 +169,7 @@ export const router = createBrowserRouter([
           { index: true, element: <Navigate to="/team/employees" replace /> },
           { path: 'employees', element: <EmployeeList /> },
           { path: 'onboarding', element: <EmployeeOnboardingList /> },
-          { path: 'onboarding/new', element: <EmployeeOnboardingSetup /> },
+          { path: 'onboarding/new', element: <Navigate to="/team/onboarding?setup=1" replace /> },
           { path: 'onboarding/:id', element: <EmployeeOnboardingDetail /> },
           { path: 'scrum', element: <ScrumPage /> },
           { path: 'announcements', element: <AnnouncementManager /> },

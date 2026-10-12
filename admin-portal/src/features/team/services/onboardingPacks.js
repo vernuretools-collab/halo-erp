@@ -67,8 +67,7 @@ export function buildOnboardingPackContext(row) {
 }
 
 function cover(pack, docNo, title, subtitle) {
-  pack.write('THE HALO EFFECT', { size: 22, color: [13, 122, 110], style: 'bold', gap: 2 })
-  pack.write('CONSULTING', { size: 14, color: [176, 132, 42], style: 'bold', gap: 14 })
+  pack.logo()
   pack.write(`DOCUMENT ${docNo} OF 3`, { size: 9, color: [100, 116, 139], gap: 6 })
   pack.h1(title)
   pack.note(subtitle)
@@ -82,7 +81,7 @@ function identity(pack, ctx) {
   ])
 }
 
-export function downloadEmploymentPack(row) {
+export function downloadEmploymentPack(row, options = {}) {
   const ctx = buildOnboardingPackContext(row)
   const pack = createPack()
   cover(pack, '1', 'Employment Agreement Pack', 'Offer Letter · Appointment Agreement · Job Description · Probation Terms')
@@ -179,10 +178,11 @@ export function downloadEmploymentPack(row) {
   ])
   pack.p(`By signing below, I, ${ctx.name}, confirm I have read, understood, and agree to be bound by all sections of this Employment Agreement Pack — Sections A, B, C, and D — as if signed individually.`)
   pack.signature({ name: ctx.name, role: ctx.designation, image: ctx.signature, place: 'Chennai' })
+  if (options.view) return pack.blob()
   pack.save(`${fileSlug(ctx.name)}-employment-pack.pdf`)
 }
 
-export function downloadLegalPack(row) {
+export function downloadLegalPack(row, options = {}) {
   const ctx = buildOnboardingPackContext(row)
   const pack = createPack()
   const conflict = ctx.answers.employment?.conflictOfInterest || 'No'
@@ -354,10 +354,11 @@ export function downloadLegalPack(row) {
   }
   pack.p(`By signing below, I, ${ctx.name}, confirm I have read, understood, and agree to be bound by all sections of this Legal Agreements & HR Records Pack as if signed individually. I specifically acknowledge that confidentiality, portfolio, and commercial secrecy obligations are perpetual and indefinite with no expiry.`)
   pack.signature({ name: ctx.name, role: ctx.designation, image: ctx.signature })
+  if (options.view) return pack.blob()
   pack.save(`${fileSlug(ctx.name)}-legal-hr-pack.pdf`)
 }
 
-export function downloadHandbookPack(row) {
+export function downloadHandbookPack(row, options = {}) {
   const ctx = buildOnboardingPackContext(row)
   const pack = createPack()
   cover(pack, '3', 'Employee Handbook & Performance Pack', 'All HR Policies · Compliance · Technology · KRA/KPI · Learning Plan · Reviews')
@@ -606,6 +607,7 @@ export function downloadHandbookPack(row) {
   pack.h2('Master sign-off — Employee Handbook & Performance Pack')
   pack.p(`By signing below, I, ${ctx.name}, confirm that I have received, read, and fully understood this Employee Handbook & Performance Pack. I agree to be bound by all policies, procedures, standards, and obligations set out herein — including leave policy, attendance policy, code of conduct, POSH policy, compliance policies, technology policies, KRA/KPI framework, learning commitments, and the disciplinary and exit policies — as if I had signed each section individually. I acknowledge these policies may be updated with reasonable notice and specifically acknowledge my mandatory obligation to submit daily scrum updates, EOD reports, and learning logs on the THEC Employee Portal.`)
   pack.signature({ name: `${ctx.name} · ${ctx.designation} · Emp ID ${ctx.id}`, role: ctx.designation, image: ctx.signature, place: 'Chennai, Tamil Nadu' })
+  if (options.view) return pack.blob()
   pack.save(`${fileSlug(ctx.name)}-handbook.pdf`)
 }
 

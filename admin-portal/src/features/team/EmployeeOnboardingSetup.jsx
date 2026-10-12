@@ -23,7 +23,7 @@ const FALLBACK_DEPARTMENTS = ['Sales', 'Engineering & Product', 'Operations', 'H
 
 const emptyKra = (weight) => ({ keyResultArea: '', kpi: '', weight })
 
-export const EmployeeOnboardingSetup = () => {
+export const EmployeeOnboardingSetup = ({ embedded = false, onClose, onCreated }) => {
   const [departments, setDepartments] = useState(FALLBACK_DEPARTMENTS)
   const [employment, setEmployment] = useState({
     employeeId: '',
@@ -95,7 +95,9 @@ export const EmployeeOnboardingSetup = () => {
           weight: Number(row.weight),
         })),
       })
-      setCreated({ ...result, username: login, password, url: joiningPageUrl() })
+      const createdRow = { ...result, username: login, password, url: joiningPageUrl() }
+      setCreated(createdRow)
+      onCreated?.(createdRow)
     } catch (err) {
       setError(err.message || 'Could not create the joining account.')
     } finally {
@@ -104,14 +106,8 @@ export const EmployeeOnboardingSetup = () => {
   }
 
   if (created) {
-    return (
-      <div className="space-y-6">
-        <PageHeader
-          title="Joining login ready"
-          description="Share this page and username with the hire. This login cannot open the employee portal."
-        />
-        <TeamSubNav />
-        <Card className="space-y-3 max-w-xl">
+    const ready = (
+      <Card className="space-y-3 max-w-xl">
           <p className="text-sm text-fg"><span className="text-muted">Joining page</span><br />{created.url}</p>
           <p className="text-sm text-fg"><span className="text-muted">Username</span><br />{created.username}</p>
           <p className="text-sm text-fg"><span className="text-muted">Password</span><br />{created.password}</p>
@@ -124,25 +120,31 @@ export const EmployeeOnboardingSetup = () => {
             >
               Copy details
             </Button>
-            <Link to="/team/onboarding">
-              <Button type="button" variant="primary">Back to list</Button>
-            </Link>
+            {embedded ? (
+              <Button type="button" variant="primary" onClick={onClose}>Done</Button>
+            ) : (
+              <Link to="/team/onboarding">
+                <Button type="button" variant="primary">Back to list</Button>
+              </Link>
+            )}
           </div>
         </Card>
+    )
+    if (embedded) return ready
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Joining login ready"
+          description="Share this page and username with the hire. This login cannot open the employee portal."
+        />
+        <TeamSubNav />
+        {ready}
       </div>
     )
   }
 
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Setup New Employee"
-        description="Enter the employment details. These will be pre-filled (read-only) for the employee in their form."
-      />
-      <TeamSubNav />
-      <Link to="/team/onboarding" className="text-sm text-accent font-medium">← Back to onboarding list</Link>
-
-      <form onSubmit={handleSubmit} className="space-y-6">
+  const form = (
+      <form onSubmit={handleSubmit} className="space-y-4">
         <Card>
           <p className="text-xs font-semibold uppercase tracking-wide text-accent mb-4">Employment details</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -250,7 +252,7 @@ export const EmployeeOnboardingSetup = () => {
                     <td className="p-2">
                       <button
                         type="button"
-                        className="text-rose-600 p-1"
+                        className="text-rose-600 p-1 cursor-pointer disabled:cursor-not-allowed"
                         aria-label="Remove KRA row"
                         onClick={() => setKras((current) => current.filter((_, i) => i !== index))}
                         disabled={kras.length === 1}
@@ -286,6 +288,19 @@ export const EmployeeOnboardingSetup = () => {
         {error && <p className="text-sm text-rose-600">{error}</p>}
         <Button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save & create joining login'}</Button>
       </form>
+  )
+
+  if (embedded) return form
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Setup New Employee"
+        description="Enter the employment details. These will be pre-filled (read-only) for the employee in their form."
+      />
+      <TeamSubNav />
+      <Link to="/team/onboarding" className="text-sm text-accent font-medium">← Back to onboarding list</Link>
+      {form}
     </div>
   )
 }
