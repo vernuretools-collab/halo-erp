@@ -260,7 +260,11 @@ export function createPack() {
   function checks(items, selected) {
     const chosen = new Set(selected || [])
     items.forEach((item) => {
-      write(`${chosen.has(item) ? '[x]' : '[ ]'}  ${item}`, { size: 10, gap: 2 })
+      const marked = item && typeof item === 'object'
+        ? Boolean(item.checked)
+        : chosen.has(item)
+      const label = item && typeof item === 'object' ? item.label : item
+      write(`${marked ? '[x]' : '[ ]'}  ${label}`, { size: 10, gap: 2 })
     })
     y += 4
   }

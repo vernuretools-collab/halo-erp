@@ -1,4 +1,5 @@
 import { DEFAULT_LEARNING_PLAN, FIXED_KRAS, defaultReviews, learningPoints } from '../../../../../shared/supabase/employeeOnboarding.js'
+import { KYC_DOCUMENTS, POLICY_ITEMS, policyLabel } from '../../../../../shared/supabase/joiningForm.js'
 import {
   addDays,
   createPack,
@@ -105,6 +106,14 @@ function handbookReviews(row, employment) {
     reviewer: review.reviewer || '',
     focus: review.focus || FALLBACK_REVIEW_FOCUS[review.id] || '',
   }))
+}
+
+function documentChecked(documents, needles, excludes = []) {
+  return (documents || []).some((doc) => {
+    const text = String(doc).toLowerCase()
+    if (excludes.some((word) => text.includes(word))) return false
+    return needles.some((needle) => text.includes(needle))
+  })
 }
 
 function cover(pack, docNo, title, subtitle) {
@@ -323,16 +332,19 @@ export function downloadLegalPack(row, options = {}) {
   pack.h2('10. KYC declaration')
   pack.p('I confirm I have submitted the following originals for verification. All copies on record are true copies:')
   pack.checks([
-    'Aadhaar card',
-    'PAN card',
-    'Passport (if available)',
-    'Voter ID / Driving licence',
-    'Educational certificates',
-    'Experience / relieving letter',
-    "Last 3 months' salary slips",
-    'Cancelled cheque / passbook',
-    '2 passport photographs',
-  ], ctx.kyc.documents)
+    { label: 'Aadhaar card', checked: documentChecked(ctx.kyc.documents, ['aadhaar']) },
+    { label: 'PAN card', checked: documentChecked(ctx.kyc.documents, ['pan']) },
+    { label: 'Passport (if available)', checked: documentChecked(ctx.kyc.documents, ['passport'], ['photograph']) },
+    { label: 'Voter ID / Driving licence', checked: documentChecked(ctx.kyc.documents, ['voter', 'driving']) },
+    { label: 'Educational certificates', checked: documentChecked(ctx.kyc.documents, ['educational']) },
+    { label: 'Experience / relieving letter', checked: documentChecked(ctx.kyc.documents, ['experience', 'relieving']) },
+    { label: "Last 3 months' salary slips", checked: documentChecked(ctx.kyc.documents, ['salary']) },
+    { label: 'Cancelled cheque / passbook', checked: documentChecked(ctx.kyc.documents, ['cheque', 'passbook']) },
+    { label: '2 passport photographs', checked: documentChecked(ctx.kyc.documents, ['photograph']) },
+  ])
+  pack.rows([
+    ['Documents confirmed on the joining form', (ctx.kyc.documents || []).filter((name) => KYC_DOCUMENTS.includes(name)).join('; ')],
+  ])
   pack.p('I confirm no pending legal proceedings affecting employment and authorise the Company to conduct background verification.')
   pack.h2('11. Education and experience declaration')
   pack.p('I solemnly declare that all educational qualifications and work experience stated are genuine and verifiable; I have not been terminated from any previous employer for misconduct without disclosing it; I am not subject to any conflicting obligations from a former employer, except as declared below.')
@@ -342,6 +354,11 @@ export function downloadLegalPack(row, options = {}) {
     ['Highest qualification and year', [ctx.kyc.qualification, ctx.kyc.institutionYear].filter(Boolean).join(', ')],
     ['Any conflicting obligations (NIL if none)', ctx.kyc.obligations],
   ])
+  pack.h2('Policy acknowledgements from the joining form')
+  pack.rows(POLICY_ITEMS.map((item) => [
+    policyLabel(item),
+    ctx.answers.policies?.[item.id] ? 'Acknowledged' : 'Not acknowledged',
+  ]))
   pack.note('Misrepresentation is grounds for immediate termination without notice or settlement.')
 
   pack.brand()

@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { FileText, Scale, BookOpen } from 'lucide-react'
 import { buildOnboardingPackContext } from '../../admin-portal/src/features/team/services/onboardingPacks.js'
+import { POLICY_ITEMS, policyLabel } from '../supabase/joiningForm.js'
 import { formatPackDate } from '../../admin-portal/src/features/team/services/onboardingPdf.js'
 import './onboardingPack.css'
 
@@ -467,6 +468,7 @@ function LegalBody({ ctx, logo, tab }) {
           ['Full Name (as on Aadhaar)', ctx.personal.fullName],
           ['Date of Birth', formatPackDate(ctx.personal.dateOfBirth)],
           ['Gender', ctx.personal.gender],
+          ['Nationality', ctx.personal.nationality],
           ['Aadhaar Number', ctx.personal.aadhaar],
           ['PAN Number', ctx.personal.pan],
           ['Mobile Number', ctx.personal.mobile],
@@ -500,6 +502,11 @@ function LegalBody({ ctx, logo, tab }) {
           ['Highest Qualification & Year', [ctx.kyc.qualification, ctx.kyc.institutionYear].filter(Boolean).join(', ')],
           ['Any conflicting obligations (NIL if none)', ctx.kyc.obligations || 'NIL'],
         ]} />
+        <h4 className="pack-sub">Policy acknowledgements from the joining form</h4>
+        <Rows items={POLICY_ITEMS.map((item) => [
+          policyLabel(item),
+          ctx.answers.policies?.[item.id] ? 'Acknowledged' : 'Not acknowledged',
+        ])} />
         <p className="pack-note">Misrepresentation is grounds for immediate termination without notice or settlement.</p>
       </Page>
 
@@ -536,6 +543,7 @@ function LegalBody({ ctx, logo, tab }) {
         <Rows items={[
           ['Primary Contact Name & Relationship', [ctx.emergency.primaryName, ctx.emergency.primaryRelationship].filter(Boolean).join(' · ')],
           ['Primary Mobile', ctx.emergency.primaryMobile],
+          ['Address', ctx.emergency.address],
           ['Secondary Contact Name & Relationship', [ctx.emergency.secondaryName, ctx.emergency.secondaryRelationship].filter(Boolean).join(' · ')],
           ['Secondary Mobile', ctx.emergency.secondaryMobile],
           ['Blood Group & Known Conditions', [ctx.personal.bloodGroup, ctx.emergency.allergies].filter(Boolean).join(' · ')],

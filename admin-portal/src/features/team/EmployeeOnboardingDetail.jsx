@@ -10,7 +10,7 @@ import { downloadAllOnboardingPacks, downloadEmploymentPack, downloadHandbookPac
 import { OnboardingPackViewer } from '../../../../shared/onboarding/OnboardingPackViewer.jsx'
 import { FIXED_KRAS, ONBOARDING_STATUS, joiningPageUrl } from '../../../../shared/supabase/employeeOnboarding.js'
 import haloLogo from '../../assets/halologo.png'
-import { KYC_DOCUMENTS, POLICY_ITEMS, declarationText } from '../../../../shared/supabase/joiningForm.js'
+import { KYC_DOCUMENTS, POLICY_ITEMS, declarationText, policyLabel } from '../../../../shared/supabase/joiningForm.js'
 import { ArrowLeft, Copy, Trash2 } from 'lucide-react'
 
 const SUMMARY_FIELDS = [
@@ -292,7 +292,7 @@ export const EmployeeOnboardingDetail = () => {
                 <ul className="space-y-3">
                   {POLICY_ITEMS.map((item) => {
                     const acknowledged = Boolean(policies[item.id])
-                    const { title, body } = policyParts(item.text)
+                    const { title, body } = policyParts(policyLabel(item))
                     return (
                       <li key={item.id} className="border border-border rounded-xl px-3 py-3">
                         <div className="flex flex-wrap items-center gap-2">

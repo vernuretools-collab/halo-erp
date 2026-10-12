@@ -161,7 +161,7 @@ export const JoiningFormPage = () => {
   const primaryLabel = returnToPreview && !onPreview ? 'Save and return to preview' : `${nextLabel} →`
 
   return (
-    <div className="min-h-screen text-slate-900 bg-slate-100">
+    <div className="min-h-screen text-slate-900 bg-slate-100 [&_button:not(:disabled)]:cursor-pointer [&_button:disabled]:cursor-not-allowed">
       <header className="bg-slate-950 text-white px-6 py-4 flex items-center gap-3">
         <img src={haloLogo} alt="" className="w-10 h-10 rounded-full bg-white p-1 object-contain" />
         <div>
@@ -169,7 +169,7 @@ export const JoiningFormPage = () => {
           <p className="text-[11px] text-amber-200 italic">Where Insights Meet Influence</p>
         </div>
         <span className="ml-auto text-xs rounded-full border border-white/20 px-3 py-1 text-slate-200">Employee Onboarding Portal</span>
-        <button type="button" className="text-xs text-slate-300" onClick={() => logoutUser()}>Sign out</button>
+        <button type="button" className="text-xs text-slate-300 cursor-pointer" onClick={() => logoutUser()}>Sign out</button>
       </header>
 
       <main className="max-w-4xl mx-auto p-4 md:p-6">
@@ -209,7 +209,7 @@ export const JoiningFormPage = () => {
             <div className="mt-4 flex items-center justify-between gap-3">
               <button
                 type="button"
-                className="rounded-lg border border-teal-700 px-4 py-2 text-sm text-teal-800 disabled:opacity-40"
+                className="rounded-lg border border-teal-700 px-4 py-2 text-sm text-teal-800 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
                 disabled={saving || step === 0}
                 onClick={async () => {
                   setError('')
@@ -231,7 +231,7 @@ export const JoiningFormPage = () => {
                 type="button"
                 disabled={saving || (onPreview && !detailsConfirmed)}
                 onClick={goNext}
-                className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm text-white disabled:opacity-50 ${onPreview ? 'bg-amber-500 font-medium' : 'bg-teal-700'}`}
+                className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm text-white cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${onPreview ? 'bg-amber-500 font-medium' : 'bg-teal-700'}`}
               >
                 {onPreview && <Check className="w-4 h-4" />}
                 {saving ? (onPreview ? 'Submitting…' : 'Saving…') : primaryLabel}
@@ -251,7 +251,7 @@ export const JoiningFormPage = () => {
             <p className="mt-2 text-sm text-slate-600">HR has received your details.</p>
             <button
               type="button"
-              className="mt-5 rounded-lg bg-teal-700 px-4 py-2 text-sm text-white"
+              className="mt-5 rounded-lg bg-teal-700 px-4 py-2 text-sm text-white cursor-pointer"
               onClick={() => setSubmittedPopup(false)}
             >
               OK

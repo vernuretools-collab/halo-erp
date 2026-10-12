@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import {
   ACCOUNT_TYPES,
   BLOOD_GROUPS,
@@ -7,11 +7,14 @@ import {
   KYC_DOCUMENTS,
   MARITAL_OPTIONS,
   POLICY_ITEMS,
+  policyBrief,
+  policyLabel,
   YES_NO,
   declarationText,
 } from '../../../../shared/supabase/joiningForm.js'
 import { hasIssuedAssets } from '../../../../admin-portal/src/features/team/services/onboardingPacks.js'
 import { SignaturePad } from './SignaturePad'
+import { X } from 'lucide-react'
 
 const labelClass = 'block text-[11px] font-semibold tracking-wide text-slate-800 mb-1.5'
 const fieldClass = 'w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-teal-700 disabled:bg-slate-50 disabled:text-slate-600'
@@ -47,7 +50,7 @@ function PreviewSection({ title, onEdit, children }) {
       <div className="flex items-center justify-between gap-3 bg-slate-50 px-4 py-3">
         <h4 className="text-sm font-semibold text-teal-800">{title}</h4>
         {onEdit ? (
-          <button type="button" onClick={onEdit} className="text-xs font-semibold text-teal-700 underline">
+          <button type="button" onClick={onEdit} className="text-xs font-semibold text-teal-700 underline cursor-pointer">
             Edit
           </button>
         ) : null}
@@ -87,6 +90,7 @@ export function JoiningWizard({
   setDetailsConfirmed,
   onEditStep,
 }) {
+  const [policyPopup, setPolicyPopup] = useState(null)
   const personal = answers.personal
   const setPersonal = (key, value) => setAnswers((current) => ({
     ...current,
@@ -352,25 +356,46 @@ export function JoiningWizard({
 
         {step === 5 && (
           <>
-            <SectionTitle>Policy acknowledgement</SectionTitle>
+            <SectionTitle>POLICY ACKNOWLEDGEMENT</SectionTitle>
             <p className="text-sm text-slate-500 mb-4">
-              Please read and acknowledge the following key policies. By checking each box, you confirm you have read and understood the policy.
+              Tick each policy after you have read it. Use Read more to open the full text from your document pack.
             </p>
             <div className="space-y-3">
               {POLICY_ITEMS.map((item) => (
-                <label key={item.id} className="flex gap-3 rounded-xl bg-slate-50 border border-slate-100 p-3 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    disabled={readOnly}
-                    checked={Boolean(answers.policies[item.id])}
-                    onChange={(e) => setAnswers((current) => ({
-                      ...current,
-                      policies: { ...current.policies, [item.id]: e.target.checked },
-                    }))}
-                  />
-                  <span>{item.text}</span>
-                </label>
+                <div key={item.id} className="rounded-xl bg-slate-50 border border-slate-200 p-4">
+                  <div className="flex gap-3 text-sm text-slate-600">
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-4 w-4 shrink-0 accent-teal-700"
+                      disabled={readOnly}
+                      checked={Boolean(answers.policies[item.id])}
+                      onChange={(e) => setAnswers((current) => ({
+                        ...current,
+                        policies: { ...current.policies, [item.id]: e.target.checked },
+                      }))}
+                    />
+                    <div className="min-w-0">
+                      <p>
+                        {item.title ? (
+                          <>
+                            <strong className="font-semibold text-slate-900">{item.title}</strong>
+                            {' — '}
+                            {item.text}
+                          </>
+                        ) : (
+                          <strong className="font-semibold text-slate-900">{item.text}</strong>
+                        )}
+                      </p>
+                      <button
+                        type="button"
+                        className="mt-1 text-xs font-semibold text-teal-700 underline cursor-pointer"
+                        onClick={() => setPolicyPopup(item.id)}
+                      >
+                        Read more
+                      </button>
+                    </div>
+                  </div>
+                </div>
               ))}
             </div>
           </>
@@ -436,7 +461,7 @@ export function JoiningWizard({
               <PreviewSection title="Policy acknowledgement" onEdit={readOnly ? null : () => onEditStep(5)}>
                 {POLICY_ITEMS.map((item) => (
                   <div key={item.id} className="py-2.5 border-b border-slate-100 last:border-0">
-                    <p className="text-sm text-slate-800">{item.text}</p>
+                    <p className="text-sm text-slate-800">{policyLabel(item)}</p>
                     <p className={`mt-1 text-xs font-semibold ${answers.policies[item.id] ? 'text-teal-700' : 'text-rose-600'}`}>
                       {answers.policies[item.id] ? 'Acknowledged' : 'Not acknowledged'}
                     </p>
@@ -493,6 +518,42 @@ export function JoiningWizard({
           </p>
         </div>
       )}
+      {policyPopup && (() => {
+        const item = POLICY_ITEMS.find((policy) => policy.id === policyPopup)
+        if (!item) return null
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4"
+            onClick={() => setPolicyPopup(null)}
+          >
+            <div
+              className="relative w-full max-w-lg max-h-[80vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="policy-popup-title"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="absolute top-4 right-4 rounded-md p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800 cursor-pointer"
+                aria-label="Close"
+                onClick={() => setPolicyPopup(null)}
+              >
+                <X className="h-5 w-5" />
+              </button>
+              <h3 id="policy-popup-title" className="pr-8 text-lg font-semibold text-teal-800">
+                {item.title || 'Document pack'}
+              </h3>
+              <p className="mt-2 text-sm text-slate-600">{item.text}</p>
+              <ul className="mt-4 space-y-2 text-sm text-slate-700 list-disc pl-5">
+                {policyBrief(item, employment).map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

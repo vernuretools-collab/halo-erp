@@ -26,22 +26,120 @@ export const KYC_DOCUMENTS = [
 
 export const POLICY_ITEMS = [
   {
-    id: 'confidentiality',
-    text: 'I will keep client names, commercial terms, campaign data, and Company information confidential, including after I leave.',
+    id: 'employmentAgreement',
+    title: 'Employment Agreement',
+    text: 'I understand my designation, CTC, probation period, notice period (30 days during probation, 60 days post-confirmation), and reporting structure.',
+    brief: [],
   },
   {
-    id: 'ip',
-    text: 'Work I create for the Company or its clients belongs to the Company or the client, and I will not use it in a personal portfolio without written consent.',
+    id: 'nda',
+    title: 'NDA & Confidentiality',
+    text: 'I understand that all client information, company data, pricing, and internal processes are strictly confidential, indefinitely and permanently, including after my employment ends.',
+    brief: [
+      'Confidential information includes client names, briefs, campaign data, pricing, financials, processes, and prospect pipeline.',
+      'You may use it only to do your job, and you must not share it with anyone without written consent.',
+      'These duties do not end when you leave. They continue with no time limit.',
+      'You may say only that you worked at The Halo Effect Consulting LLP, in your role, from your joining date.',
+    ],
+  },
+  {
+    id: 'portfolio',
+    title: 'Portfolio Restriction',
+    text: 'I understand I cannot display, share, or reference any client work in my personal portfolio, social media, or CV — permanently, even after leaving the company.',
+    brief: [
+      'You must not put client logos, screenshots, results, or case studies on a portfolio, social media, Behance, Dribbble, LinkedIn, or a CV.',
+      'You must not mention client names in public, in interviews, or in job applications.',
+      'This restriction is permanent because the work belongs to the client.',
+    ],
   },
   {
     id: 'conflict',
-    text: 'I will disclose in writing if a family member or close associate works in digital marketing, web, SEO, sales, or a related field, and I will update that disclosure if it changes.',
+    title: 'Conflict of interest',
+    text: 'I will not share prospect pricing, client data, or pipeline information with any person including family members. I will disclose any conflict of interest immediately in writing.',
+    brief: [
+      'Tell the Company in writing if a family member, relative, or close associate works in digital marketing, web, SEO, sales, or a related field.',
+      'Update that disclosure whenever it changes.',
+      'Prospect pricing, client commercial terms, and pipeline data must not be shared with anyone, including family.',
+      'Hiding a conflict, or sharing that information, is gross misconduct and can end employment immediately.',
+    ],
   },
   {
-    id: 'conduct',
-    text: 'I will follow the Company’s attendance, portal, POSH, IT security, and communication policies in the document pack.',
+    id: 'leave',
+    title: 'Leave & Attendance',
+    text: 'I understand the leave policy (1 CL + 1 SL + 1 WFH per month), attendance requirements (Mon–Sat, 9:30–6:30), and that I must submit daily scrum updates and EOD reports on the THEC Employee Portal.',
+    brief: [
+      'Casual leave: 1 day a month. Sick leave: 1 day a month. Work from home: 1 day a month, requested on the portal 3 days ahead.',
+      'Unused casual leave becomes earned leave. Leave starts from the sixth month, not from the joining date.',
+      'Working days are Monday to Saturday, 9:30 AM – 6:30 PM. Lunch is 1:00 PM – 1:45 PM. Grace is 15 minutes.',
+      'Mark attendance daily. Scrum is due by 10:00 AM and the EOD report by 6:30 PM. Missing these is a disciplinary matter.',
+      'Loss of pay is monthly CTC ÷ 26 for each unpaid day. More than 3 loss-of-pay days in a month leads to a review.',
+    ],
+  },
+  {
+    id: 'posh',
+    title: 'POSH Policy',
+    text: 'I have read and understood the Prevention of Sexual Harassment (POSH) Policy and commit to maintaining a harassment-free workplace. I am aware of the ICC process.',
+    brief: [
+      'Sexual harassment is not allowed, in the office, at client sites, at events, or on digital channels. This applies to every employee, including remote staff.',
+      'It covers unwelcome physical, verbal, or non-verbal conduct of a sexual nature.',
+      'Report what you see or experience to the Internal Complaints Committee. A written complaint is due within 3 months. The inquiry is completed within 60 days.',
+      'Proceedings stay confidential. Retaliation is misconduct. A knowingly false complaint is also misconduct.',
+      'A proven case can lead to termination and may be reported to law enforcement.',
+    ],
+  },
+  {
+    id: 'technology',
+    title: 'Technology & Security',
+    text: 'I will not input client data into public AI tools, will use 2FA on all company accounts, and will not share client information via personal email or cloud accounts.',
+    brief: [
+      'Company devices and accounts are for work only. Do not share logins, and use a unique password of at least 12 characters.',
+      'Turn on two-factor authentication for every Company account, including on a personal device.',
+      'Do not store client data on a personal device, personal email, or personal cloud, and do not forward client mail to a personal account.',
+      'AI tools may be used for research and drafts. Do not type client names or client data into a public AI tool, and review any AI output before it goes to a client.',
+      'Report phishing at once. Report a lost or stolen Company device within 1 hour.',
+    ],
+  },
+  {
+    id: 'ip',
+    title: 'IP & Work Product',
+    text: 'I understand all work I create during my employment belongs to the Company or its clients. I waive moral rights over all work product.',
+    brief: [
+      'Creatives, code, copy, strategies, and other deliverables made for the Company or its clients belong to the Company or the client.',
+      'This includes work done outside office hours when it relates to the Company’s business or clients.',
+      'You waive moral rights in that work to the extent Indian law allows.',
+      'Any work you already owned before joining must be declared in writing. If you do not declare it and use it in Company work, it is treated as assigned to the Company.',
+    ],
+  },
+  {
+    id: 'documentPack',
+    title: '',
+    text: 'I confirm I have read the full onboarding document pack provided to me — including all 3 documents (Employment Agreement, Legal Agreements & HR Records, Employee Handbook) — and agree to be bound by all terms therein.',
+    brief: [
+      'Document 1, Employment Agreement Pack: offer letter, appointment agreement, job description, and probation terms.',
+      'Document 2, Legal Agreements & HR Records: NDA, confidentiality, data protection, IP, conflict of interest, KYC, bank details, and emergency contact.',
+      'Document 3, Employee Handbook: leave, attendance, POSH, IT and AI security, KRA and KPI, the 30/60/90-day plan, and disciplinary rules.',
+    ],
   },
 ]
+
+export function policyBrief(item, employment = {}) {
+  if (item.id !== 'employmentAgreement') return item.brief || []
+  const role = [employment.designation, employment.department].filter(Boolean).join(' in ') || 'the role in your offer'
+  const manager = employment.reportingManager || 'your reporting manager'
+  const joining = employment.dateOfJoining || 'your joining date'
+  const mode = employment.workMode || 'the work mode set by HR'
+  const probation = employment.probationPeriod || 'the period in your offer'
+  return [
+    `You are appointed as ${role}, reporting to ${manager}, from ${joining}. Work mode: ${mode}.`,
+    `Probation is ${probation}. Notice is 30 days during probation and 60 days after confirmation. Confirmation is the Company’s decision.`,
+    'Hours are Monday to Saturday, 9:30 AM – 6:30 PM. Daily attendance, scrum, and EOD reports on the THEC portal are required.',
+    'For 18 months after you leave, do not solicit Company clients you dealt with. For 12 months, do not recruit Company employees.',
+  ]
+}
+
+export function policyLabel(item) {
+  return item.title ? `${item.title} — ${item.text}` : item.text
+}
 
 const EMPTY_ANSWERS = {
   personal: {
