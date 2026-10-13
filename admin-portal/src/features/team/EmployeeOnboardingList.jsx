@@ -178,7 +178,10 @@ export const EmployeeOnboardingList = () => {
                   </td>
                   <td className="px-4 py-3 font-mono text-sm text-fg break-all">{password || 'Not saved'}</td>
                   <td className="px-4 py-3">
-                    <div className="flex flex-col items-end gap-2">
+                    <div className="flex items-center justify-end gap-2">
+                      <Link to={`/team/onboarding/${row.id}`}>
+                        <Button type="button" variant="secondary" size="sm">Open</Button>
+                      </Link>
                       <Button
                         type="button"
                         variant="danger"

@@ -1,30 +1,26 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { TeamSubNav } from './components/TeamSubNav'
+import { HandbookFields, emptyKra } from './components/HandbookFields'
 import { getDepartments } from './services/teamService'
 import { createEmployeeOnboarding } from './services/employeeOnboardingService'
 import {
-  CUSTOM_KRA_TARGET,
   DEFAULT_LEARNING_PLAN,
-  FIXED_KRAS,
   PROBATION_PERIODS,
   WORK_MODES,
-  customKraWeight,
   defaultReviews,
+  handbookPayload,
+  handbookValidationError,
   isValidJoiningUsername,
   joiningPageUrl,
-  learningPoints,
   normalizeJoiningUsername,
 } from '../../../../shared/supabase/employeeOnboarding.js'
-import { Plus, Trash2 } from 'lucide-react'
 
 const FALLBACK_DEPARTMENTS = ['Sales', 'Engineering & Product', 'Operations', 'Human Resources']
-
-const emptyKra = (weight) => ({ keyResultArea: '', kpi: '', weight })
 
 export const EmployeeOnboardingSetup = ({ embedded = false, onClose, onCreated }) => {
   const [departments, setDepartments] = useState(FALLBACK_DEPARTMENTS)
@@ -63,8 +59,6 @@ export const EmployeeOnboardingSetup = ({ embedded = false, onClose, onCreated }
       .catch(() => {})
   }, [])
 
-  const weight = useMemo(() => customKraWeight(kras), [kras])
-
   useEffect(() => {
     const next = defaultReviews(employment)
     setReviews((current) => current.map((row) => {
@@ -79,10 +73,6 @@ export const EmployeeOnboardingSetup = ({ embedded = false, onClose, onCreated }
 
   const setField = (key, value) => setEmployment((current) => ({ ...current, [key]: value }))
 
-  const updateKra = (index, key, value) => {
-    setKras((current) => current.map((row, i) => (i === index ? { ...row, [key]: value } : row)))
-  }
-
   const handleSubmit = async (event) => {
     event.preventDefault()
     setError('')
@@ -95,44 +85,19 @@ export const EmployeeOnboardingSetup = ({ embedded = false, onClose, onCreated }
       setError('Password must be at least 6 characters.')
       return
     }
-    const incompletePhase = learningPlan.find((phase) => !phase.title.trim() || learningPoints(phase.points).length === 0)
-    if (incompletePhase) {
-      setError(`Add a title and at least one task for ${incompletePhase.label}. Put each task on its own line.`)
+    const handbookError = handbookValidationError({ kras, learningPlan, reviews })
+    if (handbookError) {
+      setError(handbookError)
       return
     }
-    const incompleteReview = reviews.find((review) => !String(review.focus || '').trim())
-    if (incompleteReview) {
-      setError(`Add the focus for ${incompleteReview.review}.`)
-      return
-    }
-    if (Math.abs(weight - CUSTOM_KRA_TARGET) > 0.001) {
-      const gap = Math.abs(weight - CUSTOM_KRA_TARGET)
-      const direction = weight > CUSTOM_KRA_TARGET ? 'Reduce' : 'Increase'
-      setError(`Editable KRA weights total ${weight}%. ${direction} them by ${gap}% so they total ${CUSTOM_KRA_TARGET}%. Portal Compliance and Client Satisfaction already take 10% each.`)
-      return
-    }
+    const handbook = handbookPayload({ kras, learningPlan, reviews })
     setSaving(true)
     try {
       const result = await createEmployeeOnboarding({
         username: login,
         password,
         employment,
-        kras: kras.map((row) => ({
-          keyResultArea: row.keyResultArea.trim(),
-          kpi: row.kpi.trim(),
-          weight: Number(row.weight),
-        })),
-        learningPlan: learningPlan.map((phase) => ({
-          ...phase,
-          title: phase.title.trim(),
-          points: learningPoints(phase.points),
-        })),
-        reviews: reviews.map((review) => ({
-          ...review,
-          review: review.review.trim(),
-          reviewer: review.reviewer.trim(),
-          focus: review.focus.trim(),
-        })),
+        ...handbook,
       })
       const createdRow = { ...result, username: login, password, url: joiningPageUrl() }
       setCreated(createdRow)
@@ -243,183 +208,15 @@ export const EmployeeOnboardingSetup = ({ embedded = false, onClose, onCreated }
           </div>
         </Card>
 
-        <Card>
-          <p className="text-xs font-semibold uppercase tracking-wide text-accent mb-1">KRA / KPI</p>
-          <p className="text-sm text-muted mb-4">These will appear in the performance section of the document pack.</p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-accent text-white text-xs">
-                <tr>
-                  <th className="text-left px-3 py-2 font-semibold">Key Result Area</th>
-                  <th className="text-left px-3 py-2 font-semibold">KPI / Metric</th>
-                  <th className="text-left px-3 py-2 font-semibold w-28">Weight</th>
-                  <th className="w-12" />
-                </tr>
-              </thead>
-              <tbody>
-                {kras.map((row, index) => (
-                  <tr key={index} className="border-t border-border">
-                    <td className="p-2">
-                      <input
-                        className="w-full rounded-lg border border-border bg-surface px-2 py-1.5"
-                        placeholder="e.g. Prospect Generation"
-                        value={row.keyResultArea}
-                        onChange={(e) => updateKra(index, 'keyResultArea', e.target.value)}
-                        required
-                      />
-                    </td>
-                    <td className="p-2">
-                      <input
-                        className="w-full rounded-lg border border-border bg-surface px-2 py-1.5"
-                        placeholder="e.g. 10 qualified calls/month"
-                        value={row.kpi}
-                        onChange={(e) => updateKra(index, 'kpi', e.target.value)}
-                        required
-                      />
-                    </td>
-                    <td className="p-2">
-                      <input
-                        type="number"
-                        min="1"
-                        max="80"
-                        className="w-full rounded-lg border border-border bg-surface px-2 py-1.5"
-                        value={row.weight}
-                        onChange={(e) => updateKra(index, 'weight', e.target.value)}
-                        required
-                      />
-                    </td>
-                    <td className="p-2">
-                      <button
-                        type="button"
-                        className="text-rose-600 p-1 cursor-pointer disabled:cursor-not-allowed"
-                        aria-label="Remove KRA row"
-                        onClick={() => setKras((current) => current.filter((_, i) => i !== index))}
-                        disabled={kras.length === 1}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {FIXED_KRAS.map((kra) => (
-                  <tr key={kra.keyResultArea} className="border-t border-border bg-chrome/60 text-muted">
-                    <td className="px-3 py-2">{kra.keyResultArea}</td>
-                    <td className="px-3 py-2">{kra.kpi}</td>
-                    <td className="px-3 py-2">{kra.weight}%</td>
-                    <td />
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="flex items-center justify-between mt-4 gap-3">
-            <Button type="button" variant="outline" icon={Plus} onClick={() => setKras((current) => [...current, emptyKra('')])}>
-              Add KRA row
-            </Button>
-            <p className={`text-xs text-right ${weight === CUSTOM_KRA_TARGET ? 'text-muted' : 'text-rose-600'}`}>
-              {weight === CUSTOM_KRA_TARGET
-                ? `Editable rows total ${weight}%. With the two locked 10% rows, the scorecard is 100%.`
-                : `Editable rows total ${weight}%. They need to total ${CUSTOM_KRA_TARGET}% (${weight > CUSTOM_KRA_TARGET ? `${weight - CUSTOM_KRA_TARGET}% too high` : `${CUSTOM_KRA_TARGET - weight}% too low`}). The locked rows already use 20%.`}
-            </p>
-          </div>
-        </Card>
-
-        <Card>
-          <p className="text-xs font-semibold uppercase tracking-wide text-accent mb-1">30/60/90-day learning plan</p>
-          <p className="text-sm text-muted mb-4">These tasks appear in the handbook under the learning plan. Put one task on each line.</p>
-          <div className="space-y-4">
-            {learningPlan.map((phase, index) => (
-              <div key={phase.id} className="rounded-xl border border-border p-3 space-y-2">
-                <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2">
-                  <input
-                    className="w-full rounded-lg border border-border bg-surface px-2 py-1.5 text-sm"
-                    value={phase.label}
-                    onChange={(e) => setLearningPlan((current) => current.map((row, i) => (i === index ? { ...row, label: e.target.value } : row)))}
-                    required
-                  />
-                  <input
-                    className="w-full rounded-lg border border-border bg-surface px-2 py-1.5 text-sm"
-                    placeholder="Phase title"
-                    value={phase.title}
-                    onChange={(e) => setLearningPlan((current) => current.map((row, i) => (i === index ? { ...row, title: e.target.value } : row)))}
-                    required
-                  />
-                </div>
-                <textarea
-                  className="w-full min-h-24 rounded-lg border border-border bg-surface px-2 py-1.5 text-sm"
-                  placeholder={'One task per line\nReview the current projects and tech stack'}
-                  value={phase.points}
-                  onChange={(e) => setLearningPlan((current) => current.map((row, i) => (i === index ? { ...row, points: e.target.value } : row)))}
-                  required
-                />
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card>
-          <p className="text-xs font-semibold uppercase tracking-wide text-accent mb-1">Review schedule</p>
-          <p className="text-sm text-muted mb-4">Dates follow the joining date and probation until you change them. This table is printed in the handbook.</p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-accent text-white text-xs">
-                <tr>
-                  <th className="text-left px-3 py-2 font-semibold">Review</th>
-                  <th className="text-left px-3 py-2 font-semibold">Target date</th>
-                  <th className="text-left px-3 py-2 font-semibold">Reviewer</th>
-                  <th className="text-left px-3 py-2 font-semibold">Focus</th>
-                </tr>
-              </thead>
-              <tbody>
-                {reviews.map((review, index) => (
-                  <tr key={review.id} className="border-t border-border align-top">
-                    <td className="p-2">
-                      <input
-                        className="w-full min-w-36 rounded-lg border border-border bg-surface px-2 py-1.5"
-                        value={review.review}
-                        onChange={(e) => setReviews((current) => current.map((row, i) => (i === index ? { ...row, review: e.target.value } : row)))}
-                        required
-                      />
-                    </td>
-                    <td className="p-2">
-                      <input
-                        type="date"
-                        className="w-full rounded-lg border border-border bg-surface px-2 py-1.5"
-                        value={review.date}
-                        onChange={(e) => {
-                          reviewTouched.current[`${review.id}:date`] = true
-                          setReviews((current) => current.map((row, i) => (i === index ? { ...row, date: e.target.value } : row)))
-                        }}
-                        required
-                      />
-                    </td>
-                    <td className="p-2">
-                      <input
-                        className="w-full min-w-40 rounded-lg border border-border bg-surface px-2 py-1.5"
-                        value={review.reviewer}
-                        onChange={(e) => {
-                          reviewTouched.current[`${review.id}:reviewer`] = true
-                          setReviews((current) => current.map((row, i) => (i === index ? { ...row, reviewer: e.target.value } : row)))
-                        }}
-                        required
-                      />
-                    </td>
-                    <td className="p-2">
-                      <textarea
-                        className="w-full min-w-52 min-h-16 rounded-lg border border-border bg-surface px-2 py-1.5"
-                        placeholder="What this review covers"
-                        value={review.focus}
-                        onChange={(e) => setReviews((current) => current.map((row, i) => (i === index ? { ...row, focus: e.target.value } : row)))}
-                        required
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-
+        <HandbookFields
+          kras={kras}
+          setKras={setKras}
+          learningPlan={learningPlan}
+          setLearningPlan={setLearningPlan}
+          reviews={reviews}
+          setReviews={setReviews}
+          onReviewTouch={(key) => { reviewTouched.current[key] = true }}
+        />
         {error && <p className="text-sm text-rose-600">{error}</p>}
         <Button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save & create joining login'}</Button>
       </form>

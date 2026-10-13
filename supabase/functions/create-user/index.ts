@@ -98,7 +98,7 @@ function sanitizeReviews(raw: unknown) {
 }
 
 function kraError(rows: unknown) {
-  if (!Array.isArray(rows) || rows.length === 0) return 'Add at least one KRA row'
+  if (!Array.isArray(rows) || rows.length === 0) return ''
   let total = 0
   for (const raw of rows) {
     const row = raw as { keyResultArea?: string; kpi?: string; weight?: number }

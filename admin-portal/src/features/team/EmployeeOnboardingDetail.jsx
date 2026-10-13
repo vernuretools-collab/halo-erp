@@ -5,10 +5,11 @@ import { Button } from '../../components/ui/Button'
 import { Badge } from '../../components/ui/Badge'
 import { Modal } from '../../components/ui/Modal'
 import { TeamSubNav } from './components/TeamSubNav'
-import { deleteEmployeeOnboarding, getEmployeeOnboarding } from './services/employeeOnboardingService'
+import { deleteEmployeeOnboarding, getEmployeeOnboarding, updateEmployeeHandbook } from './services/employeeOnboardingService'
+import { HandbookEditor } from './components/HandbookFields'
 import { downloadAllOnboardingPacks, downloadEmploymentPack, downloadHandbookPack, downloadLegalPack, hasIssuedAssets } from './services/onboardingPacks'
 import { OnboardingPackViewer } from '../../../../shared/onboarding/OnboardingPackViewer.jsx'
-import { FIXED_KRAS, ONBOARDING_STATUS, joiningPageUrl } from '../../../../shared/supabase/employeeOnboarding.js'
+import { ONBOARDING_STATUS, joiningPageUrl } from '../../../../shared/supabase/employeeOnboarding.js'
 import haloLogo from '../../assets/halologo.png'
 import { KYC_DOCUMENTS, POLICY_ITEMS, declarationText, policyLabel } from '../../../../shared/supabase/joiningForm.js'
 import { ArrowLeft, Copy, Trash2 } from 'lucide-react'
@@ -93,8 +94,6 @@ export const EmployeeOnboardingDetail = () => {
   }, [id])
 
   const employment = row?.employment || {}
-  const customKras = row?.kras?.custom || []
-  const fixedKras = row?.kras?.fixed?.length ? row.kras.fixed : FIXED_KRAS
   const answers = row?.answers && typeof row.answers === 'object' ? row.answers : {}
   const personal = answers.personal || {}
   const bank = answers.bank || {}
@@ -103,8 +102,16 @@ export const EmployeeOnboardingDetail = () => {
   const policies = answers.policies || {}
   const documents = Array.isArray(row?.documents) ? row.documents : []
   const submitted = row?.status === ONBOARDING_STATUS.SUBMITTED
-  const kraRows = [...customKras, ...fixedKras]
-  const kraTotal = kraRows.reduce((sum, kra) => sum + (Number(kra.weight) || 0), 0)
+
+  const saveHandbook = async (payload) => {
+    const handbook = await updateEmployeeHandbook({
+      id: row.id,
+      authId: row.auth_id,
+      ...payload,
+    })
+    const fresh = await getEmployeeOnboarding(row.id)
+    setRow({ ...(fresh || row), kras: handbook })
+  }
 
   const copyLink = async () => {
     try {
@@ -174,37 +181,7 @@ export const EmployeeOnboardingDetail = () => {
             </div>
           </Card>
 
-          <Card className="p-0 overflow-hidden">
-            <div className="flex items-center justify-between px-5 pt-5 pb-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-accent">KRA / KPI</p>
-              <p className="text-xs text-muted">Total {kraTotal}%</p>
-            </div>
-            <table className="w-full text-sm">
-              <thead className="bg-chrome text-muted text-xs">
-                <tr>
-                  <th className="text-left px-4 py-2 font-semibold">Key Result Area</th>
-                  <th className="text-left px-4 py-2 font-semibold">KPI / Metric</th>
-                  <th className="text-left px-4 py-2 font-semibold">Weight</th>
-                </tr>
-              </thead>
-              <tbody>
-                {customKras.map((kra, index) => (
-                  <tr key={`custom-${index}`} className="border-t border-border">
-                    <td className="px-4 py-2">{kra.keyResultArea || '—'}</td>
-                    <td className="px-4 py-2">{kra.kpi || '—'}</td>
-                    <td className="px-4 py-2">{kra.weight}%</td>
-                  </tr>
-                ))}
-                {fixedKras.map((kra) => (
-                  <tr key={kra.keyResultArea} className="border-t border-border bg-chrome/40">
-                    <td className="px-4 py-2">{kra.keyResultArea}</td>
-                    <td className="px-4 py-2">{kra.kpi}</td>
-                    <td className="px-4 py-2">{kra.weight}%</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
+          <HandbookEditor key={row.id} record={row} onSave={saveHandbook} />
 
           {!submitted && (
             <Card>

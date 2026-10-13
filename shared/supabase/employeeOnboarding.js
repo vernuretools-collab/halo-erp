@@ -117,6 +117,81 @@ export function learningPoints(value) {
   return String(value || '').split(/\n+/).map((item) => item.trim()).filter(Boolean)
 }
 
+export function kraRowStarted(row) {
+  return Boolean(String(row?.keyResultArea || '').trim() || String(row?.kpi || '').trim())
+}
+
+function learningPhaseStarted(phase) {
+  const defaults = DEFAULT_LEARNING_PLAN.find((item) => item.id === phase?.id)
+  const title = String(phase?.title || '').trim()
+  const label = String(phase?.label || '').trim()
+  if (learningPoints(phase?.points).length > 0) return true
+  if (!defaults) return Boolean(title || label)
+  return title !== defaults.title || label !== defaults.label
+}
+
+export function handbookValidationError({ kras = [], learningPlan = [], reviews = [] } = {}) {
+  if (kras.some(kraRowStarted)) {
+    for (const row of kras) {
+      const area = String(row?.keyResultArea || '').trim()
+      const kpi = String(row?.kpi || '').trim()
+      const weight = Number(row?.weight)
+      if (!area || !kpi) return 'Each KRA needs an area and a metric. Remove blank rows, or leave every row blank to add them later.'
+      if (!Number.isFinite(weight) || weight <= 0) return 'Each KRA weight must be greater than 0.'
+    }
+    const weight = customKraWeight(kras)
+    if (Math.abs(weight - CUSTOM_KRA_TARGET) > 0.001) {
+      const gap = Math.abs(weight - CUSTOM_KRA_TARGET)
+      const direction = weight > CUSTOM_KRA_TARGET ? 'Reduce' : 'Increase'
+      return `Editable KRA weights total ${weight}%. ${direction} them by ${gap}% so they total ${CUSTOM_KRA_TARGET}%. Portal Compliance and Client Satisfaction already take 10% each.`
+    }
+  }
+
+  const incompletePhase = (learningPlan || []).find((phase) => {
+    if (!learningPhaseStarted(phase)) return false
+    return !String(phase?.title || '').trim() || learningPoints(phase?.points).length === 0
+  })
+  if (incompletePhase) {
+    return `Add a title and at least one task for ${incompletePhase.label || 'this phase'}. Put each task on its own line.`
+  }
+
+  if ((reviews || []).some((review) => String(review?.focus || '').trim())) {
+    const incompleteReview = reviews.find((review) => !String(review?.review || '').trim() || !String(review?.focus || '').trim())
+    if (incompleteReview) return `Add the focus for ${incompleteReview.review || 'each review'}.`
+  }
+
+  return ''
+}
+
+export function handbookPayload({ kras = [], learningPlan = [], reviews = [] } = {}) {
+  const kraStarted = kras.some(kraRowStarted)
+  const planStarted = (learningPlan || []).some(learningPhaseStarted)
+  return {
+    kras: kraStarted
+      ? kras.map((row) => ({
+        keyResultArea: String(row.keyResultArea || '').trim(),
+        kpi: String(row.kpi || '').trim(),
+        weight: Number(row.weight),
+      }))
+      : [],
+    learningPlan: planStarted
+      ? learningPlan.map((phase) => ({
+        id: phase.id || '',
+        label: String(phase.label || '').trim(),
+        title: String(phase.title || '').trim(),
+        points: learningPoints(phase.points),
+      }))
+      : [],
+    reviews: (reviews || []).map((review) => ({
+      id: review.id || '',
+      review: String(review.review || '').trim(),
+      date: String(review.date || '').trim(),
+      reviewer: String(review.reviewer || '').trim(),
+      focus: String(review.focus || '').trim(),
+    })),
+  }
+}
+
 export function joiningPageUrl() {
   if (typeof window === 'undefined') return 'http://localhost:3002/joining'
   const { protocol, hostname, port } = window.location

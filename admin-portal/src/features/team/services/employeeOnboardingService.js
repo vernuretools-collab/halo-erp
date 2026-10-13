@@ -285,6 +285,40 @@ export async function createEmployeeOnboarding({ username, password, employment,
   return { ...created, ...viaFunction, id: recordId, uid: authId, username, email, kras: handbook }
 }
 
+export async function updateEmployeeHandbook({ id, authId, kras, learningPlan, reviews }) {
+  const handbook = handbookKras({ kras, learningPlan, reviews })
+  const now = new Date().toISOString()
+  let saved = false
+  if (id) {
+    const { data, error } = await supabase.from('employee_onboarding').update({ kras: handbook, updated_at: now }).eq('id', id).select('id')
+    if (error) throw error
+    saved = Boolean(data?.length)
+  }
+  if (!saved && authId) {
+    const { data, error } = await supabase.from('employee_onboarding').update({ kras: handbook, updated_at: now }).eq('auth_id', authId).select('id')
+    if (error) throw error
+    saved = Boolean(data?.length)
+  }
+
+  const profileIds = [...new Set([authId, id].filter(Boolean))]
+  let profileSaved = false
+  for (const profileId of profileIds) {
+    const { data: profile, error: readErr } = await supabase.from('profiles').select('id, data').eq('id', profileId).maybeSingle()
+    if (readErr) throw readErr
+    if (!profile) continue
+    const current = profile.data && typeof profile.data === 'object' ? profile.data : {}
+    const { error } = await supabase.from('profiles').update({
+      data: { ...current, kras: handbook },
+      updated_at: now,
+    }).eq('id', profile.id)
+    if (error) throw error
+    profileSaved = true
+  }
+
+  if (!saved && !profileSaved) throw new Error('Could not save the handbook on this record.')
+  return handbook
+}
+
 export async function deleteEmployeeOnboarding(id) {
   const record = await getEmployeeOnboarding(id)
   if (!record) throw new Error('Onboarding record not found')
