@@ -17,8 +17,16 @@ function pick(obj, keys) {
   return out
 }
 
+function localDateKey(date = new Date()) {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
 export async function buildAssistantSnapshot() {
   const month = currentMonthStr()
+  const today = localDateKey()
   const [employees, attendanceLogs, leaveRequests, timelineEntries, projects, leads, invoices] =
     await Promise.all([
       getEmployees().catch(() => []),
@@ -50,12 +58,30 @@ export async function buildAssistantSnapshot() {
 
   return {
     month,
+    today,
     employees: (employees || []).slice(0, 80).map((e) =>
-      pick(e, ['uid', 'employeeId', 'displayName', 'name', 'email', 'departmentName', 'roleName', 'status', 'joinedAt'])
+      pick(e, ['uid', 'employeeId', 'displayName', 'name', 'email', 'departmentName', 'role', 'roleName', 'accountType', 'status', 'joinedAt'])
     ),
-    attendanceLogs: (attendanceLogs || []).slice(0, 400).map((l) =>
-      pick(l, ['uid', 'date', 'present', 'onDuty', 'clockedIn', 'clockInTime', 'clockOutTime', 'source', 'regularSeconds'])
-    ),
+    attendanceLogs: (attendanceLogs || [])
+      .slice()
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+      .slice(0, 400)
+      .map((l) => ({
+        ...pick(l, [
+          'uid',
+          'date',
+          'present',
+          'onDuty',
+          'clockedIn',
+          'clockInTime',
+          'clockOutTime',
+          'source',
+          'regularSeconds',
+          'isOnBreak',
+          'departmentName',
+        ]),
+        employeeName: l.employeeName || l.displayName || nameByUid[String(l.uid || '')] || '',
+      })),
     leaveRequests: (leaveRequests || []).slice(0, 200).map((l) =>
       pick(l, [
         'employeeId',
@@ -68,7 +94,11 @@ export async function buildAssistantSnapshot() {
         'endDate',
       ])
     ),
-    timelineEntries: (timelineEntries || []).slice(0, 300).map((e) => ({
+    timelineEntries: (timelineEntries || [])
+      .slice()
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+      .slice(0, 300)
+      .map((e) => ({
       uid: e.uid || '',
       employeeName: e.employeeName || nameByUid[String(e.uid || '')] || '',
       date: e.date || '',
@@ -114,7 +144,7 @@ export function matchEmployees(employees, message) {
   )
 }
 
-function samePerson(row, people) {
+export function samePerson(row, people) {
   const ids = new Set(
     people.flatMap((person) => [person.uid, person.employeeId].filter(Boolean).map(String))
   )
@@ -133,16 +163,18 @@ export function focusSnapshot(snapshot, message) {
   if (!snapshot) return snapshot
   const q = String(message || '').toLowerCase()
   const people = matchEmployees(snapshot.employees, message)
+  const day = /\btoday\b/.test(q) ? snapshot.today || '' : ''
+  const onDay = (row) => !day || String(row?.date || '') === day
   const wantsLeads = /lead|pipeline|deal/.test(q)
   const wantsInvoices = /invoice|unpaid|payment|due/.test(q)
   const wantsProjects = /project|assigned|member/.test(q)
   const focusedPeople = people.length ? people : (snapshot.employees || []).slice(0, 30)
 
-  const timeline = (snapshot.timelineEntries || []).filter((row) =>
-    people.length ? samePerson(row, people) : true
+  const timeline = (snapshot.timelineEntries || []).filter(
+    (row) => onDay(row) && (people.length ? samePerson(row, people) : true)
   )
-  const attendance = (snapshot.attendanceLogs || []).filter((row) =>
-    people.length ? samePerson(row, people) : true
+  const attendance = (snapshot.attendanceLogs || []).filter(
+    (row) => onDay(row) && (people.length ? samePerson(row, people) : true)
   )
   const leave = (snapshot.leaveRequests || []).filter((row) =>
     people.length ? samePerson(row, people) : true
@@ -157,6 +189,7 @@ export function focusSnapshot(snapshot, message) {
 
   return {
     month: snapshot.month,
+    today: snapshot.today || '',
     employees: focusedPeople.slice(0, people.length ? people.length : 30),
     attendanceLogs: attendance.slice(0, 120),
     leaveRequests: leave.slice(0, 80),

@@ -149,18 +149,11 @@ export const distanceMeters = (lat1, lng1, lat2, lng2) => {
 }
 
 export const isWithinOfficeRadius = (userLat, userLng, office, accuracy = 0) => {
-  if (userLat == null || userLng == null) return false
-  const radius = Math.max(50, Number(office?.radiusMeters) || 200)
-  const acc = Math.max(0, Number(accuracy) || 0)
-  const allowed = radius + acc
-  const pins = [
-    [office?.lat, office?.lng],
-    [office?.networkLat, office?.networkLng],
-  ]
-  return pins.some(([lat, lng]) => {
-    if (lat == null || lng == null) return false
-    return distanceMeters(userLat, userLng, lat, lng) <= allowed
-  })
+  if (userLat == null || userLng == null || office?.lat == null || office?.lng == null) return false
+  const radius = Math.max(50, Number(office?.radiusMeters) || 50)
+  // GPS jitter only. A poor Wi-Fi fix must not stretch the office fence.
+  const acc = Math.min(20, Math.max(0, Number(accuracy) || 0))
+  return distanceMeters(userLat, userLng, office.lat, office.lng) <= radius + acc
 }
 
 const geoErrorMessage = (err) => {
@@ -200,14 +193,8 @@ export const getCurrentPositionCoords = (options = { enableHighAccuracy: true, t
   })
 
 const nearestOfficeDistance = (lat, lng, office) => {
-  const pins = [
-    [office?.lat, office?.lng],
-    [office?.networkLat, office?.networkLng],
-  ]
-  const distances = pins
-    .filter(([pLat, pLng]) => pLat != null && pLng != null)
-    .map(([pLat, pLng]) => distanceMeters(lat, lng, pLat, pLng))
-  return distances.length ? Math.min(...distances) : Infinity
+  if (office?.lat == null || office?.lng == null) return Infinity
+  return distanceMeters(lat, lng, office.lat, office.lng)
 }
 
 const collectClockInCoords = async (office) => {

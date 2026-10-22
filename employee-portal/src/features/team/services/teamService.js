@@ -237,23 +237,18 @@ export const subscribeToWfhPolicy = (callback) => {
 const DEFAULT_OFFICE_LOCATION = {
   lat: null,
   lng: null,
-  networkLat: null,
-  networkLng: null,
-  radiusMeters: 200,
+  radiusMeters: 50,
   label: 'Office',
 }
 
 export const normalizeOfficeLocation = (data) => {
   const lat = data?.lat != null ? Number(data.lat) : null
   const lng = data?.lng != null ? Number(data.lng) : null
-  const networkLat = data?.networkLat != null ? Number(data.networkLat) : null
-  const networkLng = data?.networkLng != null ? Number(data.networkLng) : null
-  const radiusMeters = Math.max(50, Number(data?.radiusMeters) || DEFAULT_OFFICE_LOCATION.radiusMeters)
+  let radiusMeters = Math.max(50, Number(data?.radiusMeters) || DEFAULT_OFFICE_LOCATION.radiusMeters)
+  if (radiusMeters === 5000) radiusMeters = 50
   return {
     lat: Number.isFinite(lat) ? lat : null,
     lng: Number.isFinite(lng) ? lng : null,
-    networkLat: Number.isFinite(networkLat) ? networkLat : null,
-    networkLng: Number.isFinite(networkLng) ? networkLng : null,
     radiusMeters,
     label: data?.label || 'Office',
     updatedBy: data?.updatedBy || null,

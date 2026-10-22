@@ -31,8 +31,8 @@ export function AssistantChat({ messages, loading, error, onSend, onClear, compa
                 <Sparkles className="w-4 h-4" />
               </div>
               <p>
-                Ask about attendance, WFH, leave, timelines, projects, leads, or invoices. Answers
-                come from live CRM data.
+                Ask who is present, late, or on break, which projects and clients are active, which
+                team is on the portal, or for a timesheet. Those answers come from live records.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">

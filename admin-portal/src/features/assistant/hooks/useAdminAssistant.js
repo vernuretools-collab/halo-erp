@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { askAdminAssistant } from '../services/assistantService'
+import { downloadTimesheetPdf } from '../services/operationalReports'
 
 const STORAGE_KEY = 'admin-assistant-v1'
 
@@ -15,13 +16,11 @@ function loadMessages() {
 }
 
 export const SUGGESTED_QUESTIONS = [
-  'How many employees are present today?',
-  'How many days was this employee absent this month?',
-  'How many WFH days did this employee take this month?',
-  'Show timeline hours for this employee this month',
-  'Which projects is this employee assigned to?',
-  'How many open leads are in the pipeline?',
-  'Which invoices are unpaid?',
+  'What projects are going on, and for which client?',
+  'Which team is using the portal today?',
+  'Who is present, who is late, and who is on break?',
+  "What is today's timesheet for Deepan?",
+  'Download all employee timesheets as a PDF',
 ]
 
 export function useAdminAssistant() {
@@ -47,6 +46,7 @@ export function useAdminAssistant() {
     try {
       const history = [...messages, userMsg]
       const data = await askAdminAssistant(message, history)
+      if (data.pdfRows?.length) downloadTimesheetPdf(data.pdfRows, data.today)
       setMessages((prev) => [
         ...prev,
         {
@@ -60,7 +60,7 @@ export function useAdminAssistant() {
       const code = err?.code || ''
       let msg = err?.message || 'Assistant request failed.'
       if (code === 'functions/failed-precondition' || /GEMINI_API_KEY/i.test(msg)) {
-        msg = 'Gemini is not configured. Set GEMINI_API_KEY with firebase functions:secrets:set and deploy functions.'
+        msg = 'The AI key is not set. Add GEMINI_API_KEY or OPENAI_API_KEY in Supabase Edge Function secrets, then redeploy ask-admin-assistant.'
       } else if (code === 'functions/unauthenticated') {
         msg = 'Sign in again to use the assistant.'
       } else if (code === 'functions/not-found' || /NOT_FOUND/i.test(msg)) {

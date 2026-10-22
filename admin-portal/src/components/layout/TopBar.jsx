@@ -1,6 +1,7 @@
-import React from 'react'
-import { Link } from 'react-router-dom'
-import { Bell, Search, User, Command, LogOut, Sun, Moon } from 'lucide-react'
+import React, { useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
+import { Bell, Search, User, Command, LogOut, Sun, Moon, Download, Loader2 } from 'lucide-react'
+import { exportCurrentPage } from './exportPageData'
 import { useUserStore } from '../../stores/userStore'
 import { useOrgStore } from '../../stores/orgStore'
 import { useUIStore } from '../../stores/uiStore'
@@ -12,8 +13,24 @@ export const TopBar = () => {
   const { org } = useOrgStore()
   const { theme, toggleTheme } = useUIStore()
   const { notifications, toggleOpen } = useNotificationStore()
+  const { pathname } = useLocation()
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState('')
 
   const unreadCount = notifications.filter((n) => !n.isRead).length
+
+  const handleExport = async () => {
+    if (exporting) return
+    setExporting(true)
+    setExportError('')
+    try {
+      await exportCurrentPage(pathname, { user, userDoc })
+    } catch (err) {
+      setExportError(err?.message || 'Export failed')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   return (
     <header className="h-16 bg-surface/90 backdrop-blur-md border-b border-border px-6 flex items-center justify-between sticky top-0 z-30 transition-colors">
@@ -34,6 +51,17 @@ export const TopBar = () => {
 
       {/* Right Controls */}
       <div className="flex items-center gap-3 relative">
+        <button
+          type="button"
+          onClick={handleExport}
+          disabled={exporting}
+          title={exportError || 'Download this page as CSV'}
+          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl bg-accent text-white text-xs font-semibold hover:opacity-90 disabled:opacity-60 border border-accent cursor-pointer"
+        >
+          {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+          {exporting ? 'Exporting…' : 'Export'}
+        </button>
+
         {/* Sun/Moon Theme Toggle Button */}
         <button
           onClick={toggleTheme}

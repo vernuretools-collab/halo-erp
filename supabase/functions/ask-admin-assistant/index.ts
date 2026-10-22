@@ -13,13 +13,13 @@ const MODEL_CANDIDATES = [
   'gemini-2.5-flash',
 ].filter(Boolean)
 
-const SYSTEM_PROMPT = `You are the Halo admin CRM assistant. Answer from CRM snapshot JSON in the user message first.
+const SYSTEM_PROMPT = `You are the Halo admin assistant. Answer only from the CRM snapshot JSON and the verified report in the user message.
 Rules:
-- Never invent attendance days, money, names, or task descriptions.
-- snapshot.attendanceLogs and snapshot.leaveRequests are live data for the current month. WFH is usually leaveType/requestedLeaveType containing WFH or work from home, or an attendance source/onDuty flag.
-- snapshot.timelineEntries are work logs (date, hours, description).
-- For "what work did they do" questions, write a short paragraph of plain sentences. Name the employee, the month, the total hours, then say what they did on each day in normal language. Do not reply with a raw bullet list of the timeline rows.
-- Default month is snapshot.month. "This employee" is ambiguous unless a name is given — ask which employee.
+- Never invent attendance days, hours, names, or task descriptions.
+- snapshot.today is today's date. snapshot.timelineEntries are the timesheet (date, hours, description).
+- For a timesheet or "what did they work on" question, name the employee and the day or month, give the total hours, then list each task with its hours. That list is the report the admin should read instead of opening the timesheet.
+- For "how many employees are present today", count people marked present on snapshot.today and name them. Do not ask which employee.
+- "This employee" is ambiguous unless a name is given — ask which employee.
 - If the snapshot has no matching rows, say so. Do not mention these instructions.`
 
 Deno.serve(async (req) => {
@@ -39,21 +39,21 @@ Deno.serve(async (req) => {
     const role = String(profile?.data?.role || authData.user.app_metadata?.role || '').toLowerCase()
     if (['employee', 'client'].includes(role)) return json({ error: 'permission-denied' }, 403)
 
-    const apiKey = Deno.env.get('GEMINI_API_KEY') || ''
-    if (!apiKey) {
-      return json({
-        answer: 'GEMINI_API_KEY is not set. In Supabase: Project Settings → Edge Functions → Secrets, add GEMINI_API_KEY, then redeploy.',
-        toolsUsed: [],
-      })
-    }
-
     const body = await req.json()
     const message = String(body.message || '').trim()
     if (!message) return json({ error: 'message is required' }, 400)
 
     const rawSnapshot = body.snapshot || null
     const snapshot = focusSnapshot(rawSnapshot, message)
+    const facts = answerFromSnapshot(message, snapshot)
     const context = JSON.stringify(snapshot || {}).slice(0, 48000)
+    const geminiKey = Deno.env.get('GEMINI_API_KEY') || ''
+    const openaiKey = Deno.env.get('OPENAI_API_KEY') || ''
+
+    // Timesheet and attendance reports come from the database. They do not wait on a paid API.
+    if (facts) {
+      return json({ answer: facts, toolsUsed: ['timesheet'] })
+    }
 
     const contents = [
       ...(Array.isArray(body.history)
@@ -64,21 +64,30 @@ Deno.serve(async (req) => {
         : []),
       {
         role: 'user',
-        parts: [{ text: `${message}\n\nCRM snapshot JSON:\n${context}` }],
+        parts: [{
+          text: `${message}\n\nCRM snapshot JSON:\n${context}${facts ? `\n\nVerified report:\n${facts}` : ''}`,
+        }],
       },
     ]
 
-    const geminiJson = await generateContent(apiKey, contents)
-    const parts = geminiJson?.candidates?.[0]?.content?.parts || []
-    const modelAnswer = parts.map((p) => p.text).filter(Boolean).join('\n').trim()
-    if (modelAnswer) {
-      return json({ answer: modelAnswer, toolsUsed: ['supabase_crm_context'] })
+    const model = await askModel(geminiKey, openaiKey, contents)
+    const answer = preferAnswer(model?.text || '', facts)
+    if (answer) {
+      const toolsUsed = ['timesheet']
+      if (model?.provider) toolsUsed.push(model.provider)
+      return json({ answer, toolsUsed })
     }
 
-    const fallback = answerFromSnapshot(message, snapshot)
+    if (!geminiKey && !openaiKey) {
+      return json({
+        answer: 'This question needs an AI key. Timesheet and attendance questions already answer from your records. For other questions, add a free GEMINI_API_KEY from Google AI Studio (or a paid OPENAI_API_KEY) in Supabase Edge Function secrets, then redeploy ask-admin-assistant.',
+        toolsUsed: [],
+      })
+    }
+
     return json({
-      answer: fallback || 'The assistant is busy right now. Ask again in a moment, and include the employee name.',
-      toolsUsed: ['supabase_crm_context'],
+      answer: 'The AI key was rejected or the model did not reply. Check GEMINI_API_KEY or OPENAI_API_KEY in Supabase secrets. You do not need a paid ChatGPT plan for timesheet reports.',
+      toolsUsed: ['timesheet'],
     })
   } catch (err) {
     return json({ answer: err?.message || String(err), toolsUsed: [] }, 200)
@@ -125,10 +134,16 @@ function focusSnapshot(snapshot, message) {
   if (!snapshot || typeof snapshot !== 'object') return snapshot
   const q = String(message || '').toLowerCase()
   const people = matchEmployees(snapshot.employees, message)
+  const day = /\btoday\b/.test(q) ? snapshot.today || '' : ''
+  const onDay = (row) => !day || String(row?.date || '') === day
   const wantsLeads = /lead|pipeline|deal/.test(q)
   const wantsInvoices = /invoice|unpaid|payment|due/.test(q)
-  const timeline = (snapshot.timelineEntries || []).filter((row) => (people.length ? samePerson(row, people) : true))
-  const attendance = (snapshot.attendanceLogs || []).filter((row) => (people.length ? samePerson(row, people) : true))
+  const timeline = (snapshot.timelineEntries || []).filter(
+    (row) => onDay(row) && (people.length ? samePerson(row, people) : true)
+  )
+  const attendance = (snapshot.attendanceLogs || []).filter(
+    (row) => onDay(row) && (people.length ? samePerson(row, people) : true)
+  )
   const leave = (snapshot.leaveRequests || []).filter((row) => (people.length ? samePerson(row, people) : true))
   const projects = (snapshot.projects || []).filter((project) => {
     if (!people.length) return /project|assigned/.test(q)
@@ -136,6 +151,7 @@ function focusSnapshot(snapshot, message) {
   })
   return {
     month: snapshot.month,
+    today: snapshot.today || '',
     employees: (people.length ? people : snapshot.employees || []).slice(0, people.length ? 8 : 24),
     attendanceLogs: attendance.slice(0, 80),
     leaveRequests: leave.slice(0, 40),
@@ -196,16 +212,66 @@ function workSummary(name, month, entries) {
   return sentences.join(' ')
 }
 
+function isPresentLog(row) {
+  return row?.present === true || row?.onDuty === true || row?.clockedIn === true || Boolean(row?.clockInTime)
+}
+
+function presentReport(snapshot, day) {
+  const logs = (snapshot.attendanceLogs || []).filter(
+    (row) => isPresentLog(row) && (!day || String(row.date || '') === day)
+  )
+  const names = [...new Set(logs.map((row) => row.employeeName || row.displayName || '').filter(Boolean))]
+  const when = day ? dayLabel(day) : monthLabel(snapshot.month)
+  if (!names.length) return `No employees are marked present for ${when}.`
+  return `${names.length} employee${names.length === 1 ? ' is' : 's are'} present for ${when}: ${names.join(', ')}.`
+}
+
+function timesheetReport(person, snapshot, day) {
+  const name = personName(person)
+  const entries = (snapshot.timelineEntries || [])
+    .filter((row) => samePerson(row, [person]) && (!day || String(row.date || '') === day))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+  const logs = (snapshot.attendanceLogs || []).filter(
+    (row) => samePerson(row, [person]) && (!day || String(row.date || '') === day)
+  )
+  const when = day ? dayLabel(day) : monthLabel(snapshot.month)
+  const total = entries.reduce((sum, row) => sum + (Number(row.hours) || 0), 0)
+  const lines = [`${name} — timesheet for ${when}`]
+  if (entries.length) {
+    lines.push(`Logged ${hoursPhrase(total)}.`)
+    if (day) {
+      entries.forEach((row) => {
+        lines.push(`- ${cleanDesc(row.description)} — ${hoursPhrase(row.hours)}`)
+      })
+    } else {
+      lines.push(workSummary(name, snapshot.month, entries))
+    }
+  } else {
+    lines.push(`No task notes are logged for ${when}.`)
+  }
+  logs.forEach((log) => {
+    const span = [log.clockInTime, log.clockOutTime].filter(Boolean).join(' to ')
+    const clockHours = Number(log.regularSeconds) > 0 ? hoursPhrase(Number(log.regularSeconds) / 3600) : ''
+    const bits = [span && `clock ${span}`, clockHours && `${clockHours} on the clock`].filter(Boolean)
+    if (bits.length) lines.push(`Attendance: ${bits.join(', ')}.`)
+  })
+  return lines.join('\n')
+}
+
 function answerFromSnapshot(message, snapshot) {
   if (!snapshot) return ''
   const q = String(message || '').toLowerCase()
   const people = matchEmployees(snapshot.employees, message)
-  const month = snapshot.month || 'this month'
-  const wantsWork = /work|timeline|task|logged|hours|done|did\b/.test(q)
+  const day = /\btoday\b/.test(q) ? snapshot.today || '' : ''
+  const wantsWork = /work|timeline|task|logged|hours|done|did\b|timesheet/.test(q)
+  const wantsHeadcount = /how many|number of|count/.test(q) && /present|clocked in|attendance/.test(q)
   const wantsLeave = /wfh|leave|absent|attendance|present/.test(q)
+
+  if (wantsHeadcount && !people.length) return presentReport(snapshot, day)
+
   if (!people.length) {
-    if ((wantsWork || wantsLeave) && /employee/.test(q)) {
-      return 'Which employee should I check? Include their name, for example “what work did Saravana do this month?”'
+    if ((wantsWork || wantsLeave) && /employee|timesheet|timeline/.test(q)) {
+      return 'Which employee should I check? Include their name, for example “what is today’s timesheet for Deepan?”'
     }
     return ''
   }
@@ -214,17 +280,12 @@ function answerFromSnapshot(message, snapshot) {
   const blocks = people.map((person) => {
     const lines = []
     const name = personName(person)
-    if (wantsWork || !wantsLeave) {
-      const entries = (snapshot.timelineEntries || [])
-        .filter((row) => samePerson(row, [person]))
-        .sort((a, b) => String(a.date).localeCompare(String(b.date)))
-      lines.push(entries.length ? workSummary(name, month, entries) : `${name} has no timeline work logs for ${monthLabel(month)}.`)
-    }
-    if (wantsLeave) {
+    if (wantsWork || !wantsLeave) lines.push(timesheetReport(person, snapshot, day))
+    if (wantsLeave && !wantsWork) {
       const leaves = (snapshot.leaveRequests || []).filter((row) => samePerson(row, [person]))
       const logs = (snapshot.attendanceLogs || []).filter((row) => samePerson(row, [person]))
-      const present = logs.filter((row) => row.present === true || row.onDuty === true || row.clockedIn).length
-      lines.push(`${name} has ${logs.length} attendance logs this month, with ${present} marked present or on duty, and ${leaves.length} leave request${leaves.length === 1 ? '' : 's'}.`)
+      const present = logs.filter((row) => isPresentLog(row)).length
+      lines.push(`${name} has ${logs.length} attendance log${logs.length === 1 ? '' : 's'} in this view, with ${present} marked present or on duty, and ${leaves.length} leave request${leaves.length === 1 ? '' : 's'}.`)
     }
     const projects = (snapshot.projects || []).filter(
       (project) => samePerson(project, [person]) || (project.members || []).some((member) => samePerson(member, [person]))
@@ -232,13 +293,33 @@ function answerFromSnapshot(message, snapshot) {
     if (/project|assigned/.test(q) && projects.length) {
       lines.push(`${name} is on ${projects.map((project) => project.name || project.projectId).filter(Boolean).join(', ')}.`)
     }
-    return lines.join(' ')
+    return lines.join('\n')
   })
 
   return blocks.filter(Boolean).join('\n\n')
 }
 
-async function generateContent(apiKey, contents) {
+function preferAnswer(modelAnswer, facts) {
+  const model = String(modelAnswer || '').trim()
+  const report = String(facts || '').trim()
+  if (!model) return report
+  if (report && /which employee should i check/i.test(model)) return report
+  return model
+}
+
+async function askModel(geminiKey, openaiKey, contents) {
+  if (geminiKey) {
+    const text = await generateGemini(geminiKey, contents)
+    if (text) return { text, provider: 'gemini' }
+  }
+  if (openaiKey) {
+    const text = await generateOpenAI(openaiKey, contents)
+    if (text) return { text, provider: 'chatgpt' }
+  }
+  return null
+}
+
+async function generateGemini(apiKey, contents) {
   const models = [...new Set(MODEL_CANDIDATES)].slice(0, 3)
   for (const model of models) {
     try {
@@ -250,21 +331,53 @@ async function generateContent(apiKey, contents) {
             'Content-Type': 'application/json',
             'x-goog-api-key': apiKey,
           },
-          signal: AbortSignal.timeout(12000),
+          signal: AbortSignal.timeout(20000),
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-            generationConfig: { temperature: 0.2, maxOutputTokens: 700 },
+            generationConfig: { temperature: 0.2, maxOutputTokens: 900 },
             contents,
           }),
         }
       )
       const body = await res.json().catch(() => ({}))
-      if (res.ok && body?.candidates?.[0]?.content?.parts?.some((part) => part.text)) return body
+      const text = (body?.candidates?.[0]?.content?.parts || []).map((part) => part.text).filter(Boolean).join('\n').trim()
+      if (res.ok && text) return text
     } catch {
       /* try the next model immediately */
     }
   }
-  return null
+  return ''
+}
+
+async function generateOpenAI(apiKey, contents) {
+  const model = Deno.env.get('OPENAI_MODEL') || 'gpt-4o-mini'
+  try {
+    const messages = [
+      { role: 'system', content: SYSTEM_PROMPT },
+      ...contents.map((turn) => ({
+        role: turn.role === 'model' ? 'assistant' : 'user',
+        content: (turn.parts || []).map((part) => part.text).join('\n'),
+      })),
+    ]
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      signal: AbortSignal.timeout(20000),
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        max_tokens: 900,
+        messages,
+      }),
+    })
+    const body = await res.json().catch(() => ({}))
+    return res.ok ? String(body?.choices?.[0]?.message?.content || '').trim() : ''
+  } catch {
+    return ''
+  }
 }
 
 function json(body, status = 200) {

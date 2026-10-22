@@ -175,6 +175,32 @@ function attendanceLogBelongsToToday(log, today = todayDateStr()) {
   return hasClockInOnLocalDay(logs, midnight)
 }
 
+function newestOfType(logs, type) {
+  return (logs || []).find((log) => log?.type === type) || null
+}
+
+function pauseAlreadyEnded(logs, endType, startType) {
+  const end = newestOfType(logs, endType)
+  if (!end) return false
+  const start = newestOfType(logs, startType)
+  return !start || Number(end.timestamp || 0) >= Number(start.timestamp || 0)
+}
+
+function withShiftLog(logs, entry) {
+  const latest = logs?.[0]
+  if (
+    latest &&
+    latest.type === entry.type &&
+    Math.abs(Number(latest.timestamp || 0) - Number(entry.timestamp || 0)) < 2000
+  ) {
+    return logs
+  }
+  return [entry, ...(logs || [])]
+}
+
+let lastBreakToggleMs = 0
+let lastLunchFinishMs = 0
+
 function mergeSavedPauses(liveState, todayLog) {
   const next = { ...liveState }
   if (!todayLog) return next
@@ -187,11 +213,11 @@ function mergeSavedPauses(liveState, todayLog) {
   if (savedLunch > (Number(next.accumulatedLunchSeconds) || 0)) {
     next.accumulatedLunchSeconds = savedLunch
   }
-  if (!next.isOnBreak && todayLog.isOnBreak) {
+  if (!next.isOnBreak && todayLog.isOnBreak && !pauseAlreadyEnded(next.todayShiftLogs, 'break_end', 'break_start')) {
     next.isOnBreak = true
     next.breakStartTime = todayLog.breakStartTime || null
   }
-  if (!next.isOnLunch && todayLog.isOnLunch) {
+  if (!next.isOnLunch && todayLog.isOnLunch && !pauseAlreadyEnded(next.todayShiftLogs, 'lunch_end', 'lunch_start')) {
     next.isOnLunch = true
     next.lunchStartTime = todayLog.lunchStartTime || null
     next.lunchEndsAt = todayLog.lunchEndsAt || null
@@ -199,8 +225,9 @@ function mergeSavedPauses(liveState, todayLog) {
 
   const serverLogs = todayLog.todayShiftLogs || todayLog.shiftLogs || []
   const localLogs = next.todayShiftLogs || []
-  const localAway = (Number(next.accumulatedBreakSeconds) || 0) + (Number(next.accumulatedLunchSeconds) || 0)
-  if (serverLogs.length > localLogs.length || (localAway <= 0 && serverLogs.length > 0)) {
+  const localNewest = Number(localLogs[0]?.timestamp || 0)
+  const serverNewest = Number(serverLogs[0]?.timestamp || 0)
+  if (serverLogs.length && serverNewest > localNewest) {
     next.todayShiftLogs = serverLogs
   }
   return next
@@ -962,25 +989,35 @@ export const useTeamStore = create(
       },
 
       toggleBreak: (userMeta = {}) => {
+        const nowMs = Date.now()
+        if (nowMs - lastBreakToggleMs < 800) return
+        lastBreakToggleMs = nowMs
+
         const meta = resolveUserMeta(userMeta)
         const state = get()
         if (!state.clockedIn) return
-        const now = new Date()
-        const timeStr = canonicalTimeFromDate(now)
+        const timeStr = canonicalTimeFromDate(new Date(nowMs))
 
         if (!state.isOnBreak) {
-          const breakStartMs = Date.now()
+          if (pauseAlreadyEnded(state.todayShiftLogs, 'break_start', 'break_end') && newestOfType(state.todayShiftLogs, 'break_start')) {
+            const openStart = newestOfType(state.todayShiftLogs, 'break_start')
+            const openEnd = newestOfType(state.todayShiftLogs, 'break_end')
+            if (openStart && (!openEnd || Number(openStart.timestamp || 0) > Number(openEnd.timestamp || 0))) {
+              set({ isOnBreak: true, breakStartTime: openStart.timestamp || nowMs })
+              return
+            }
+          }
           const newLog = {
-            id: `log_${breakStartMs}`,
+            id: `log_${nowMs}`,
             type: 'break_start',
             label: 'Started Break',
             time: timeStr,
-            timestamp: breakStartMs,
+            timestamp: nowMs,
           }
-          const updatedLogs = [newLog, ...state.todayShiftLogs]
+          const updatedLogs = withShiftLog(state.todayShiftLogs, newLog)
           set({
             isOnBreak: true,
-            breakStartTime: breakStartMs,
+            breakStartTime: nowMs,
             todayShiftLogs: updatedLogs,
           })
 
@@ -989,24 +1026,36 @@ export const useTeamStore = create(
               displayName: meta.displayName || 'Employee',
               departmentName: meta.departmentName || '',
               isOnBreak: true,
-              breakStartTime: breakStartMs,
+              breakStartTime: nowMs,
               todayShiftLogs: updatedLogs,
               shiftLogs: updatedLogs,
             })
           }
+        } else if (pauseAlreadyEnded(state.todayShiftLogs, 'break_end', 'break_start')) {
+          set({ isOnBreak: false, breakStartTime: null })
+          if (meta.uid) {
+            upsertAttendanceLog(meta.uid, {
+              displayName: meta.displayName || 'Employee',
+              departmentName: meta.departmentName || '',
+              isOnBreak: false,
+              breakStartTime: null,
+              todayShiftLogs: state.todayShiftLogs,
+              shiftLogs: state.todayShiftLogs,
+            })
+          }
         } else {
           const breakDuration = state.breakStartTime
-            ? Math.floor((Date.now() - state.breakStartTime) / 1000)
+            ? Math.floor((nowMs - state.breakStartTime) / 1000)
             : 0
           const newBreakTotal = state.accumulatedBreakSeconds + breakDuration
           const newLog = {
-            id: `log_${Date.now()}`,
+            id: `log_${nowMs}`,
             type: 'break_end',
             label: 'Ended Break',
             time: timeStr,
-            timestamp: Date.now(),
+            timestamp: nowMs,
           }
-          const updatedLogs = [newLog, ...state.todayShiftLogs]
+          const updatedLogs = withShiftLog(state.todayShiftLogs, newLog)
           set({
             isOnBreak: false,
             breakStartTime: null,
@@ -1065,6 +1114,9 @@ export const useTeamStore = create(
       },
 
       finishLunch: () => {
+        const nowMs = Date.now()
+        if (nowMs - lastLunchFinishMs < 800) return
+        lastLunchFinishMs = nowMs
         const meta = resolveUserMeta({})
         const state = get()
         if (!state.isOnLunch || !state.lunchStartTime) return
@@ -1078,7 +1130,6 @@ export const useTeamStore = create(
         disarmLunchTimer()
         const duration = openLunchSeconds(state)
         const newLunchTotal = (state.accumulatedLunchSeconds || 0) + duration
-        const nowMs = Date.now()
         const timeStr = canonicalTimeFromDate(new Date(nowMs))
         const newLog = {
           id: `log_${nowMs}`,
@@ -1087,7 +1138,7 @@ export const useTeamStore = create(
           time: timeStr,
           timestamp: nowMs,
         }
-        const updatedLogs = [newLog, ...state.todayShiftLogs]
+        const updatedLogs = withShiftLog(state.todayShiftLogs, newLog)
         set({
           isOnLunch: false,
           lunchStartTime: null,

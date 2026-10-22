@@ -21,7 +21,7 @@ VITE_SUPABASE_ANON_KEY=...
 
 4. `npm install` in the repo root and in each portal.
 5. Deploy functions: `npx supabase functions deploy create-user ask-admin-assistant send-workflow-email`
-6. Set secrets: `GEMINI_API_KEY`, optional `RESEND_API_KEY` / SMTP vars.
+6. Set secrets: `GEMINI_API_KEY` or `OPENAI_API_KEY` (the admin assistant uses whichever is set), optional `RESEND_API_KEY` / SMTP vars.
 7. Database webhook (Dashboard): `workflow_runs` INSERT → `send-workflow-email`.
 8. Enable Google provider in Auth if you use Google login.
 

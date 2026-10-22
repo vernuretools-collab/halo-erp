@@ -89,7 +89,7 @@ const LeafletPicker = ({ lat, lng, radiusMeters, onPick }) => {
     }
 
     const point = [Number(lat), Number(lng)]
-    const radius = Math.max(50, Number(radiusMeters) || 200)
+    const radius = Math.max(50, Number(radiusMeters) || 50)
 
     if (!markerRef.current) {
       markerRef.current = L.marker(point, { draggable: true }).addTo(map)
@@ -232,7 +232,7 @@ const GoogleMapsPicker = ({ lat, lng, radiusMeters, onPick }) => {
     }
 
     const pos = { lat: Number(lat), lng: Number(lng) }
-    const radius = Math.max(50, Number(radiusMeters) || 200)
+    const radius = Math.max(50, Number(radiusMeters) || 50)
 
     if (!markerRef.current) {
       const marker = new window.google.maps.Marker({
@@ -302,7 +302,7 @@ const GoogleMapsPicker = ({ lat, lng, radiusMeters, onPick }) => {
 export const OfficeLocationPickerMap = ({
   lat,
   lng,
-  radiusMeters = 200,
+  radiusMeters = 50,
   onPick,
   className = '',
 }) => {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Card } from '../../components/ui/Card'
 import { Badge } from '../../components/ui/Badge'
@@ -255,7 +255,7 @@ export const AttendancePage = () => {
   const [showOfficePanel, setShowOfficePanel] = useState(false)
   const [officeLat, setOfficeLat] = useState('')
   const [officeLng, setOfficeLng] = useState('')
-  const [officeRadius, setOfficeRadius] = useState(200)
+  const [officeRadius, setOfficeRadius] = useState('50')
   const [officeLoaded, setOfficeLoaded] = useState(false)
   const [savingOffice, setSavingOffice] = useState(false)
   const [officeSaved, setOfficeSaved] = useState(false)
@@ -268,18 +268,32 @@ export const AttendancePage = () => {
     }).catch(() => {})
   }, [setEmployees])
 
+  const officeRadiusCorrected = useRef(false)
+
   useEffect(() => {
     const unsub = subscribeToOfficeLocation((loc) => {
+      let radius = loc.radiusMeters != null ? Number(loc.radiusMeters) : 50
+      // The office pin was saved at 5000m. Office clock-in uses 50m.
+      if (radius === 5000 && loc.lat != null && loc.lng != null) {
+        radius = 50
+        if (!officeRadiusCorrected.current) {
+          officeRadiusCorrected.current = true
+          saveOfficeLocation(
+            { lat: loc.lat, lng: loc.lng, radiusMeters: 50, label: loc.label || 'Office' },
+            adminName
+          )
+        }
+      }
       setOfficeLat(loc.lat != null ? String(loc.lat) : '')
       setOfficeLng(loc.lng != null ? String(loc.lng) : '')
-      setOfficeRadius(loc.radiusMeters || 200)
+      setOfficeRadius(String(radius))
       setOfficeLoaded(true)
     })
     return () => unsub()
-  }, [])
+  }, [adminName])
 
-  const persistOfficeLocation = async (lat, lng, radiusMeters = officeRadius, extra = {}) => {
-    const radius = Math.max(50, Math.min(50000, Number(radiusMeters) || 200))
+  const persistOfficeLocation = async (lat, lng, radiusMeters = officeRadius) => {
+    const radius = Math.max(50, Math.min(5000, Number(radiusMeters) || 50))
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
       setOfficeError('Enter valid latitude and longitude.')
       return false
@@ -290,10 +304,10 @@ export const AttendancePage = () => {
     }
     setSavingOffice(true)
     setOfficeError('')
-    await saveOfficeLocation({ lat, lng, radiusMeters: radius, label: 'Office', ...extra }, adminName)
+    await saveOfficeLocation({ lat, lng, radiusMeters: radius, label: 'Office' }, adminName)
     setOfficeLat(String(Number(lat.toFixed(6))))
     setOfficeLng(String(Number(lng.toFixed(6))))
-    setOfficeRadius(radius)
+    setOfficeRadius(String(radius))
     setSavingOffice(false)
     setOfficeSaved(true)
     setTimeout(() => setOfficeSaved(false), 2000)
@@ -326,17 +340,6 @@ export const AttendancePage = () => {
         )
       })
 
-    const distMeters = (lat1, lng1, lat2, lng2) => {
-      const toRad = (deg) => (deg * Math.PI) / 180
-      const R = 6371000
-      const dLat = toRad(lat2 - lat1)
-      const dLng = toRad(lng2 - lng1)
-      const a =
-        Math.sin(dLat / 2) ** 2 +
-        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
-      return 2 * R * Math.asin(Math.sqrt(a))
-    }
-
     setLocatingDevice(true)
     try {
       let high
@@ -346,44 +349,9 @@ export const AttendancePage = () => {
         high = await readPosition({ enableHighAccuracy: false, timeout: 10000, maximumAge: 0 })
       }
 
-      let low = null
-      try {
-        low = await readPosition({ enableHighAccuracy: false, timeout: 10000, maximumAge: 0 })
-      } catch {
-        low = null
-      }
-
-      const existingLat = Number(officeLat)
-      const existingLng = Number(officeLng)
-      const hasExisting = Number.isFinite(existingLat) && Number.isFinite(existingLng)
-      const radius = Math.max(50, Number(officeRadius) || 200)
-      const distFromExisting = hasExisting
-        ? distMeters(high.lat, high.lng, existingLat, existingLng)
-        : 0
-
-      let pinLat = high.lat
-      let pinLng = high.lng
-      let networkLat = null
-      let networkLng = null
-
-      // Office PCs often report a Wi-Fi location kilometres from GPS.
-      // Keep the existing GPS pin and store this reading as a second allowed point.
-      if (hasExisting && distFromExisting > radius) {
-        pinLat = existingLat
-        pinLng = existingLng
-        networkLat = high.lat
-        networkLng = high.lng
-      } else if (
-        low &&
-        distMeters(low.lat, low.lng, high.lat, high.lng) > radius
-      ) {
-        networkLat = low.lat
-        networkLng = low.lng
-      }
-
-      setOfficeLat(String(Number(pinLat.toFixed(6))))
-      setOfficeLng(String(Number(pinLng.toFixed(6))))
-      await persistOfficeLocation(pinLat, pinLng, officeRadius, { networkLat, networkLng })
+      setOfficeLat(String(Number(high.lat.toFixed(6))))
+      setOfficeLng(String(Number(high.lng.toFixed(6))))
+      await persistOfficeLocation(high.lat, high.lng, officeRadius)
     } catch (err) {
       if (err?.code === 1) {
         setOfficeError('Location permission denied. Allow location access for this browser.')
@@ -725,7 +693,7 @@ export const AttendancePage = () => {
             <div>
               <h3 className="text-sm font-bold text-fg">Office Location</h3>
               <p className="text-[11px] text-muted mt-0.5">
-                Employees must be inside this radius to clock in (unless Full WFH or approved WFH today).
+                Office clock-in only. Employees must be inside this radius. Work from home is not checked against this location.
               </p>
             </div>
           </div>
@@ -766,7 +734,7 @@ export const AttendancePage = () => {
                     : 'Use my device location'}
               </Button>
               <p className="text-[11px] text-muted">
-                Stand at the office and tap this to set the GPS pin. On an office computer, tap it again to also save the Wi-Fi location employees use (it will not replace the GPS pin).
+                Stand at the office and tap this to set the pin. You can also type latitude, longitude, and the radius below. Work from home does not use this pin.
               </p>
             </div>
 
@@ -804,12 +772,17 @@ export const AttendancePage = () => {
                 label="Radius (meters)"
                 type="number"
                 min={50}
-                max={50000}
+                max={5000}
+                step={1}
                 value={officeRadius}
-                onChange={(e) => setOfficeRadius(Math.max(50, Math.min(50000, Number(e.target.value) || 200)))}
+                onChange={(e) => setOfficeRadius(e.target.value)}
+                placeholder="50"
                 required
               />
             </div>
+            <p className="text-[11px] text-muted">
+              Set the radius to 50 meters for the office building, then save. This applies only when an employee clocks in at the office.
+            </p>
             <div className="flex justify-end">
               <Button type="submit" variant="primary" icon={Save} disabled={savingOffice || !officeLoaded || locatingDevice}>
                 {savingOffice ? 'Saving…' : officeSaved ? 'Saved' : 'Save Office Location'}

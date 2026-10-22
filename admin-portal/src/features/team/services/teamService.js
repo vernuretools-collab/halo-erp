@@ -12,6 +12,7 @@ import {
   where,
   orderBy,
   serverTimestamp,
+  deleteField,
 } from 'firebase/firestore'
 import { db } from '../../../shared/services/firebaseService'
 import {
@@ -978,9 +979,7 @@ export const saveWfhPolicy = async (policy, updatedBy) => {
 const DEFAULT_OFFICE_LOCATION = {
   lat: null,
   lng: null,
-  networkLat: null,
-  networkLng: null,
-  radiusMeters: 200,
+  radiusMeters: 50,
   label: 'Office',
 }
 
@@ -990,14 +989,10 @@ const DEFAULT_OFFICE_LOCATION = {
 export const normalizeOfficeLocation = (data) => {
   const lat = data?.lat != null ? Number(data.lat) : null
   const lng = data?.lng != null ? Number(data.lng) : null
-  const networkLat = data?.networkLat != null ? Number(data.networkLat) : null
-  const networkLng = data?.networkLng != null ? Number(data.networkLng) : null
   const radiusMeters = Math.max(50, Number(data?.radiusMeters) || DEFAULT_OFFICE_LOCATION.radiusMeters)
   return {
     lat: Number.isFinite(lat) ? lat : null,
     lng: Number.isFinite(lng) ? lng : null,
-    networkLat: Number.isFinite(networkLat) ? networkLat : null,
-    networkLng: Number.isFinite(networkLng) ? networkLng : null,
     radiusMeters,
     label: data?.label || 'Office',
     updatedBy: data?.updatedBy || null,
@@ -1042,8 +1037,8 @@ export const subscribeToOfficeLocation = (callback) => {
 /**
  * Save office geofence to Firestore /companyPolicies/officeLocation
  */
-export const saveOfficeLocation = async ({ lat, lng, radiusMeters, label, networkLat, networkLng }, updatedBy) => {
-  const normalized = normalizeOfficeLocation({ lat, lng, radiusMeters, label, networkLat, networkLng })
+export const saveOfficeLocation = async ({ lat, lng, radiusMeters, label }, updatedBy) => {
+  const normalized = normalizeOfficeLocation({ lat, lng, radiusMeters, label })
   const payload = {
     lat: normalized.lat,
     lng: normalized.lng,
@@ -1051,10 +1046,9 @@ export const saveOfficeLocation = async ({ lat, lng, radiusMeters, label, networ
     label: normalized.label || 'Office',
     updatedBy: updatedBy || 'Admin',
     updatedAt: serverTimestamp(),
-  }
-  if (normalized.networkLat != null && normalized.networkLng != null) {
-    payload.networkLat = normalized.networkLat
-    payload.networkLng = normalized.networkLng
+    // Clock-in uses this one office pin only. Drop any older Wi-Fi pin.
+    networkLat: deleteField(),
+    networkLng: deleteField(),
   }
   try {
     await setDoc(doc(db, 'companyPolicies', 'officeLocation'), payload, { merge: true })
