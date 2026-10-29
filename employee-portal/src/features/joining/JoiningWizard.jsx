@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   ACCOUNT_TYPES,
   BLOOD_GROUPS,
@@ -14,7 +14,7 @@ import {
 } from '../../../../shared/supabase/joiningForm.js'
 import { hasIssuedAssets } from '../../../../admin-portal/src/features/team/services/onboardingPacks.js'
 import { SignaturePad } from './SignaturePad'
-import { X } from 'lucide-react'
+import { Calendar, X } from 'lucide-react'
 
 const labelClass = 'block text-[11px] font-semibold tracking-wide text-slate-800 mb-1.5'
 const fieldClass = 'w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-teal-700 disabled:bg-slate-50 disabled:text-slate-600'
@@ -65,6 +65,142 @@ function PreviewRow({ label, value }) {
     <div className="grid grid-cols-1 sm:grid-cols-[200px_1fr] gap-1 py-2.5 border-b border-slate-100 last:border-0">
       <dt className="text-xs font-semibold text-slate-500">{label}</dt>
       <dd className="text-sm text-slate-800 whitespace-pre-wrap break-words">{displayValue(value)}</dd>
+    </div>
+  )
+}
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
+const BIRTH_YEAR_START = 1940
+
+function parseIsoDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''))
+  if (!match) return null
+  const year = Number(match[1])
+  const month = Number(match[2]) - 1
+  const day = Number(match[3])
+  const date = new Date(year, month, day)
+  if (date.getFullYear() !== year || date.getMonth() !== month || date.getDate() !== day) return null
+  return { year, month, day }
+}
+
+function toIsoDate(year, month, day) {
+  return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+function displayDate(value) {
+  const parsed = parseIsoDate(value)
+  if (!parsed) return ''
+  return `${String(parsed.day).padStart(2, '0')}/${String(parsed.month + 1).padStart(2, '0')}/${parsed.year}`
+}
+
+function BirthDateField({ value, disabled, onChange }) {
+  const parsed = parseIsoDate(value)
+  const today = new Date()
+  const maxYear = today.getFullYear()
+  const [open, setOpen] = useState(false)
+  const [viewYear, setViewYear] = useState(parsed?.year || maxYear - 25)
+  const [viewMonth, setViewMonth] = useState(parsed?.month || 0)
+  const rootRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return undefined
+    const onPointer = (event) => {
+      if (!rootRef.current?.contains(event.target)) setOpen(false)
+    }
+    const onKey = (event) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onPointer)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onPointer)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const openPicker = () => {
+    if (disabled) return
+    const current = parseIsoDate(value)
+    setViewYear(current?.year || maxYear - 25)
+    setViewMonth(current?.month ?? 0)
+    setOpen(true)
+  }
+
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate()
+  const firstWeekday = new Date(viewYear, viewMonth, 1).getDay()
+  const years = []
+  for (let year = maxYear; year >= BIRTH_YEAR_START; year -= 1) years.push(year)
+  const todayStamp = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <input
+        readOnly
+        disabled={disabled}
+        value={displayDate(value)}
+        placeholder="dd/mm/yyyy"
+        onClick={openPicker}
+        className={`${fieldClass} cursor-pointer pr-10`}
+        aria-label="Date of birth"
+      />
+      <button
+        type="button"
+        disabled={disabled}
+        aria-label="Choose date, month, and year"
+        aria-expanded={open}
+        onClick={() => (open ? setOpen(false) : openPicker())}
+        className="absolute inset-y-0 right-0 flex w-10 cursor-pointer items-center justify-center text-teal-700 disabled:cursor-not-allowed disabled:text-slate-400"
+      >
+        <Calendar className="h-4 w-4" />
+      </button>
+      {open && (
+        <div className="absolute right-0 z-30 mt-1 w-72 rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
+          <div className="grid grid-cols-2 gap-2">
+            <select
+              aria-label="Month"
+              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-800 outline-none focus:border-teal-700"
+              value={viewMonth}
+              onChange={(event) => setViewMonth(Number(event.target.value))}
+            >
+              {MONTHS.map((month, index) => <option key={month} value={index}>{month}</option>)}
+            </select>
+            <select
+              aria-label="Year"
+              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-800 outline-none focus:border-teal-700"
+              value={viewYear}
+              onChange={(event) => setViewYear(Number(event.target.value))}
+            >
+              {years.map((year) => <option key={year} value={year}>{year}</option>)}
+            </select>
+          </div>
+          <div className="mt-3 grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-slate-400">
+            {WEEKDAYS.map((day) => <span key={day}>{day}</span>)}
+          </div>
+          <div className="mt-1 grid grid-cols-7 gap-1">
+            {Array.from({ length: firstWeekday }, (_, index) => <span key={`empty-${index}`} />)}
+            {Array.from({ length: daysInMonth }, (_, index) => {
+              const day = index + 1
+              const selected = parsed && parsed.year === viewYear && parsed.month === viewMonth && parsed.day === day
+              const future = new Date(viewYear, viewMonth, day).getTime() > todayStamp
+              return (
+                <button
+                  key={day}
+                  type="button"
+                  disabled={future}
+                  onClick={() => {
+                    onChange(toIsoDate(viewYear, viewMonth, day))
+                    setOpen(false)
+                  }}
+                  className={`h-8 rounded-md text-sm cursor-pointer disabled:cursor-not-allowed ${selected ? 'bg-teal-700 text-white' : 'text-slate-800 hover:bg-teal-50 disabled:text-slate-300 disabled:hover:bg-transparent'}`}
+                >
+                  {day}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -149,7 +285,7 @@ export function JoiningWizard({
                 <input className={fieldClass} placeholder="As on Aadhaar card" value={personal.fullName} disabled={readOnly} onChange={(e) => setPersonal('fullName', e.target.value)} />
               </Field>
               <Field label="Date of birth" required>
-                <input type="date" className={fieldClass} value={personal.dateOfBirth} disabled={readOnly} onChange={(e) => setPersonal('dateOfBirth', e.target.value)} />
+                <BirthDateField value={personal.dateOfBirth} disabled={readOnly} onChange={(next) => setPersonal('dateOfBirth', next)} />
               </Field>
               <Field label="Gender" required>
                 <select className={fieldClass} value={personal.gender} disabled={readOnly} onChange={(e) => setPersonal('gender', e.target.value)}>

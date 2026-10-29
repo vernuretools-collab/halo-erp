@@ -15,8 +15,6 @@ export const WORK_MODES = ['Office', 'Hybrid', 'Remote']
 
 export const PROBATION_PERIODS = ['3 months', '6 months']
 
-export const CUSTOM_KRA_TARGET = 80
-
 export const FIXED_KRAS = [
   {
     keyResultArea: 'THEC Portal Compliance',
@@ -139,12 +137,6 @@ export function handbookValidationError({ kras = [], learningPlan = [], reviews 
       if (!area || !kpi) return 'Each KRA needs an area and a metric. Remove blank rows, or leave every row blank to add them later.'
       if (!Number.isFinite(weight) || weight <= 0) return 'Each KRA weight must be greater than 0.'
     }
-    const weight = customKraWeight(kras)
-    if (Math.abs(weight - CUSTOM_KRA_TARGET) > 0.001) {
-      const gap = Math.abs(weight - CUSTOM_KRA_TARGET)
-      const direction = weight > CUSTOM_KRA_TARGET ? 'Reduce' : 'Increase'
-      return `Editable KRA weights total ${weight}%. ${direction} them by ${gap}% so they total ${CUSTOM_KRA_TARGET}%. Portal Compliance and Client Satisfaction already take 10% each.`
-    }
   }
 
   const incompletePhase = (learningPlan || []).find((phase) => {
@@ -193,11 +185,7 @@ export function handbookPayload({ kras = [], learningPlan = [], reviews = [] } =
 }
 
 export function joiningPageUrl() {
-  if (typeof window === 'undefined') return 'http://localhost:3002/joining'
-  const { protocol, hostname, port } = window.location
-  const employeePort = port === '3001' ? '3002' : port
-  const host = employeePort ? `${hostname}:${employeePort}` : hostname
-  return `${protocol}//${host}/joining`
+  return 'https://thehaloeffect.in/joining'
 }
 
 export function onboardingFromProfile(profile) {

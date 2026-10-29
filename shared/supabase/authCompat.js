@@ -1,5 +1,6 @@
 import { supabase } from './client.js'
 import { loginIdentifierToEmail } from './clientLogin.js'
+import { isJoiningAccount } from './employeeOnboarding.js'
 
 const ADMIN_ROLES = new Set(['admin', 'owner', 'superadmin'])
 
@@ -33,7 +34,9 @@ function profileRoleScore(row, authUser) {
   if (looksLikeAdminProfile(data)) score += 80
   if (role === 'employee' || role === 'client') score -= 80
   if (!role) score += 40
-  if (row?.id && row.id !== authUser.id) score += 10
+  const joiningLogin = isJoiningAccount({ role: authUser?.app_metadata?.role, email: authUser?.email })
+  if (joiningLogin && (row?.auth_id === authUser.id || row?.id === authUser.id)) score += 500
+  if (!joiningLogin && row?.id && row.id !== authUser.id) score += 10
   if (data.email) score += 5
   if (data.displayName) score += 2
   return score

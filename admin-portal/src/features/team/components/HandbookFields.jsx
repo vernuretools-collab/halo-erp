@@ -3,9 +3,7 @@ import { Button } from '../../../components/ui/Button'
 import { Card } from '../../../components/ui/Card'
 import { Modal } from '../../../components/ui/Modal'
 import {
-  CUSTOM_KRA_TARGET,
   DEFAULT_LEARNING_PLAN,
-  FIXED_KRAS,
   customKraWeight,
   defaultReviews,
   handbookPayload,
@@ -139,7 +137,6 @@ export function HandbookFields({ kras, setKras, learningPlan, setLearningPlan, r
                     <input
                       type="number"
                       min="1"
-                      max="80"
                       className="w-full rounded-lg border border-border bg-surface px-2 py-1.5"
                       value={row.weight}
                       onChange={(e) => updateKra(index, 'weight', e.target.value)}
@@ -158,14 +155,6 @@ export function HandbookFields({ kras, setKras, learningPlan, setLearningPlan, r
                   </td>
                 </tr>
               ))}
-              {FIXED_KRAS.map((kra) => (
-                <tr key={kra.keyResultArea} className="border-t border-border bg-chrome/60 text-muted">
-                  <td className="px-3 py-2">{kra.keyResultArea}</td>
-                  <td className="px-3 py-2">{kra.kpi}</td>
-                  <td className="px-3 py-2">{kra.weight}%</td>
-                  <td />
-                </tr>
-              ))}
             </tbody>
           </table>
         </div>
@@ -173,12 +162,10 @@ export function HandbookFields({ kras, setKras, learningPlan, setLearningPlan, r
           <Button type="button" variant="outline" icon={Plus} onClick={() => setKras((current) => [...current, emptyKra('')])}>
             Add KRA row
           </Button>
-          <p className={`text-xs text-right ${!kraStarted || weight === CUSTOM_KRA_TARGET ? 'text-muted' : 'text-rose-600'}`}>
+          <p className="text-xs text-right text-muted">
             {!kraStarted
-              ? 'Blank rows are skipped. Once you fill a row, every row needs an area, a metric, and weights that total 80%.'
-              : weight === CUSTOM_KRA_TARGET
-                ? `Editable rows total ${weight}%. With the two locked 10% rows, the scorecard is 100%.`
-                : `Editable rows total ${weight}%. They need to total ${CUSTOM_KRA_TARGET}% (${weight > CUSTOM_KRA_TARGET ? `${weight - CUSTOM_KRA_TARGET}% too high` : `${CUSTOM_KRA_TARGET - weight}% too low`}). The locked rows already use 20%.`}
+              ? 'Blank rows are skipped. Once you fill a row, every row needs an area, a metric, and a weight.'
+              : `Weights total ${weight}%.`}
           </p>
         </div>
       </Card>

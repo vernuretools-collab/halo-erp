@@ -1,8 +1,4 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import {
-  DEFAULT_EMPLOYEE_CONTROLS,
-  subscribeEmployeeControls,
-} from '../../../../../shared/employeeControls.js'
 import { NavLink } from 'react-router-dom'
 import { Card } from '../../../components/ui/Card'
 import { Badge } from '../../../components/ui/Badge'
@@ -94,9 +90,6 @@ export const ClockInOverviewWidget = ({ children }) => {
   }, [leaveRequests, activeUid, user, userDoc, currentEmp, displayName, identityIds, todayKey])
 
   const [confirmKind, setConfirmKind] = useState(null)
-  const [employeeControls, setEmployeeControls] = useState(DEFAULT_EMPLOYEE_CONTROLS)
-
-  useEffect(() => subscribeEmployeeControls(setEmployeeControls), [])
   const [currentTimeStr, setCurrentTimeStr] = useState('')
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [elapsedExtraSec, setElapsedExtraSec] = useState(0)
@@ -364,7 +357,7 @@ export const ClockInOverviewWidget = ({ children }) => {
               </Button>
             )}
 
-            {clockedIn && (employeeControls.showLunchButton || isOnLunch) && (
+            {clockedIn && (
               <Button
                 variant={isOnLunch ? 'primary' : 'secondary'}
                 onClick={() => {

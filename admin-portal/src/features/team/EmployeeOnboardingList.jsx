@@ -9,7 +9,7 @@ import { TeamSubNav } from './components/TeamSubNav'
 import { deleteEmployeeOnboarding, listEmployeeOnboarding } from './services/employeeOnboardingService'
 import { EmployeeOnboardingSetup } from './EmployeeOnboardingSetup'
 import { ONBOARDING_STATUS, joiningPageUrl } from '../../../../shared/supabase/employeeOnboarding.js'
-import { Trash2, UserPlus } from 'lucide-react'
+import { Trash2, UserPlus, Copy } from 'lucide-react'
 
 function statusLabel(status) {
   if (status === ONBOARDING_STATUS.SUBMITTED) return 'Submitted'
@@ -25,6 +25,7 @@ export const EmployeeOnboardingList = () => {
   const [deleteError, setDeleteError] = useState('')
   const [searchParams, setSearchParams] = useSearchParams()
   const [setupOpen, setSetupOpen] = useState(() => searchParams.get('setup') === '1')
+  const [copied, setCopied] = useState(false)
   const joiningUrl = joiningPageUrl()
 
   const loadRows = useCallback(() => {
@@ -61,6 +62,24 @@ export const EmployeeOnboardingList = () => {
 
   const openSetup = () => setSetupOpen(true)
 
+  const copyJoiningLink = async () => {
+    try {
+      await navigator.clipboard.writeText(joiningUrl)
+    } catch {
+      const input = document.createElement('textarea')
+      input.value = joiningUrl
+      input.setAttribute('readonly', '')
+      input.style.position = 'fixed'
+      input.style.left = '-9999px'
+      document.body.appendChild(input)
+      input.select()
+      document.execCommand('copy')
+      document.body.removeChild(input)
+    }
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 2000)
+  }
+
   const closeSetup = () => {
     setSetupOpen(false)
     if (searchParams.get('setup')) {
@@ -83,14 +102,17 @@ export const EmployeeOnboardingList = () => {
 
   const confirmDelete = async () => {
     if (!pending || deleting) return
+    const target = pending
     setDeleting(true)
     setDeleteError('')
+    setError('')
+    setRows((current) => current.filter((row) => row.id !== target.id))
+    setPending(null)
     try {
-      await deleteEmployeeOnboarding(pending.id)
-      setRows((current) => current.filter((row) => row.id !== pending.id))
-      setPending(null)
+      await deleteEmployeeOnboarding(target)
     } catch (err) {
-      setDeleteError(err.message || 'Could not delete this onboarding record.')
+      setRows((current) => (current.some((row) => row.id === target.id) ? current : [target, ...current]))
+      setError(err.message || 'Could not delete this onboarding record.')
     } finally {
       setDeleting(false)
     }
@@ -110,9 +132,14 @@ export const EmployeeOnboardingList = () => {
       />
       <TeamSubNav />
 
-      <Card className="space-y-2">
-        <p className="text-sm text-fg">Joining page for new hires: <span className="font-medium">{joiningUrl}</span></p>
-        <p className="text-xs text-muted">Waiting for answers = hire has not submitted yet. Submitted = click the employee name to see the filled form and download the 3 PDF packs.</p>
+      <Card className="flex items-center justify-between gap-4">
+        <div className="space-y-2 min-w-0">
+          <p className="text-sm text-fg">Joining page for new hires: <span className="font-medium">{joiningUrl}</span></p>
+          <p className="text-xs text-muted">Waiting for answers = hire has not submitted yet. Submitted = click the employee name to see the filled form and download the 3 PDF packs.</p>
+        </div>
+        <Button type="button" variant="secondary" size="sm" icon={Copy} className="shrink-0" onClick={copyJoiningLink}>
+          {copied ? 'Copied' : 'Copy link'}
+        </Button>
       </Card>
 
       {!loading && rows.length > 0 && (
@@ -144,7 +171,7 @@ export const EmployeeOnboardingList = () => {
                 <td colSpan={6} className="px-4 py-8 text-muted">Loading onboarding records…</td>
               </tr>
             )}
-            {!loading && rows.length === 0 && (
+            {!loading && !error && rows.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-4 py-10">
                   <div className="flex flex-col items-center gap-3 text-center">

@@ -1,3 +1,5 @@
+import { mergeAttendanceSnapshot } from '../../../../../shared/shiftLogs.js'
+
 const CHANNEL_NAME = 'crm-employee-attendance'
 export const TEAM_STORE_KEY = 'crm_employee_team_store'
 
@@ -108,7 +110,8 @@ export function attachTeamStoreCrossWindowSync(useTeamStore) {
       if (!event?.data || typeof event.data !== 'object') return
       applyingRemote = true
       try {
-        useTeamStore.setState(event.data)
+        const current = useTeamStore.getState()
+        useTeamStore.setState(mergeAttendanceSnapshot(current, event.data))
       } finally {
         applyingRemote = false
       }
@@ -122,7 +125,7 @@ export function attachTeamStoreCrossWindowSync(useTeamStore) {
       const remote = parsed.state || parsed
       if (!remote || typeof remote !== 'object') return
       applyingRemote = true
-      useTeamStore.setState(snapshotAttendance(remote))
+      useTeamStore.setState(mergeAttendanceSnapshot(useTeamStore.getState(), snapshotAttendance(remote)))
     } catch {
       /* ignore malformed persist payloads */
     } finally {

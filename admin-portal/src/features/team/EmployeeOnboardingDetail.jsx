@@ -128,7 +128,7 @@ export const EmployeeOnboardingDetail = () => {
     setDeleting(true)
     setDeleteError('')
     try {
-      await deleteEmployeeOnboarding(row.id)
+      await deleteEmployeeOnboarding(row)
       navigate('/team/onboarding')
     } catch (err) {
       setDeleteError(err.message || 'Could not delete this onboarding record.')

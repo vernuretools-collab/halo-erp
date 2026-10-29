@@ -105,6 +105,9 @@ function TimelineEntryCard({ entry, interactive = false, onEdit }) {
           {formatHours(entry.hours)}
         </span>
       </div>
+      {entry.pendingSync ? (
+        <p className="mt-1.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">Waiting to sync</p>
+      ) : null}
     </div>
   )
 }

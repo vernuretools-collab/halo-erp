@@ -1,5 +1,12 @@
 import { doc, setDoc, getDoc, collection, query, where, getDocs, serverTimestamp } from 'firebase/firestore'
 import { db } from '../../../shared/services/firebaseService'
+import { mergeShiftLogs, pairedShiftLogs } from '../../../../../shared/shiftLogs.js'
+import {
+  ATTENDANCE_OUTBOX_KEY,
+  dropAttendanceSave,
+  mergeAttendancePayload,
+  rememberAttendanceSave,
+} from '../../../../../shared/offlineQueue.js'
 
 const IS_MOCK = import.meta.env.VITE_FIREBASE_API_KEY === 'mock_api_key_dev'
 
@@ -52,38 +59,110 @@ export const attendanceRecordLooksPresent = (record) => {
   return status === 'present' || status === 'wfh' || status === 'on duty' || status === 'on_duty'
 }
 
+function readAttendanceOutbox() {
+  try {
+    if (typeof localStorage === 'undefined') return {}
+    const raw = localStorage.getItem(ATTENDANCE_OUTBOX_KEY)
+    const parsed = raw ? JSON.parse(raw) : {}
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeAttendanceOutbox(queue) {
+  try {
+    if (typeof localStorage === 'undefined') return
+    localStorage.setItem(ATTENDANCE_OUTBOX_KEY, JSON.stringify(queue))
+  } catch {
+    /* private mode */
+  }
+}
+
+const attendanceWriteChains = new Map()
+
+function chainAttendanceWrite(key, task) {
+  const prev = attendanceWriteChains.get(key) || Promise.resolve()
+  const next = prev.then(task, task)
+  attendanceWriteChains.set(key, next)
+  return next
+}
+
+async function writeAttendanceLog(uid, date, payload) {
+  const docId = `${date}_${uid}`
+  const ref = doc(db, 'attendanceLogs', docId)
+  const { replaceShiftLogs, ...fields } = payload || {}
+
+  // Website and Electron both write this row. Union the events so one
+  // window's stale list cannot erase the other's break or lunch.
+  let shiftLogs = null
+  if (fields.shiftLogs || fields.todayShiftLogs) {
+    const incoming = fields.shiftLogs || fields.todayShiftLogs || []
+    if (replaceShiftLogs) {
+      shiftLogs = pairedShiftLogs(incoming)
+    } else {
+      const existingSnap = await getDoc(ref)
+      const existing = existingSnap.exists() ? existingSnap.data() : {}
+      shiftLogs = mergeShiftLogs(existing.shiftLogs || existing.todayShiftLogs, incoming)
+    }
+  }
+
+  await setDoc(
+    ref,
+    {
+      uid,
+      date,
+      docId,
+      updatedAt: serverTimestamp(),
+      ...fields,
+      ...(Array.isArray(shiftLogs) ? { shiftLogs, todayShiftLogs: shiftLogs } : {}),
+    },
+    { merge: true }
+  )
+}
+
 /**
  * Upserts today's attendance log for the given employee into Firestore.
  *
  * Uses a FLAT collection (no subcollections) to avoid collectionGroup index issues.
  * Path: attendanceLogs/{YYYY-MM-DD}_{uid}
  *
+ * A failed save stays in this browser and is sent again by flushAttendanceQueue.
+ *
  * @param {string} uid     - Firebase user uid
  * @param {object} payload - Fields to merge into the document
  */
-export const upsertAttendanceLog = async (uid, payload) => {
-  if (IS_MOCK || !uid) return
+export const upsertAttendanceLog = (uid, payload) => {
+  if (IS_MOCK || !uid) return Promise.resolve()
 
-  try {
-    const date = payload?.date || localDateKey()
-    // Flat doc ID: "2026-07-29_abc123uid"
-    const docId = `${date}_${uid}`
-    const ref = doc(db, 'attendanceLogs', docId)
+  const date = payload?.date || localDateKey()
+  const key = `${date}_${uid}`
+  return chainAttendanceWrite(key, async () => {
+    const queued = readAttendanceOutbox()[key]?.payload
+    const toWrite = queued ? mergeAttendancePayload(queued, payload) : payload
+    try {
+      await writeAttendanceLog(uid, date, toWrite)
+      writeAttendanceOutbox(dropAttendanceSave(readAttendanceOutbox(), uid, date))
+    } catch (err) {
+      writeAttendanceOutbox(rememberAttendanceSave(readAttendanceOutbox(), uid, date, toWrite))
+      console.error('[attendanceService] upsertAttendanceLog error:', err)
+    }
+  })
+}
 
-    await setDoc(
-      ref,
-      {
-        uid,
-        date,
-        docId,
-        updatedAt: serverTimestamp(),
-        ...payload,
-      },
-      { merge: true }
-    )
-  } catch (err) {
-    console.error('[attendanceService] upsertAttendanceLog error:', err)
+/** Send attendance saves that failed while this browser was offline. */
+export async function flushAttendanceQueue() {
+  const items = Object.values(readAttendanceOutbox())
+  for (const item of items) {
+    if (!item?.uid) continue
+    await upsertAttendanceLog(item.uid, { ...(item.payload || {}), date: item.date })
   }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    flushAttendanceQueue()
+  })
 }
 
 /**

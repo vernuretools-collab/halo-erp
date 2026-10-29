@@ -1,0 +1,11 @@
+---
+description: Keep product decisions in IMPORTANT_CHANGES.md and do not undo them
+alwaysApply: true
+---
+
+# Important changes stay
+
+Before changing onboarding, employees, auth, or `create-user`, read [IMPORTANT_CHANGES.md](IMPORTANT_CHANGES.md).
+
+- Keep every behavior listed there. Do not revert a listed decision while doing a different task.
+- When a change sets a new rule of that kind, append a dated entry to `IMPORTANT_CHANGES.md`. Do not replace the file or remove older entries.

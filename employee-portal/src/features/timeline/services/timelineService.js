@@ -1,6 +1,7 @@
 import {
   collection,
   addDoc,
+  setDoc,
   updateDoc,
   deleteDoc,
   doc,
@@ -121,24 +122,39 @@ export const createTimelineEntry = async (payload) => {
     return created
   }
 
+  const fields = {
+    uid: payload.uid,
+    employeeName: payload.employeeName || '',
+    date: payload.date,
+    description: payload.description || '',
+    hours: Number(payload.hours) || 0,
+    entryType,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }
+
   try {
-    const docRef = await addDoc(collection(db, 'workTimelineEntries'), {
-      uid: payload.uid,
-      employeeName: payload.employeeName || '',
-      date: payload.date,
-      description: payload.description || '',
-      hours: Number(payload.hours) || 0,
-      entryType,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    })
+    // A local id lets an offline retry write the same row again.
+    if (payload.entryId) {
+      await setDoc(doc(db, 'workTimelineEntries', payload.entryId), fields)
+      return {
+        entryId: payload.entryId,
+        uid: fields.uid,
+        employeeName: fields.employeeName,
+        date: fields.date,
+        description: fields.description,
+        hours: fields.hours,
+        entryType,
+      }
+    }
+    const docRef = await addDoc(collection(db, 'workTimelineEntries'), fields)
     return {
       entryId: docRef.id,
-      uid: payload.uid,
-      employeeName: payload.employeeName || '',
-      date: payload.date,
-      description: payload.description || '',
-      hours: Number(payload.hours) || 0,
+      uid: fields.uid,
+      employeeName: fields.employeeName,
+      date: fields.date,
+      description: fields.description,
+      hours: fields.hours,
       entryType,
     }
   } catch (err) {

@@ -51,7 +51,7 @@ export const EmployeeOnboardingSetup = ({ embedded = false, onClose, onCreated }
   useEffect(() => {
     getDepartments()
       .then((rows) => {
-        const names = rows.map((row) => row.name).filter(Boolean)
+        const names = [...new Set(rows.map((row) => String(row.name || '').trim()).filter(Boolean))]
         if (names.length === 0) return
         setDepartments(names)
         setEmployment((current) => ({ ...current, department: current.department || names[0] }))
@@ -163,7 +163,7 @@ export const EmployeeOnboardingSetup = ({ embedded = false, onClose, onCreated }
                 onChange={(e) => setField('department', e.target.value)}
                 required
               >
-                {departments.map((name) => <option key={name} value={name}>{name}</option>)}
+                {departments.map((name, index) => <option key={`${name}-${index}`} value={name}>{name}</option>)}
               </select>
             </label>
             <Input label="Reporting manager *" value={employment.reportingManager} onChange={(e) => setField('reportingManager', e.target.value)} required />

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Minus, LogIn, LogOut, Coffee, Play, Loader2, AlertCircle, Sun, Moon } from 'lucide-react'
+import { Minus, LogIn, LogOut, Coffee, Play, Loader2, AlertCircle, Sun, Moon, Utensils } from 'lucide-react'
 import { Button } from '../../components/ui/Button'
 import { Modal } from '../../components/ui/Modal'
 import { useTeamStore } from '../team/stores/teamStore'
@@ -34,12 +34,7 @@ function openLunchSeconds(snapshot, endMs) {
   if (!snapshot.isOnLunch) return 0
   const startMs = toEpochMs(snapshot.lunchStartTime)
   if (!startMs) return 0
-  const elapsed = Math.max(0, Math.floor((endMs - startMs) / 1000))
-  const ends = toEpochMs(snapshot.lunchEndsAt)
-  if (ends && ends > startMs) {
-    return Math.min(Math.floor((ends - startMs) / 1000), elapsed)
-  }
-  return elapsed
+  return Math.max(0, Math.floor((endMs - startMs) / 1000))
 }
 
 function completedPairSeconds(logs, startType, endType) {
@@ -127,6 +122,8 @@ export const MyTimingCard = ({
     clockIn,
     clockOut,
     handleBreakToggle,
+    handleLunchStart,
+    handleLunchEnd,
   } = useAttendanceClockActions({ listenForDesktopEvents })
 
   const clockInTime = useTeamStore((s) => s.clockInTime)
@@ -139,7 +136,7 @@ export const MyTimingCard = ({
   const lunchEndsAt = useTeamStore((s) => s.lunchEndsAt)
   const accumulatedLunchSeconds = useTeamStore((s) => s.accumulatedLunchSeconds)
   const todayShiftLogs = useTeamStore((s) => s.todayShiftLogs)
-  const [confirmBreak, setConfirmBreak] = useState(false)
+  const [confirmKind, setConfirmKind] = useState(null)
 
   const [workedSec, setWorkedSec] = useState(0)
   const [overallSec, setOverallSec] = useState(0)
@@ -210,7 +207,7 @@ export const MyTimingCard = ({
         }
       : {
           label: 'BREAK',
-          onClick: () => setConfirmBreak(true),
+          onClick: () => setConfirmKind('break'),
           disabled: clockBusy,
           variant: 'outline',
           className:
@@ -323,14 +320,35 @@ export const MyTimingCard = ({
           <PrimaryIcon className={`w-3.5 h-3.5 ${primaryAction.spin ? 'animate-spin' : ''}`} />
           {primaryAction.label}
         </Button>
+        {clockedIn ? (
+          <Button
+            size="sm"
+            variant={isOnLunch ? 'primary' : 'outline'}
+            disabled={clockBusy}
+            onClick={() => {
+              if (isOnLunch) handleLunchEnd()
+              else setConfirmKind('lunch')
+            }}
+            className={`w-full justify-center text-xs font-extrabold py-2.5 tracking-wide ${
+              isOnLunch
+                ? 'bg-accent hover:bg-accent-hover text-white border border-accent'
+                : '!bg-accent-soft hover:!bg-accent !text-accent hover:!text-white !border-2 !border-accent'
+            }`}
+          >
+            <Utensils className="w-3.5 h-3.5" />
+            {isOnLunch ? 'END LUNCH' : 'LUNCH'}
+          </Button>
+        ) : null}
         <Button
           size="sm"
           variant="danger"
           disabled={clockBusy || !clockedIn}
           onClick={clockOut}
-          className="w-full justify-center text-xs font-extrabold py-2.5 tracking-wide bg-danger hover:opacity-90 text-white"
+          className={`w-full justify-center text-xs font-extrabold py-2.5 tracking-wide bg-danger hover:opacity-90 text-white ${
+            clockedIn ? 'col-span-2' : ''
+          }`}
         >
-          {clockBusy && clockedIn && !isOnBreak ? (
+          {clockBusy && clockedIn && !isOnBreak && !isOnLunch ? (
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
           ) : (
             <LogOut className="w-3.5 h-3.5" />
@@ -342,20 +360,21 @@ export const MyTimingCard = ({
       <MyTimingTasks fillWindow={fillWindow} />
 
       <Modal
-        open={confirmBreak}
-        onClose={() => setConfirmBreak(false)}
-        title="Start break?"
+        open={confirmKind === 'break' || confirmKind === 'lunch'}
+        onClose={() => setConfirmKind(null)}
+        title={confirmKind === 'lunch' ? 'Start lunch?' : 'Start break?'}
         size="sm"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setConfirmBreak(false)}>
+            <Button variant="secondary" onClick={() => setConfirmKind(null)}>
               Cancel
             </Button>
             <Button
               variant="primary"
               onClick={() => {
-                handleBreakToggle()
-                setConfirmBreak(false)
+                if (confirmKind === 'lunch') handleLunchStart()
+                else handleBreakToggle()
+                setConfirmKind(null)
               }}
             >
               Confirm
@@ -363,7 +382,9 @@ export const MyTimingCard = ({
           </>
         }
       >
-        <p className="text-sm text-muted">Are you taking a break?</p>
+        <p className="text-sm text-muted">
+          {confirmKind === 'lunch' ? 'Are you taking lunch?' : 'Are you taking a break?'}
+        </p>
       </Modal>
     </div>
   )

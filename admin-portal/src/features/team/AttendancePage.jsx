@@ -25,6 +25,7 @@ import {
   doc,
   setDoc,
 } from 'firebase/firestore'
+import { mergeShiftLogs, pairedShiftLogs } from '../../../../shared/shiftLogs.js'
 import {
   Users,
   CheckCircle2,
@@ -151,6 +152,75 @@ function canonicalTimeOrDefault(timeStr, fallback = '09:00 AM') {
   const mins = timeStrToMinutes(timeStr)
   if (mins === null) return fallback
   return formatTimeStr(timeStr)
+}
+
+function resolveShiftLogs(log = {}) {
+  return mergeShiftLogs(log.shiftLogs, log.todayShiftLogs)
+}
+
+function isClockEventType(type) {
+  return type === 'clock_in' || type === 'clock_out' || type === 'auto_clock_out'
+}
+
+function keepNonClockShiftEvents(existingLogs) {
+  return (Array.isArray(existingLogs) ? existingLogs : []).filter((entry) => !isClockEventType(entry.type))
+}
+
+/** Official clock-in / clock-out rows that match the attendance table. */
+function officialClockEvents({
+  clockInTime,
+  clockInTimestamp,
+  clockOutTime,
+  clockOutTimestamp,
+  isClockedIn,
+  clockInLabel = 'Clocked In',
+}) {
+  const events = []
+  if (clockInTime && clockInTime !== '—') {
+    events.push({
+      id: `log_admin_in_${clockInTimestamp || Date.now()}`,
+      type: 'clock_in',
+      label: clockInLabel,
+      time: clockInTime,
+      timestamp: clockInTimestamp || Date.now(),
+    })
+  }
+  if (!isClockedIn && clockOutTime && clockOutTime !== '—' && clockOutTime !== 'In office') {
+    events.push({
+      id: `log_admin_out_${clockOutTimestamp || Date.now()}`,
+      type: 'clock_out',
+      label: 'Clocked Out',
+      time: clockOutTime,
+      timestamp: clockOutTimestamp || Date.now(),
+    })
+  }
+  return events
+}
+
+/** Replace leftover clock-in/out history with the edited table times. */
+function patchShiftLogsForEditedTimes(existingLogs, times) {
+  const wfhClockIn = (existingLogs || []).some((entry) => entry.type === 'clock_in' && /wfh/i.test(entry.label || ''))
+  return [
+    ...officialClockEvents({ ...times, clockInLabel: wfhClockIn ? 'Clocked In (WFH)' : 'Clocked In' }),
+    ...pairedShiftLogs(keepNonClockShiftEvents(existingLogs)),
+  ]
+}
+
+/** Today's Shift Events must follow Clock In / Clock Out columns, not stale re-clock history. */
+function shiftEventsForDisplay(row, dateStr) {
+  const wfhClockIn = (row.shiftLogs || []).some((entry) => entry.type === 'clock_in' && /wfh/i.test(entry.label || ''))
+  const isClockedIn = Boolean(row.clockedIn) || !row.clockOutTime || row.clockOutTime === 'In office'
+  return [
+    ...officialClockEvents({
+      clockInTime: row.clockInTime,
+      clockInTimestamp: timestampFromDateAndTime(dateStr, row.clockInTime),
+      clockOutTime: row.clockOutTime,
+      clockOutTimestamp: timestampFromDateAndTime(dateStr, row.clockOutTime),
+      isClockedIn,
+      clockInLabel: wfhClockIn ? 'Clocked In (WFH)' : 'Clocked In',
+    }),
+    ...pairedShiftLogs(keepNonClockShiftEvents(row.shiftLogs)),
+  ]
 }
 
 function TimerWheel({ label, value, onUp, onDown }) {
@@ -412,6 +482,15 @@ export const AttendancePage = () => {
       )
 
       const clockInTimestamp = timestampFromDateAndTime(selectedDate, clockInTime)
+      const clockOutTimestamp = isClockedIn ? null : timestampFromDateAndTime(selectedDate, clockOutTime)
+      const liveLog = attendanceLogs.find((log) => log.uid === editingRow.uid) || {}
+      const nextShiftLogs = patchShiftLogsForEditedTimes(resolveShiftLogs({ ...liveLog, ...editingRow }), {
+        clockInTime,
+        clockInTimestamp,
+        clockOutTime,
+        clockOutTimestamp,
+        isClockedIn,
+      })
 
       const updatedData = {
         uid: editingRow.uid,
@@ -429,6 +508,8 @@ export const AttendancePage = () => {
         regularHours: secToHrsStr(regSec),
         autoClockOut: false,
         source: 'admin_edit',
+        shiftLogs: nextShiftLogs,
+        todayShiftLogs: nextShiftLogs,
       }
 
       await setDoc(doc(db, 'attendanceLogs', docId), updatedData, { merge: true })
@@ -595,7 +676,7 @@ export const AttendancePage = () => {
         regularSeconds: calculatedRegularSec,
         extraSeconds: log.extraSeconds || 0,
         autoClockOut: isAutoClockOut,
-        shiftLogs: log.shiftLogs || [],
+        shiftLogs: resolveShiftLogs(log),
       }
     }
 
@@ -1041,8 +1122,9 @@ export const AttendancePage = () => {
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             {rows
-              .filter((r) => r.shiftLogs && r.shiftLogs.length > 0)
-              .map((row) => (
+              .map((row) => ({ row, events: shiftEventsForDisplay(row, selectedDate) }))
+              .filter(({ events }) => events.length > 0)
+              .map(({ row, events }) => (
                 <Card key={row.uid} className="p-4 border-border bg-surface space-y-3">
                   <div className="flex items-center gap-2">
                     <div className="w-6 h-6 rounded-lg bg-accent-soft text-accent flex items-center justify-center font-bold text-[11px]">
@@ -1053,7 +1135,7 @@ export const AttendancePage = () => {
                   </div>
 
                   <div className="space-y-1.5">
-                    {[...row.shiftLogs]
+                    {[...events]
                       .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
                       .map((log, i) => (
                         <div

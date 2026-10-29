@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { Check } from 'lucide-react'
 import haloLogo from '../../assets/halologo.png'
@@ -9,6 +9,72 @@ import { useLiveAuthSession } from '../../../../shared/supabase/useLiveAuthSessi
 import { ONBOARDING_STATUS, isJoiningAccount, onboardingFromProfile } from '../../../../shared/supabase/employeeOnboarding.js'
 import { JOINING_STEPS, mergeJoiningAnswers, validateJoiningStep } from '../../../../shared/supabase/joiningForm.js'
 import { JoiningWizard } from './JoiningWizard'
+
+function ignoredUuidError(error) {
+  return /invalid input syntax for type uuid/i.test(String(error?.message || ''))
+}
+
+function draftKey(uid) {
+  return `employee-onboarding-draft:${uid}`
+}
+
+function clampStep(step) {
+  const index = Number(step)
+  if (!Number.isInteger(index)) return 0
+  return Math.min(Math.max(index, 0), JOINING_STEPS.length - 1)
+}
+
+function readDraft(uid) {
+  if (!uid) return null
+  try {
+    const parsed = JSON.parse(localStorage.getItem(draftKey(uid)) || 'null')
+    if (!parsed || typeof parsed !== 'object' || !parsed.answers) return null
+    return { answers: parsed.answers, step: clampStep(parsed.step), dirty: Boolean(parsed.dirty) }
+  } catch {
+    return null
+  }
+}
+
+function writeDraft(uid, answers, step, dirty) {
+  if (!uid) return
+  try {
+    localStorage.setItem(draftKey(uid), JSON.stringify({ answers, step: clampStep(step), dirty }))
+  } catch {
+    // A large signature can exceed browser storage. The server draft still saves.
+  }
+}
+
+function clearDraft(uid) {
+  if (!uid) return
+  try {
+    localStorage.removeItem(draftKey(uid))
+  } catch {
+    // Ignore storage failures. The submitted row is already on the server.
+  }
+}
+
+async function loadJoiningRecord(fallbackId) {
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+  if (sessionError) throw sessionError
+  const ids = [...new Set([sessionData.session?.user?.id, fallbackId].filter(Boolean))]
+  for (const id of ids) {
+    const byAuth = await supabase.from('employee_onboarding').select('*').eq('auth_id', id).maybeSingle()
+    if (byAuth.error) {
+      if (!ignoredUuidError(byAuth.error)) throw byAuth.error
+    } else if (byAuth.data) return byAuth.data
+    const byId = await supabase.from('employee_onboarding').select('*').eq('id', id).maybeSingle()
+    if (byId.error) {
+      if (!ignoredUuidError(byId.error)) throw byId.error
+    } else if (byId.data) return byId.data
+  }
+  for (const id of ids) {
+    const profile = await supabase.from('profiles').select('id, auth_id, data, created_at').eq('id', id).maybeSingle()
+    if (profile.error) throw profile.error
+    const fromProfile = onboardingFromProfile(profile.data)
+    if (fromProfile?.username || Object.keys(fromProfile?.employment || {}).length) return fromProfile
+  }
+  return null
+}
 
 export const JoiningFormPage = () => {
   const { user, sessionReady } = useLiveAuthSession({ auth, useUserStore, fetchCustomClaims })
@@ -23,6 +89,12 @@ export const JoiningFormPage = () => {
   const [detailsConfirmed, setDetailsConfirmed] = useState(false)
   const [submittedPopup, setSubmittedPopup] = useState(false)
   const [returnToPreview, setReturnToPreview] = useState(false)
+  const [draftReady, setDraftReady] = useState(false)
+  const ignoreNextDraftWrite = useRef(false)
+  const answersRef = useRef(answers)
+  const stepRef = useRef(step)
+  answersRef.current = answers
+  stepRef.current = step
 
   useEffect(() => {
     setDetailsConfirmed(false)
@@ -37,18 +109,25 @@ export const JoiningFormPage = () => {
     let cancelled = false
     Promise.resolve()
       .then(async () => {
-        const byAuth = await supabase.from('employee_onboarding').select('*').eq('auth_id', user.uid).maybeSingle()
-        if (byAuth.data) return byAuth.data
-        const byId = await supabase.from('employee_onboarding').select('*').eq('id', user.uid).maybeSingle()
-        if (byId.data) return byId.data
-        const profile = await supabase.from('profiles').select('id, auth_id, data, created_at').eq('id', user.uid).maybeSingle()
-        if (profile.error) throw profile.error
-        return onboardingFromProfile(profile.data)
+        return loadJoiningRecord(user.uid)
       })
       .then((data) => {
         if (cancelled) return
         setRow(data)
-        setAnswers(mergeJoiningAnswers(data?.answers))
+        const local = readDraft(user.uid)
+        const submittedNow = data?.status === ONBOARDING_STATUS.SUBMITTED
+        if (submittedNow) {
+          clearDraft(user.uid)
+          setAnswers(mergeJoiningAnswers(data?.answers))
+        } else if (local?.dirty) {
+          setAnswers(mergeJoiningAnswers(local.answers))
+          setStep(local.step)
+        } else {
+          setAnswers(mergeJoiningAnswers(data?.answers))
+          if (local) setStep(local.step)
+        }
+        ignoreNextDraftWrite.current = true
+        setDraftReady(Boolean(data) && !submittedNow)
       })
       .catch((loadError) => {
         if (!cancelled) setError(loadError.message)
@@ -75,6 +154,27 @@ export const JoiningFormPage = () => {
     }).eq('id', user.uid)
     if (updateError) throw updateError
   }
+
+  useEffect(() => {
+    if (!draftReady || !user?.uid || submitted) return undefined
+    if (ignoreNextDraftWrite.current) {
+      ignoreNextDraftWrite.current = false
+      return undefined
+    }
+    writeDraft(user.uid, answers, step, true)
+    const snapshot = JSON.stringify({ answers, step })
+    const timer = setTimeout(() => {
+      persistDraft(answers)
+        .then(() => {
+          const current = JSON.stringify({ answers: answersRef.current, step: stepRef.current })
+          if (current === snapshot) writeDraft(user.uid, answersRef.current, stepRef.current, false)
+        })
+        .catch(() => {
+          // Keep the browser copy. The next edit, Back, or Next tries the server again.
+        })
+    }, 700)
+    return () => clearTimeout(timer)
+  }, [answers, step, draftReady, submitted, user?.uid])
 
   const goNext = async () => {
     const message = validateJoiningStep(JOINING_STEPS[step].id, answers)
@@ -131,6 +231,7 @@ export const JoiningFormPage = () => {
         }).eq('id', user.uid)
         if (updateError) throw updateError
       }
+      clearDraft(user.uid)
       setRow({ ...row, status: ONBOARDING_STATUS.SUBMITTED, answers })
       setSubmittedPopup(true)
     } catch (err) {

@@ -1,7 +1,9 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { upsertAttendanceLog, getTodayAttendanceLog, getUserMonthlyAttendance } from '../services/attendanceService'
+import { upsertAttendanceLog, getTodayAttendanceLog, getUserMonthlyAttendance, flushAttendanceQueue } from '../services/attendanceService'
 import { attachTeamStoreCrossWindowSync } from '../services/desktopAttendanceSync'
+import { openPause, pairedShiftLogs } from '../../../../../shared/shiftLogs.js'
+import { mergeLoadedShiftLogs } from '../../../../../shared/offlineQueue.js'
 import { computeRealAttendanceStats, formatTo12HourTime, canonicalTimeFromDate, toEpochMs, timestampFromClockInTime, timeStrToMinutes, resolveEmployeeDisplayName } from '../services/attendanceStatsUtils'
 import { useUserStore } from '../../../stores/userStore'
 
@@ -14,43 +16,23 @@ export const OFFICE_END_MINUTE = 0
 
 // Regular workday length: 8 hours of office time, including break and lunch.
 export const WORKDAY_SECONDS = 8 * 3600
-export const LUNCH_SECONDS = 60 * 60
-export const LUNCH_MS = LUNCH_SECONDS * 1000
 
 let armLunchTimer = () => {}
 let disarmLunchTimer = () => {}
 
-function lunchCapMs(fields = {}) {
-  const start = toEpochMs(fields.lunchStartTime)
-  const ends = toEpochMs(fields.lunchEndsAt)
-  if (start && ends && ends > start) return ends - start
-  return LUNCH_MS
-}
-
 function openLunchSeconds(state, nowMs = Date.now()) {
   if (!state?.isOnLunch || !state.lunchStartTime) return 0
-  const elapsed = Math.max(0, Math.floor((nowMs - Number(state.lunchStartTime)) / 1000))
-  return Math.min(Math.floor(lunchCapMs(state) / 1000), elapsed)
+  return Math.max(0, Math.floor((nowMs - Number(state.lunchStartTime)) / 1000))
 }
 
 function resolveStoredLunch(fields = {}) {
   const start = toEpochMs(fields.lunchStartTime)
   const accumulated = Number(fields.accumulatedLunchSeconds) || 0
-  const capMs = lunchCapMs(fields)
   if (fields.isOnLunch && start) {
-    if (Date.now() - start >= capMs) {
-      return {
-        isOnLunch: false,
-        lunchStartTime: null,
-        lunchEndsAt: null,
-        accumulatedLunchSeconds: accumulated + Math.floor(capMs / 1000),
-        lunchJustEnded: true,
-      }
-    }
     return {
       isOnLunch: true,
       lunchStartTime: start,
-      lunchEndsAt: toEpochMs(fields.lunchEndsAt) || start + LUNCH_MS,
+      lunchEndsAt: null,
       accumulatedLunchSeconds: accumulated,
       lunchJustEnded: false,
     }
@@ -186,6 +168,35 @@ function pauseAlreadyEnded(logs, endType, startType) {
   return !start || Number(end.timestamp || 0) >= Number(start.timestamp || 0)
 }
 
+function pauseSignature(logs) {
+  return (logs || [])
+    .map((entry) => `${entry?.type || ''}:${entry?.id || entry?.timestamp || ''}`)
+    .sort()
+    .join('|')
+}
+
+function pauseLogsNeedSave(before, after) {
+  if (pauseSignature(before?.todayShiftLogs) !== pauseSignature(after?.todayShiftLogs)) return true
+  if (Boolean(before?.isOnLunch) !== Boolean(after?.isOnLunch)) return true
+  if (Boolean(before?.isOnBreak) !== Boolean(after?.isOnBreak)) return true
+  return false
+}
+
+function reconcilePauseState(state = {}) {
+  const logs = pairedShiftLogs(state.todayShiftLogs)
+  const lunch = openPause(logs, 'lunch_start', 'lunch_end')
+  const brk = openPause(logs, 'break_start', 'break_end')
+  return {
+    ...state,
+    todayShiftLogs: logs,
+    isOnLunch: Boolean(lunch),
+    lunchStartTime: lunch ? toEpochMs(state.lunchStartTime) || toEpochMs(lunch.timestamp) : null,
+    lunchEndsAt: lunch ? state.lunchEndsAt || null : null,
+    isOnBreak: Boolean(brk),
+    breakStartTime: brk ? toEpochMs(state.breakStartTime) || toEpochMs(brk.timestamp) : null,
+  }
+}
+
 function withShiftLog(logs, entry) {
   const latest = logs?.[0]
   if (
@@ -225,10 +236,12 @@ function mergeSavedPauses(liveState, todayLog) {
 
   const serverLogs = todayLog.todayShiftLogs || todayLog.shiftLogs || []
   const localLogs = next.todayShiftLogs || []
-  const localNewest = Number(localLogs[0]?.timestamp || 0)
-  const serverNewest = Number(serverLogs[0]?.timestamp || 0)
-  if (serverLogs.length && serverNewest > localNewest) {
-    next.todayShiftLogs = serverLogs
+  next.todayShiftLogs = mergeLoadedShiftLogs(localLogs, serverLogs, todayLog.source)
+  if (todayLog.source === 'admin_edit' && serverLogs.length) {
+    if (todayLog.clockInTime) next.clockInTime = todayLog.clockInTime
+    if (todayLog.clockInTimestamp != null) next.clockInTimestamp = todayLog.clockInTimestamp
+    next.clockOutTime = todayLog.clockOutTime || null
+    next.clockedIn = Boolean(todayLog.clockedIn)
   }
   return next
 }
@@ -432,6 +445,7 @@ export const useTeamStore = create(
         set({ currentUserId: uid })
 
         try {
+          await flushAttendanceQueue()
           const [todayLog, monthlyLogsMap] = await Promise.all([
             getTodayAttendanceLog(ids),
             getUserMonthlyAttendance(ids),
@@ -546,6 +560,7 @@ export const useTeamStore = create(
                 extraTimeLogs: [],
                 todayShiftLogs: [],
                 shiftLogs: [],
+                replaceShiftLogs: true,
                 date: today,
               })
             }
@@ -561,14 +576,38 @@ export const useTeamStore = create(
           }
           const realStats = computeRealAttendanceStats(monthlyLogsList, currentLive)
 
-          const resolved = applyResolvedLunch(todayState)
+          const reconciled = reconcilePauseState(todayState)
+          const resolved = applyResolvedLunch(reconciled)
           const { lunchJustEnded, ...resolvedState } = resolved
           if (lunchJustEnded && uid) {
+            const openStart = openPause(resolvedState.todayShiftLogs, 'lunch_start', 'lunch_end')
+            if (openStart) {
+              const endMs = Date.now()
+              resolvedState.todayShiftLogs = withShiftLog(resolvedState.todayShiftLogs, {
+                id: `log_${endMs}`,
+                type: 'lunch_end',
+                label: 'Ended Lunch',
+                time: canonicalTimeFromDate(new Date(endMs)),
+                timestamp: endMs,
+              })
+            }
             upsertAttendanceLog(uid, {
               isOnLunch: false,
               lunchStartTime: null,
               lunchEndsAt: null,
               accumulatedLunchSeconds: resolvedState.accumulatedLunchSeconds,
+              todayShiftLogs: resolvedState.todayShiftLogs,
+              shiftLogs: resolvedState.todayShiftLogs,
+            })
+          } else if (uid && pauseLogsNeedSave(todayState, reconciled)) {
+            upsertAttendanceLog(uid, {
+              isOnLunch: reconciled.isOnLunch,
+              lunchStartTime: reconciled.lunchStartTime,
+              lunchEndsAt: reconciled.lunchEndsAt,
+              isOnBreak: reconciled.isOnBreak,
+              breakStartTime: reconciled.breakStartTime,
+              todayShiftLogs: reconciled.todayShiftLogs,
+              shiftLogs: reconciled.todayShiftLogs,
             })
           }
 
@@ -782,6 +821,7 @@ export const useTeamStore = create(
               date: today,
               todayShiftLogs: newLogs,
               shiftLogs: newLogs,
+              replaceShiftLogs: isNewDay,
               locationVerified: gate.locationVerified === true,
               wfhExempt: gate.wfhExempt === true,
               clockInCoords: gate.coords || null,
@@ -989,11 +1029,12 @@ export const useTeamStore = create(
       },
 
       toggleBreak: (userMeta = {}) => {
-        const nowMs = Date.now()
-        if (nowMs - lastBreakToggleMs < 800) return
-        lastBreakToggleMs = nowMs
-
+        if (Date.now() - lastBreakToggleMs < 800) return
         const meta = resolveUserMeta(userMeta)
+        if (!get().clockedIn) return
+        if (!get().isOnBreak && get().isOnLunch) get().finishLunch()
+        const nowMs = Date.now()
+        lastBreakToggleMs = nowMs
         const state = get()
         if (!state.clockedIn) return
         const timeStr = canonicalTimeFromDate(new Date(nowMs))
@@ -1014,7 +1055,7 @@ export const useTeamStore = create(
             time: timeStr,
             timestamp: nowMs,
           }
-          const updatedLogs = withShiftLog(state.todayShiftLogs, newLog)
+          const updatedLogs = pairedShiftLogs(withShiftLog(state.todayShiftLogs, newLog))
           set({
             isOnBreak: true,
             breakStartTime: nowMs,
@@ -1044,9 +1085,29 @@ export const useTeamStore = create(
             })
           }
         } else {
+          const openStart = openPause(state.todayShiftLogs, 'break_start', 'break_end')
+          if (!openStart) {
+            const cleaned = pairedShiftLogs(state.todayShiftLogs)
+            set({
+              isOnBreak: false,
+              breakStartTime: null,
+              todayShiftLogs: cleaned,
+            })
+            if (meta.uid) {
+              upsertAttendanceLog(meta.uid, {
+                displayName: meta.displayName || 'Employee',
+                departmentName: meta.departmentName || '',
+                isOnBreak: false,
+                breakStartTime: null,
+                todayShiftLogs: cleaned,
+                shiftLogs: cleaned,
+              })
+            }
+            return
+          }
           const breakDuration = state.breakStartTime
             ? Math.floor((nowMs - state.breakStartTime) / 1000)
-            : 0
+            : Math.max(0, Math.floor((nowMs - Number(openStart.timestamp || nowMs)) / 1000))
           const newBreakTotal = state.accumulatedBreakSeconds + breakDuration
           const newLog = {
             id: `log_${nowMs}`,
@@ -1055,7 +1116,7 @@ export const useTeamStore = create(
             time: timeStr,
             timestamp: nowMs,
           }
-          const updatedLogs = withShiftLog(state.todayShiftLogs, newLog)
+          const updatedLogs = pairedShiftLogs(withShiftLog(state.todayShiftLogs, newLog))
           set({
             isOnBreak: false,
             breakStartTime: null,
@@ -1077,12 +1138,12 @@ export const useTeamStore = create(
         }
       },
 
-      startLunch: (userMeta = {}, options = {}) => {
+      startLunch: (userMeta = {}) => {
         const meta = resolveUserMeta(userMeta)
+        if (get().isOnBreak) get().toggleBreak(meta)
         const state = get()
         if (!state.clockedIn || state.isOnLunch) return
         const lunchStartMs = Date.now()
-        const endsAt = Number(options.endsAt) > lunchStartMs ? Number(options.endsAt) : lunchStartMs + LUNCH_MS
         const timeStr = canonicalTimeFromDate(new Date(lunchStartMs))
         const newLog = {
           id: `log_${lunchStartMs}`,
@@ -1091,11 +1152,11 @@ export const useTeamStore = create(
           time: timeStr,
           timestamp: lunchStartMs,
         }
-        const updatedLogs = [newLog, ...state.todayShiftLogs]
+        const updatedLogs = pairedShiftLogs(withShiftLog(state.todayShiftLogs, newLog))
         set({
           isOnLunch: true,
           lunchStartTime: lunchStartMs,
-          lunchEndsAt: endsAt,
+          lunchEndsAt: null,
           todayShiftLogs: updatedLogs,
         })
         if (meta.uid) {
@@ -1104,7 +1165,7 @@ export const useTeamStore = create(
             departmentName: meta.departmentName || '',
             isOnLunch: true,
             lunchStartTime: lunchStartMs,
-            lunchEndsAt: endsAt,
+            lunchEndsAt: null,
             accumulatedLunchSeconds: state.accumulatedLunchSeconds || 0,
             todayShiftLogs: updatedLogs,
             shiftLogs: updatedLogs,
@@ -1116,10 +1177,35 @@ export const useTeamStore = create(
       finishLunch: () => {
         const nowMs = Date.now()
         if (nowMs - lastLunchFinishMs < 800) return
-        lastLunchFinishMs = nowMs
         const meta = resolveUserMeta({})
         const state = get()
-        if (!state.isOnLunch || !state.lunchStartTime) return
+        const openStart = openPause(state.todayShiftLogs, 'lunch_start', 'lunch_end')
+        if (!state.isOnLunch || !state.lunchStartTime || !openStart) {
+          if (state.isOnLunch || state.lunchStartTime || state.lunchEndsAt) {
+            lastLunchFinishMs = nowMs
+            disarmLunchTimer()
+            const cleaned = pairedShiftLogs(state.todayShiftLogs)
+            set({
+              isOnLunch: false,
+              lunchStartTime: null,
+              lunchEndsAt: null,
+              todayShiftLogs: cleaned,
+            })
+            if (meta.uid) {
+              upsertAttendanceLog(meta.uid, {
+                displayName: meta.displayName || 'Employee',
+                departmentName: meta.departmentName || '',
+                isOnLunch: false,
+                lunchStartTime: null,
+                lunchEndsAt: null,
+                todayShiftLogs: cleaned,
+                shiftLogs: cleaned,
+              })
+            }
+          }
+          return
+        }
+        lastLunchFinishMs = nowMs
         const lockKey = `crm_lunch_finish_${state.lunchStartTime}`
         try {
           if (localStorage.getItem(lockKey)) return
@@ -1138,7 +1224,7 @@ export const useTeamStore = create(
           time: timeStr,
           timestamp: nowMs,
         }
-        const updatedLogs = withShiftLog(state.todayShiftLogs, newLog)
+        const updatedLogs = pairedShiftLogs(withShiftLog(state.todayShiftLogs, newLog))
         set({
           isOnLunch: false,
           lunchStartTime: null,
@@ -1189,6 +1275,8 @@ export const useTeamStore = create(
         const today = todayDateStr()
         if (isStaleLocalAttendance(state, today)) {
           Object.assign(state, freshWorkdayFields(today))
+        } else {
+          Object.assign(state, reconcilePauseState(state))
         }
         armLunchTimer()
       },
@@ -1203,18 +1291,6 @@ disarmLunchTimer = () => {
 }
 armLunchTimer = () => {
   disarmLunchTimer()
-  const { isOnLunch, lunchStartTime, lunchEndsAt, finishLunch } = useTeamStore.getState()
-  if (!isOnLunch || !lunchStartTime) return
-  const endsAt = Number(lunchEndsAt) || Number(lunchStartTime) + LUNCH_MS
-  const remaining = endsAt - Date.now()
-  if (remaining <= 0) {
-    finishLunch()
-    return
-  }
-  lunchEndTimer = setTimeout(() => {
-    lunchEndTimer = null
-    useTeamStore.getState().finishLunch()
-  }, remaining)
 }
 
 attachTeamStoreCrossWindowSync(useTeamStore)

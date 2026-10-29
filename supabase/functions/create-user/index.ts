@@ -99,7 +99,6 @@ function sanitizeReviews(raw: unknown) {
 
 function kraError(rows: unknown) {
   if (!Array.isArray(rows) || rows.length === 0) return ''
-  let total = 0
   for (const raw of rows) {
     const row = raw as { keyResultArea?: string; kpi?: string; weight?: number }
     const area = String(row.keyResultArea || '').trim()
@@ -107,9 +106,7 @@ function kraError(rows: unknown) {
     const weight = Number(row.weight)
     if (!area || !kpi) return 'Each KRA needs an area and a metric'
     if (!Number.isFinite(weight) || weight <= 0) return 'Each KRA weight must be greater than 0'
-    total += weight
   }
-  if (Math.abs(total - 80) > 0.001) return 'KRA weights must total 80%'
   return ''
 }
 
@@ -130,6 +127,121 @@ async function rememberJoiningPassword(admin, uid: string, password: string) {
     data: { ...(profile.data || {}), loginPassword: password },
     updated_at: new Date().toISOString(),
   }).eq('id', profile.id)
+}
+
+function joiningKras(customKras: unknown[], learningPlan: unknown, reviews: unknown) {
+  const rows = Array.isArray(customKras) ? customKras : []
+  return {
+    custom: rows.map((row) => ({
+      keyResultArea: String((row as { keyResultArea?: string }).keyResultArea || '').trim(),
+      kpi: String((row as { kpi?: string }).kpi || '').trim(),
+      weight: Number((row as { weight?: number }).weight),
+    })),
+    fixed: FIXED_KRAS,
+    learningPlan,
+    reviews,
+  }
+}
+
+async function findAuthIdForJoining(admin, email: string, username: string) {
+  const { data: profiles } = await admin.from('profiles').select('id, auth_id, data').eq('data->>email', email).limit(5)
+  const profile = (profiles || []).find((row) => String(row?.data?.email || '').trim().toLowerCase() === email)
+  if (profile) return String(profile.auth_id || profile.id || '')
+
+  const { data: onboarding } = await admin.from('employee_onboarding').select('auth_id').eq('username', username).maybeSingle()
+  if (onboarding?.auth_id) return String(onboarding.auth_id)
+
+  const { data: employees } = await admin.from('employees').select('id, auth_id, user_id, data').eq('data->>email', email).limit(5)
+  const employee = (employees || []).find((row) => String(row?.data?.email || '').trim().toLowerCase() === email)
+  return String(employee?.auth_id || employee?.user_id || employee?.id || '')
+}
+
+async function upsertJoiningProfile(admin, { uid, orgId, username, email, displayName, employment, kras, password }) {
+  const { data: profile, error: readErr } = await admin.from('profiles').select('id, data').eq('id', uid).maybeSingle()
+  if (readErr) throw new Error(readErr.message)
+  const current = profile?.data && typeof profile.data === 'object' ? profile.data : {}
+  const { error } = await admin.from('profiles').upsert({
+    id: uid,
+    auth_id: uid,
+    org_id: orgId,
+    data: {
+      ...current,
+      uid,
+      username,
+      email,
+      displayName: displayName || current.displayName || username,
+      role: 'employee_onboarding',
+      status: 'active',
+      tier: 'joining',
+      orgId,
+      loginPassword: password || current.loginPassword || '',
+      joiningStatus: current.joiningStatus === 'submitted' ? 'submitted' : 'draft',
+      employment: employment || current.employment || {},
+      kras,
+      answers: current.answers || {},
+    },
+    updated_at: new Date().toISOString(),
+  })
+  if (error) throw new Error(error.message)
+}
+
+async function saveJoiningOnboarding(admin, { orgId, uid, username, password, employment, kras }) {
+  const now = new Date().toISOString()
+  const byName = await admin.from('employee_onboarding').select('id, status').eq('username', username).maybeSingle()
+  if (byName.error) throw new Error(byName.error.message)
+  let existing = byName.data
+  if (!existing && uid) {
+    const byAuth = await admin.from('employee_onboarding').select('id, status').eq('auth_id', uid).maybeSingle()
+    if (byAuth.error) throw new Error(byAuth.error.message)
+    existing = byAuth.data
+  }
+  if (existing?.id) {
+    const { data, error } = await admin.from('employee_onboarding').update({
+      org_id: orgId,
+      auth_id: uid,
+      username,
+      login_password: password,
+      employment,
+      kras,
+      updated_at: now,
+    }).eq('id', existing.id).select('id, username, status').single()
+    if (error) throw new Error(error.message)
+    return data
+  }
+  const { data, error } = await admin.from('employee_onboarding').insert({
+    org_id: orgId,
+    auth_id: uid,
+    username,
+    status: 'awaiting_answers',
+    login_password: password,
+    employment,
+    kras,
+    answers: {},
+    documents: [],
+    updated_at: now,
+  }).select('id, username, status').single()
+  if (error) throw new Error(error.message)
+  return data
+}
+
+async function profilesByIds(admin, ids: string[]) {
+  const unique = [...new Set(ids.filter(Boolean))]
+  if (!unique.length) return []
+  const results = await Promise.all(unique.map((profileId) =>
+    admin.from('profiles').select('id, auth_id, data').eq('id', profileId).maybeSingle()
+  ))
+  const failed = results.find((result) => result.error)
+  if (failed?.error) throw new Error(failed.error.message)
+  return results.map((result) => result.data).filter(Boolean)
+}
+
+async function removeJoiningDirectoryRows(admin, { uid, username }) {
+  const emails = [`${username}@join.halo.local`, `${username}@joining.halo.local`]
+  const jobs = emails.map((email) => admin.from('employees').delete().eq('data->>email', email))
+  if (uid) jobs.push(admin.from('employees').delete().eq('id', uid))
+  const results = await Promise.all(jobs)
+  const failed = results.find((result) => result.error)
+  if (failed?.error) throw new Error(failed.error.message)
 }
 
 Deno.serve(async (req) => {
@@ -220,17 +332,17 @@ Deno.serve(async (req) => {
     const authIdHint = String(body.authId || body.uid || '').trim()
     if ((!id || id.length > 80) && !username) return json({ error: 'A valid onboarding id is required' }, 400)
 
-    let row = null
-    if (id) {
-      const byId = await admin.from('employee_onboarding').select('id, auth_id, org_id, username').eq('id', id).maybeSingle()
-      if (byId.error) return json({ error: byId.error.message }, 400)
-      row = byId.data
-    }
-    if (!row && username) {
-      const byName = await admin.from('employee_onboarding').select('id, auth_id, org_id, username').eq('username', username).maybeSingle()
-      if (byName.error) return json({ error: byName.error.message }, 400)
-      row = byName.data
-    }
+    const [byId, byName] = await Promise.all([
+      id
+        ? admin.from('employee_onboarding').select('id, auth_id, org_id, username').eq('id', id).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      username
+        ? admin.from('employee_onboarding').select('id, auth_id, org_id, username').eq('username', username).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+    ])
+    if (byId.error) return json({ error: byId.error.message }, 400)
+    if (byName.error) return json({ error: byName.error.message }, 400)
+    const row = byId.data || byName.data
     if (row && String(row.org_id || '') !== orgId) return json({ error: 'permission-denied' }, 403)
 
     const login = normalizeUsername(row?.username || username)
@@ -249,46 +361,68 @@ Deno.serve(async (req) => {
       if (profile.auth_id) authIds.add(String(profile.auth_id))
     }
 
-    if (login) {
-      const named = await admin.from('profiles').select('id, auth_id, data').eq('data->>username', login)
-      if (named.error) return json({ error: named.error.message }, 400)
-      for (const profile of named.data || []) considerProfile(profile)
+    const namedPromise = login
+      ? admin.from('profiles').select('id, auth_id, data').eq('data->>username', login)
+      : Promise.resolve({ data: [], error: null })
+    let named
+    let seeded
+    try {
+      ;[named, seeded] = await Promise.all([
+        namedPromise,
+        profilesByIds(admin, [id, ...authIds]),
+      ])
+    } catch (err) {
+      return json({ error: err instanceof Error ? err.message : 'Could not load the joining login' }, 400)
     }
-    if (id) {
-      const byProfileId = await admin.from('profiles').select('id, auth_id, data').eq('id', id).maybeSingle()
-      if (byProfileId.error) return json({ error: byProfileId.error.message }, 400)
-      considerProfile(byProfileId.data)
+    if (named.error) return json({ error: named.error.message }, 400)
+    const seenProfiles = new Set<string>()
+    for (const profile of [...(named.data || []), ...seeded]) {
+      if (!profile?.id || seenProfiles.has(profile.id)) continue
+      seenProfiles.add(profile.id)
+      considerProfile(profile)
     }
-    for (const authId of [...authIds]) {
-      const byAuth = await admin.from('profiles').select('id, auth_id, data').eq('id', authId).maybeSingle()
-      if (byAuth.error) return json({ error: byAuth.error.message }, 400)
-      considerProfile(byAuth.data)
+    const missing = [...authIds].filter((authId) => !seenProfiles.has(authId))
+    if (missing.length) {
+      try {
+        for (const profile of await profilesByIds(admin, missing)) considerProfile(profile)
+      } catch (err) {
+        return json({ error: err instanceof Error ? err.message : 'Could not load the joining login' }, 400)
+      }
     }
 
     if (!row && profileIds.size === 0) return json({ error: 'Onboarding record not found' }, 404)
 
-    for (const profileId of profileIds) {
+    const cleanups = [...profileIds].map(async (profileId) => {
       const employee = await admin.from('employees').select('id, data').eq('id', profileId).maybeSingle()
+      if (employee.error) throw new Error(employee.error.message)
       const employeeEmail = String(employee.data?.data?.email || '').toLowerCase()
       if (isJoiningLoginEmail(employeeEmail)) {
         const { error: employeeErr } = await admin.from('employees').delete().eq('id', profileId)
-        if (employeeErr) return json({ error: employeeErr.message }, 400)
+        if (employeeErr) throw new Error(employeeErr.message)
       }
       const { error: profileErr } = await admin.from('profiles').delete().eq('id', profileId)
-      if (profileErr) return json({ error: profileErr.message }, 400)
-    }
+      if (profileErr) throw new Error(profileErr.message)
+    })
     if (row) {
-      const { error: deleteErr } = await admin.from('employee_onboarding').delete().eq('id', row.id)
-      if (deleteErr) return json({ error: deleteErr.message }, 400)
+      cleanups.push((async () => {
+        const { error: deleteErr } = await admin.from('employee_onboarding').delete().eq('id', row.id)
+        if (deleteErr) throw new Error(deleteErr.message)
+      })())
     }
+    let authWarning = ''
     for (const authId of authIds) {
       if (!authId || authId === authData.user.id) continue
-      const { error: authDeleteErr } = await admin.auth.admin.deleteUser(authId)
-      if (authDeleteErr && !/not found/i.test(authDeleteErr.message || '')) {
-        return json({ ok: true, authWarning: authDeleteErr.message })
-      }
+      cleanups.push((async () => {
+        const { error: authDeleteErr } = await admin.auth.admin.deleteUser(authId)
+        if (authDeleteErr && !/not found/i.test(authDeleteErr.message || '')) authWarning = authDeleteErr.message
+      })())
     }
-    return json({ ok: true })
+    try {
+      await Promise.all(cleanups)
+    } catch (err) {
+      return json({ error: err instanceof Error ? err.message : 'Could not delete the joining login' }, 400)
+    }
+    return json(authWarning ? { ok: true, authWarning } : { ok: true })
   }
 
   if (kind === 'employee_onboarding') {
@@ -310,6 +444,7 @@ Deno.serve(async (req) => {
 
     const email = joiningUsernameToAuthEmail(username)
     const displayName = String(employment.fullName || username).trim()
+    const kras = joiningKras(customKras, learningPlan, reviews)
     const { data: created, error: createErr } = await admin.auth.admin.createUser({
       email,
       password,
@@ -317,37 +452,36 @@ Deno.serve(async (req) => {
       app_metadata: { role: 'employee_onboarding', orgId, tier: 'joining' },
       user_metadata: { displayName, username },
     })
-    if (createErr) return json({ error: createErr.message }, 400)
 
-    const uid = created.user.id
-    const now = new Date().toISOString()
-    const { data: row, error: insertErr } = await admin.from('employee_onboarding').insert({
-      org_id: orgId,
-      auth_id: uid,
-      username,
-      status: 'awaiting_answers',
-      login_password: password,
-      employment,
-      kras: {
-        custom: customKras.map((row) => ({
-          keyResultArea: String(row.keyResultArea || '').trim(),
-          kpi: String(row.kpi || '').trim(),
-          weight: Number(row.weight),
-        })),
-        fixed: FIXED_KRAS,
-        learningPlan,
-        reviews,
-      },
-      answers: {},
-      documents: [],
-      updated_at: now,
-    }).select('id, username, status').single()
-
-    if (insertErr) {
-      await admin.auth.admin.deleteUser(uid)
-      return json({ error: insertErr.message }, 400)
+    let uid = ''
+    let createdNew = false
+    if (createErr) {
+      if (!/already been registered/i.test(createErr.message || '')) {
+        return json({ error: createErr.message }, 400)
+      }
+      uid = await findAuthIdForJoining(admin, email, username)
+      if (!uid) return json({ error: createErr.message }, 400)
+      const { error: updateErr } = await admin.auth.admin.updateUserById(uid, {
+        password,
+        app_metadata: { role: 'employee_onboarding', orgId, tier: 'joining' },
+      })
+      if (updateErr) return json({ error: updateErr.message }, 400)
+    } else {
+      uid = created.user.id
+      createdNew = true
     }
-    return json({ id: row.id, username: row.username, status: row.status, joiningPath: '/joining' })
+
+    try {
+      const row = await saveJoiningOnboarding(admin, { orgId, uid, username, password, employment, kras })
+      await Promise.all([
+        upsertJoiningProfile(admin, { uid, orgId, username, email, displayName, employment, kras, password }),
+        removeJoiningDirectoryRows(admin, { uid, username }),
+      ])
+      return json({ id: row.id, uid, username: row.username, status: row.status, joiningPath: '/joining' })
+    } catch (err) {
+      if (createdNew) await admin.auth.admin.deleteUser(uid)
+      return json({ error: err instanceof Error ? err.message : 'Could not save the joining login' }, 400)
+    }
   }
 
   let email = String(body.email || '').trim().toLowerCase()
