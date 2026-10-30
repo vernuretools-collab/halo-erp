@@ -8,7 +8,7 @@ export const PageHeader = ({ title, description, actions, action, children }) =>
         <h1 className="text-2xl font-bold text-fg tracking-tight">{title}</h1>
         {description && <p className="text-sm text-muted mt-1">{description}</p>}
       </div>
-      {headerActions && <div className="flex items-center gap-3">{headerActions}</div>}
+      {headerActions && <div className="flex flex-wrap items-center justify-end gap-3">{headerActions}</div>}
     </div>
   )
 }

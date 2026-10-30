@@ -38,3 +38,18 @@ On Employee Onboarding, the admin chooses the KRA weights. They do not have to t
 
 - Setup and the handbook editor accept any total. A filled row still needs an area, a metric, and a weight greater than 0.
 - `create-user` for `employee_onboarding` does not reject a total other than 80%.
+
+## 2026-10-30 — Onboarding department can be typed
+
+On Employee Onboarding **Setup new employee**, Department is a text field with the existing departments as suggestions.
+
+- An admin can choose a saved department or type a new name and press Enter.
+- A new name is stored with the other departments, so the next setup can choose it.
+- Saving the joining login also stores a typed department that was not confirmed with Enter.
+
+## 2026-10-30 — Onboarding department is a plain input
+
+On Employee Onboarding **Setup new employee**, Department is only a text input. It does not show a department list or suggestions.
+
+- The admin types the department name. That text is what the joining record uses.
+- Saving still stores a new name with the other departments, without asking the admin to pick from a list.

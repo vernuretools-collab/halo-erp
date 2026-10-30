@@ -6,7 +6,7 @@ import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { TeamSubNav } from './components/TeamSubNav'
 import { HandbookFields, emptyKra } from './components/HandbookFields'
-import { getDepartments } from './services/teamService'
+import { createDepartment, getDepartments } from './services/teamService'
 import { createEmployeeOnboarding } from './services/employeeOnboardingService'
 import {
   DEFAULT_LEARNING_PLAN,
@@ -20,15 +20,13 @@ import {
   normalizeJoiningUsername,
 } from '../../../../shared/supabase/employeeOnboarding.js'
 
-const FALLBACK_DEPARTMENTS = ['Sales', 'Engineering & Product', 'Operations', 'Human Resources']
-
 export const EmployeeOnboardingSetup = ({ embedded = false, onClose, onCreated }) => {
-  const [departments, setDepartments] = useState(FALLBACK_DEPARTMENTS)
+  const [departments, setDepartments] = useState([])
   const [employment, setEmployment] = useState({
     employeeId: '',
     fullName: '',
     designation: '',
-    department: FALLBACK_DEPARTMENTS[0],
+    department: '',
     reportingManager: '',
     dateOfJoining: '',
     workMode: WORK_MODES[0],
@@ -54,7 +52,6 @@ export const EmployeeOnboardingSetup = ({ embedded = false, onClose, onCreated }
         const names = [...new Set(rows.map((row) => String(row.name || '').trim()).filter(Boolean))]
         if (names.length === 0) return
         setDepartments(names)
-        setEmployment((current) => ({ ...current, department: current.department || names[0] }))
       })
       .catch(() => {})
   }, [])
@@ -72,6 +69,25 @@ export const EmployeeOnboardingSetup = ({ embedded = false, onClose, onCreated }
   }, [employment.dateOfJoining, employment.probationPeriod, employment.reportingManager])
 
   const setField = (key, value) => setEmployment((current) => ({ ...current, [key]: value }))
+
+  const rememberDepartment = async (raw) => {
+    const trimmed = String(raw || '').trim()
+    if (!trimmed) return ''
+    const existing = departments.find((name) => name.toLowerCase() === trimmed.toLowerCase())
+    if (existing) {
+      setField('department', existing)
+      return existing
+    }
+    const created = await createDepartment(trimmed)
+    const savedName = String(created?.name || trimmed).trim()
+    setDepartments((current) => (
+      current.some((name) => name.toLowerCase() === savedName.toLowerCase())
+        ? current
+        : [...current, savedName]
+    ))
+    setField('department', savedName)
+    return savedName
+  }
 
   const handleSubmit = async (event) => {
     event.preventDefault()
@@ -91,12 +107,17 @@ export const EmployeeOnboardingSetup = ({ embedded = false, onClose, onCreated }
       return
     }
     const handbook = handbookPayload({ kras, learningPlan, reviews })
+    const department = await rememberDepartment(employment.department)
+    if (!department) {
+      setError('Enter a department, or choose one from the list.')
+      return
+    }
     setSaving(true)
     try {
       const result = await createEmployeeOnboarding({
         username: login,
         password,
-        employment,
+        employment: { ...employment, department },
         ...handbook,
       })
       const createdRow = { ...result, username: login, password, url: joiningPageUrl() }
@@ -155,17 +176,7 @@ export const EmployeeOnboardingSetup = ({ embedded = false, onClose, onCreated }
             <Input label="Employee ID *" placeholder="e.g. THEC-2026-SAL-001" value={employment.employeeId} onChange={(e) => setField('employeeId', e.target.value)} required />
             <Input label="Full name *" placeholder="Employee's full name" value={employment.fullName} onChange={(e) => setField('fullName', e.target.value)} required />
             <Input label="Designation *" placeholder="e.g. Inside Sales Executive" value={employment.designation} onChange={(e) => setField('designation', e.target.value)} required />
-            <label className="w-full space-y-1.5 text-left">
-              <span className="block text-xs font-medium text-fg">Department *</span>
-              <select
-                className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm"
-                value={employment.department}
-                onChange={(e) => setField('department', e.target.value)}
-                required
-              >
-                {departments.map((name, index) => <option key={`${name}-${index}`} value={name}>{name}</option>)}
-              </select>
-            </label>
+            <Input label="Department *" placeholder="e.g. Content & Creative" value={employment.department} onChange={(e) => setField('department', e.target.value)} required />
             <Input label="Reporting manager *" value={employment.reportingManager} onChange={(e) => setField('reportingManager', e.target.value)} required />
             <Input label="Date of joining *" type="date" value={employment.dateOfJoining} onChange={(e) => setField('dateOfJoining', e.target.value)} required />
             <label className="w-full space-y-1.5 text-left">

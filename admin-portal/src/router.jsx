@@ -69,6 +69,9 @@ const PayslipManager = lazy(() =>
 const EmployeeDocumentManager = lazy(() =>
   import('./features/team/EmployeeDocumentManager').then((m) => ({ default: m.EmployeeDocumentManager }))
 )
+const RelievingLetterPage = lazy(() =>
+  import('./features/team/RelievingLetterPage').then((m) => ({ default: m.RelievingLetterPage }))
+)
 const WfhPolicyPage = lazy(() =>
   import('./features/team/WfhPolicyPage').then((m) => ({ default: m.WfhPolicyPage }))
 )
@@ -179,6 +182,7 @@ export const router = createBrowserRouter([
           { path: 'holidays', element: <HolidayManager /> },
           { path: 'payslips', element: <PayslipManager /> },
           { path: 'documents', element: <EmployeeDocumentManager /> },
+          { path: 'relieving-letter', element: <RelievingLetterPage /> },
           { path: 'wfh-policy', element: <WfhPolicyPage /> },
           { path: 'timeline', element: <EmployeeTimelinePage /> },
           { path: 'reports', element: <EmployeeMonthlyReportPage /> },

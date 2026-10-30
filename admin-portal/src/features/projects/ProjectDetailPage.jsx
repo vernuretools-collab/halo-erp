@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { collection, getDocs, query, where } from 'firebase/firestore'
 import { db } from '../../shared/services/firebaseService'
@@ -9,6 +9,7 @@ import { Input } from '../../components/ui/Input'
 import { useUserStore } from '../../stores/userStore'
 import {
   getProjectById,
+  getProjectProcessSteps,
   updateProjectInDb,
   subscribeProjectProcessSteps,
   addProcessStep,
@@ -178,6 +179,34 @@ export const ProjectDetailPage = () => {
   // Clients & Team Members dropdown
   const [clients, setClients] = useState([])
   const [employees, setEmployees] = useState([])
+  const stepsWriteSeq = useRef(0)
+  const settledWriteSeq = useRef(0)
+  const stepsRef = useRef([])
+
+  const publishSteps = (writeSeq, list) => {
+    if (writeSeq !== stepsWriteSeq.current) return
+    settledWriteSeq.current = writeSeq
+    stepsRef.current = list
+    setSteps(list)
+  }
+
+  const reloadSteps = async (writeSeq) => {
+    if (!projectId) return
+    const list = await getProjectProcessSteps(projectId)
+    publishSteps(writeSeq, list)
+  }
+
+  const applyLocalSteps = (updater) => {
+    const previous = stepsRef.current
+    const next = updater(previous)
+    stepsRef.current = next
+    setSteps(next)
+    return previous
+  }
+
+  const restoreSteps = (writeSeq, previous) => {
+    publishSteps(writeSeq, previous)
+  }
 
   // Load project details
   useEffect(() => {
@@ -206,6 +235,8 @@ export const ProjectDetailPage = () => {
     if (!projectId) return
 
     const unsubscribe = subscribeProjectProcessSteps(projectId, (list) => {
+      if (stepsWriteSeq.current !== settledWriteSeq.current) return
+      stepsRef.current = list
       setSteps(list)
     })
 
@@ -277,19 +308,54 @@ export const ProjectDetailPage = () => {
     e.preventDefault()
     if (!stepTitle.trim()) return
 
+    const payload = {
+      title: stepTitle.trim(),
+      message: stepMessage.trim(),
+      type: stepType,
+      status: stepStatus,
+      author: stepAuthor.trim(),
+      meta: stepMeta.trim(),
+    }
+    const now = new Date().toISOString()
+    const writeSeq = ++stepsWriteSeq.current
+    const editingId = editingStep?.id
+    const previous = applyLocalSteps((prev) => {
+      if (editingId) {
+        return prev.map((s) =>
+          s.id === editingId
+            ? {
+                ...s,
+                ...payload,
+                updatedAt: now,
+                completedAt: payload.status === 'completed' ? s.completedAt || now : null,
+              }
+            : s
+        )
+      }
+      return [
+        ...prev,
+        {
+          id: `temp-${writeSeq}`,
+          ...payload,
+          projectId,
+          stepNumber: (prev.reduce((max, s) => Math.max(max, s.stepNumber || 0), 0) || 0) + 1,
+          createdByRole: 'admin',
+          createdByUid: adminUid,
+          createdByName: adminName,
+          clientVisibility: 'approved',
+          clientApprovedAt: now,
+          clientApprovedBy: adminUid || adminName || 'admin',
+          completedAt: payload.status === 'completed' ? now : null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]
+    })
+
     setSubmittingStep(true)
     try {
-      const payload = {
-        title: stepTitle.trim(),
-        message: stepMessage.trim(),
-        type: stepType,
-        status: stepStatus,
-        author: stepAuthor.trim(),
-        meta: stepMeta.trim(),
-      }
-
-      if (editingStep) {
-        await updateProcessStep(projectId, editingStep.id, payload)
+      if (editingId) {
+        await updateProcessStep(projectId, editingId, payload)
       } else {
         await addProcessStep(projectId, {
           ...payload,
@@ -301,7 +367,9 @@ export const ProjectDetailPage = () => {
       }
 
       setShowStepModal(false)
+      await reloadSteps(writeSeq)
     } catch (err) {
+      restoreSteps(writeSeq, previous)
       console.error('Failed to save process step:', err)
     } finally {
       setSubmittingStep(false)
@@ -310,39 +378,95 @@ export const ProjectDetailPage = () => {
 
   // One-Click Toggle Status (Pending -> In Progress -> Completed -> Pending)
   const handleToggleStatus = async (step) => {
+    const nextStatus =
+      step.status === 'in_progress' ? 'completed' : step.status === 'completed' ? 'pending' : 'in_progress'
+    const now = new Date().toISOString()
+    const writeSeq = ++stepsWriteSeq.current
+    const previous = applyLocalSteps((prev) =>
+      prev.map((s) =>
+        s.id === step.id
+          ? {
+              ...s,
+              status: nextStatus,
+              completedAt: nextStatus === 'completed' ? now : null,
+              updatedAt: now,
+            }
+          : s
+      )
+    )
     try {
       await toggleProcessStepStatus(projectId, step.id, step.status)
+      await reloadSteps(writeSeq)
     } catch (err) {
+      restoreSteps(writeSeq, previous)
       console.error('Failed to toggle status:', err)
     }
   }
 
   // Direct Mark Completed / In Progress / Pending Action
   const handleSetStepStatus = async (stepId, targetStatus) => {
+    const now = new Date().toISOString()
+    const writeSeq = ++stepsWriteSeq.current
+    const previous = applyLocalSteps((prev) =>
+      prev.map((s) =>
+        s.id === stepId
+          ? {
+              ...s,
+              status: targetStatus,
+              completedAt: targetStatus === 'completed' ? now : null,
+              updatedAt: now,
+            }
+          : s
+      )
+    )
     try {
       await updateProcessStep(projectId, stepId, { status: targetStatus })
+      await reloadSteps(writeSeq)
     } catch (err) {
+      restoreSteps(writeSeq, previous)
       console.error('Failed to update step status:', err)
     }
   }
 
   const handleSetClientVisibility = async (stepId, visibility) => {
+    const now = new Date().toISOString()
+    const writeSeq = ++stepsWriteSeq.current
+    const previous = applyLocalSteps((prev) =>
+      prev.map((s) =>
+        s.id === stepId
+          ? {
+              ...s,
+              clientVisibility: visibility,
+              updatedAt: now,
+              ...(visibility === 'approved'
+                ? { clientApprovedAt: now, clientApprovedBy: adminUid || adminName || 'admin' }
+                : {}),
+            }
+          : s
+      )
+    )
     try {
       await setProcessStepClientVisibility(projectId, stepId, visibility, {
         uid: adminUid,
         name: adminName,
       })
+      await reloadSteps(writeSeq)
     } catch (err) {
+      restoreSteps(writeSeq, previous)
       console.error('Failed to update client visibility:', err)
     }
   }
 
   // Delete Step
   const handleDeleteStep = async (stepId) => {
+    const writeSeq = ++stepsWriteSeq.current
+    const previous = applyLocalSteps((prev) => prev.filter((s) => s.id !== stepId))
     try {
       await deleteProcessStep(projectId, stepId)
       setDeleteConfirmStep(null)
+      await reloadSteps(writeSeq)
     } catch (err) {
+      restoreSteps(writeSeq, previous)
       console.error('Failed to delete step:', err)
     }
   }

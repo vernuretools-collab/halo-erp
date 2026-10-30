@@ -60,6 +60,9 @@ export function TeamSubNav({ className = '' }) {
       <NavLink to="/team/documents" className={linkClass}>
         <FolderOpen className="w-3.5 h-3.5" /> Documents
       </NavLink>
+      <NavLink to="/team/relieving-letter" className={linkClass}>
+        <FileText className="w-3.5 h-3.5" /> Relieving Letter
+      </NavLink>
       <NavLink to="/team/wfh-policy" className={linkClass}>
         <Home className="w-3.5 h-3.5" /> Leave & WFH Policy
       </NavLink>
