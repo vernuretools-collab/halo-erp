@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Download, Eraser, PenLine, RotateCcw, Upload } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Download, Eraser, PenLine, RotateCcw, Upload } from 'lucide-react'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
@@ -7,7 +7,7 @@ import { Input } from '../../components/ui/Input'
 import { supabase } from '../../shared/services/firebaseService'
 import { TeamSubNav } from './components/TeamSubNav'
 import { getEmployees } from './services/teamService'
-import { addMonthsInput, downloadAssetsReturn, downloadCredentialsRevocation, downloadExperienceCertificate, downloadFnfSettlement, downloadNda, downloadRelievingLetter, formatTenure } from './services/relievingLetterPdf'
+import { addMonthsInput, downloadAssetsReturn, downloadCredentialsRevocation, downloadExperienceCertificate, downloadFnfSettlement, downloadNda, downloadRelievingLetter, emptyAssetRows, emptyCredentialRows, emptySettlementRows, formatTenure, SETTLEMENT_STATUSES } from './services/relievingLetterPdf'
 
 const DEFAULT_SIGNATORY = 'Swathish G'
 const DEFAULT_TITLE = 'Co-Founder & Authorised Signatory'
@@ -237,6 +237,35 @@ function employeeLabel(employee) {
   return employee.displayName || employee.name || employee.email || 'Employee'
 }
 
+const LETTERS = [
+  { id: 'letter', label: 'Relieving Letter' },
+  { id: 'assets', label: 'Assets Return' },
+  { id: 'credentials', label: 'Credentials Revocation' },
+  { id: 'nda', label: 'NDA & Confidentiality' },
+  { id: 'fnf', label: 'F&F Settlement' },
+  { id: 'experience', label: 'Experience Certificate' },
+]
+
+const DOWNLOADS = {
+  letter: { save: downloadRelievingLetter, error: 'The relieving letter could not be downloaded.', label: 'Download relieving letter' },
+  assets: { save: downloadAssetsReturn, error: 'The assets acknowledgement could not be downloaded.', label: 'Download assets return' },
+  credentials: { save: downloadCredentialsRevocation, error: 'The credentials revocation could not be downloaded.', label: 'Download credentials revocation' },
+  nda: { save: downloadNda, error: 'The NDA could not be downloaded.', label: 'Download NDA' },
+  fnf: { save: downloadFnfSettlement, error: 'The full and final settlement could not be downloaded.', label: 'Download F&F settlement' },
+  experience: { save: downloadExperienceCertificate, error: 'The experience certificate could not be downloaded.', label: 'Download experience certificate' },
+}
+
+function filled(value) {
+  return Boolean(String(value || '').trim())
+}
+
+function completeRow(row, fields, optional) {
+  if (optional && fields.every((field) => !filled(row[field]))) return true
+  return fields.every((field) => filled(row[field]))
+}
+
+const rowInputClass = 'w-full bg-surface border border-border text-fg text-xs rounded-lg py-2 px-2.5 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent'
+
 const emptyForm = () => ({
   employeeName: '',
   designation: '',
@@ -250,12 +279,16 @@ const emptyForm = () => ({
   conductSummary: DEFAULT_CONDUCT,
   signatoryName: DEFAULT_SIGNATORY,
   signatoryTitle: DEFAULT_TITLE,
+  assets: emptyAssetRows(),
+  credentials: emptyCredentialRows(),
+  settlement: emptySettlementRows(),
 })
 
 export function RelievingLetterPage() {
   const [employees, setEmployees] = useState([])
   const [selectedId, setSelectedId] = useState('')
   const [form, setForm] = useState(emptyForm)
+  const [letter, setLetter] = useState('letter')
   const [coFounderSign, setCoFounderSign] = useState(initialCoFounderSign)
   const [employeeSign, setEmployeeSign] = useState('')
   const [pad, setPad] = useState('')
@@ -299,7 +332,7 @@ export function RelievingLetterPage() {
     setForm((current) => (current.settlementDeadline === next ? current : { ...current, settlementDeadline: next }))
   }, [form.lastWorkingDay])
 
-  const assetsReady = useMemo(() => [
+  const exitReady = useMemo(() => [
     form.employeeName,
     form.designation,
     form.department,
@@ -307,20 +340,68 @@ export function RelievingLetterPage() {
     form.issueDate,
     form.signatoryName,
     form.signatoryTitle,
-  ].every((value) => String(value || '').trim()), [form])
+  ].every(filled), [form])
 
-  const ready = useMemo(() => [
-    form.employeeName,
-    form.designation,
-    form.department,
+  const letterReady = useMemo(() => exitReady && [
     form.dateOfJoining,
     form.resignationDate,
-    form.lastWorkingDay,
-    form.issueDate,
     form.totalTenure,
-    form.signatoryName,
-    form.signatoryTitle,
-  ].every((value) => String(value || '').trim()), [form])
+  ].every(filled), [exitReady, form])
+
+  const experienceReady = useMemo(() => exitReady && [
+    form.dateOfJoining,
+    form.totalTenure,
+    form.conductSummary,
+  ].every(filled), [exitReady, form])
+
+  const assetRowsReady = useMemo(() => form.assets.every((row) => completeRow(
+    row,
+    ['item', 'serial', 'condition', 'status'],
+    row.other,
+  )), [form.assets])
+
+  const credentialRowsReady = useMemo(() => form.credentials.every((row) => completeRow(
+    row,
+    ['platform', 'access', 'action', 'confirmedBy'],
+    row.other,
+  )), [form.credentials])
+
+  const letterIndex = LETTERS.findIndex((item) => item.id === letter)
+  const currentLetter = LETTERS[letterIndex] || LETTERS[0]
+
+  const goStep = (delta) => {
+    const next = letterIndex + delta
+    if (next < 0 || next >= LETTERS.length) return
+    setLetter(LETTERS[next].id)
+  }
+
+  const canDownload = letter === 'letter'
+    ? letterReady
+    : letter === 'assets'
+      ? exitReady && assetRowsReady
+      : letter === 'credentials'
+        ? exitReady && credentialRowsReady
+        : letter === 'fnf'
+          ? exitReady && filled(form.settlementDeadline)
+          : letter === 'experience'
+            ? experienceReady
+            : exitReady
+
+  const downloadGap = [
+    [form.employeeName, 'employee name'],
+    [form.designation, 'designation'],
+    [form.department, 'department'],
+    [form.lastWorkingDay, 'last working day'],
+    [form.issueDate, 'issue date'],
+    [form.signatoryName, 'authorised signatory'],
+    [form.signatoryTitle, 'signatory title'],
+    ...(letter === 'letter' || letter === 'experience' ? [[form.dateOfJoining, 'date of joining'], [form.totalTenure, 'total tenure']] : []),
+    ...(letter === 'letter' ? [[form.resignationDate, 'resignation date']] : []),
+    ...(letter === 'experience' ? [[form.conductSummary, 'conduct summary']] : []),
+    ...(letter === 'fnf' ? [[form.settlementDeadline, 'F&F deadline']] : []),
+  ].filter(([value]) => !filled(value)).map(([, label]) => label)
+  if (letter === 'assets' && !assetRowsReady) downloadGap.push('each listed asset row')
+  if (letter === 'credentials' && !credentialRowsReady) downloadGap.push('each listed credential row')
 
   const setField = (key, value) => {
     if (key === 'totalTenure') tenureEdited.current = true
@@ -379,68 +460,23 @@ export function RelievingLetterPage() {
     setPad('')
   }
 
+  const setRow = (key, index, field, value) => {
+    setForm((current) => ({
+      ...current,
+      [key]: current[key].map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row)),
+    }))
+  }
+
   const handleDownload = async (event) => {
-    event.preventDefault()
-    if (!ready || downloading) return
+    event?.preventDefault()
+    const pack = DOWNLOADS[letter]
+    if (!pack || !canDownload || downloading) return
     setError('')
-    setDownloading('letter')
+    setDownloading(letter)
     try {
-      await downloadRelievingLetter(letterInput())
+      await pack.save(letterInput())
     } catch (err) {
-      setError(err?.message || 'The relieving letter could not be downloaded.')
-    } finally {
-      setDownloading('')
-    }
-  }
-
-  const downloadPackFile = async (key, save, fallback) => {
-    if (!assetsReady || downloading) return
-    setError('')
-    setDownloading(key)
-    try {
-      await save(letterInput())
-    } catch (err) {
-      setError(err?.message || fallback)
-    } finally {
-      setDownloading('')
-    }
-  }
-
-  const handleAssetsDownload = () => downloadPackFile(
-    'assets',
-    downloadAssetsReturn,
-    'The assets acknowledgement could not be downloaded.',
-  )
-
-  const handleCredentialsDownload = () => downloadPackFile(
-    'credentials',
-    downloadCredentialsRevocation,
-    'The credentials revocation could not be downloaded.',
-  )
-
-  const handleNdaDownload = () => downloadPackFile(
-    'nda',
-    downloadNda,
-    'The NDA could not be downloaded.',
-  )
-
-  const handleFnfDownload = () => {
-    if (!String(form.settlementDeadline || '').trim()) return
-    downloadPackFile(
-      'fnf',
-      downloadFnfSettlement,
-      'The full and final settlement could not be downloaded.',
-    )
-  }
-
-  const handleExperienceDownload = async () => {
-    if (!ready || downloading) return
-    setError('')
-    setDownloading('experience')
-    try {
-      await downloadExperienceCertificate(letterInput())
-    } catch (err) {
-      setError(err?.message || 'The experience certificate could not be downloaded.')
+      setError(err?.message || pack.error)
     } finally {
       setDownloading('')
     }
@@ -450,8 +486,8 @@ export function RelievingLetterPage() {
     <div className="space-y-5">
       <TeamSubNav />
       <PageHeader
-        title="Relieving Letter"
-        description="Enter the exit details, then download any document in the exit pack. Files are not saved to the employee record."
+        title="Final Documentation"
+        description="Enter the exit details, then open each letter and download its PDF. Files are not saved to the employee record."
         actions={(
           <div className="grid w-[24rem] max-w-full grid-cols-2 gap-2">
             <SignCard
@@ -504,41 +540,119 @@ export function RelievingLetterPage() {
                 })}
               </select>
             </div>
-            <Input label="Employee name *" value={form.employeeName} onChange={(event) => setField('employeeName', event.target.value)} required />
-            <Input label="Designation *" value={form.designation} onChange={(event) => setField('designation', event.target.value)} required />
-            <Input label="Department *" value={form.department} onChange={(event) => setField('department', event.target.value)} required />
-            <Input label="Date of joining *" type="date" value={form.dateOfJoining} onChange={(event) => setField('dateOfJoining', event.target.value)} required />
-            <Input label="Resignation date *" type="date" value={form.resignationDate} onChange={(event) => setField('resignationDate', event.target.value)} required />
-            <Input label="Last working day *" type="date" value={form.lastWorkingDay} onChange={(event) => setField('lastWorkingDay', event.target.value)} required />
-            <Input label="Issue date *" type="date" value={form.issueDate} onChange={(event) => setField('issueDate', event.target.value)} required />
-            <Input label="Total tenure *" value={form.totalTenure} onChange={(event) => setField('totalTenure', event.target.value)} required />
-            <Input label="F&F deadline *" type="date" value={form.settlementDeadline} onChange={(event) => setField('settlementDeadline', event.target.value)} required />
-            <Input label="Conduct summary *" value={form.conductSummary} onChange={(event) => setField('conductSummary', event.target.value)} required />
-            <Input label="Authorised signatory *" value={form.signatoryName} onChange={(event) => setField('signatoryName', event.target.value)} required />
-            <Input label="Signatory title *" value={form.signatoryTitle} onChange={(event) => setField('signatoryTitle', event.target.value)} required />
+            <Input label="Employee name *" value={form.employeeName} onChange={(event) => setField('employeeName', event.target.value)} />
+            <Input label="Designation *" value={form.designation} onChange={(event) => setField('designation', event.target.value)} />
+            <Input label="Department *" value={form.department} onChange={(event) => setField('department', event.target.value)} />
+            <Input label="Date of joining *" type="date" value={form.dateOfJoining} onChange={(event) => setField('dateOfJoining', event.target.value)} />
+            <Input label="Resignation date *" type="date" value={form.resignationDate} onChange={(event) => setField('resignationDate', event.target.value)} />
+            <Input label="Last working day *" type="date" value={form.lastWorkingDay} onChange={(event) => setField('lastWorkingDay', event.target.value)} />
+            <Input label="Issue date *" type="date" value={form.issueDate} onChange={(event) => setField('issueDate', event.target.value)} />
+            <Input label="Total tenure *" value={form.totalTenure} onChange={(event) => setField('totalTenure', event.target.value)} />
+            <Input label="Authorised signatory *" value={form.signatoryName} onChange={(event) => setField('signatoryName', event.target.value)} />
+            <Input label="Signatory title *" value={form.signatoryTitle} onChange={(event) => setField('signatoryTitle', event.target.value)} />
           </div>
         </Card>
-        {error && <p className="text-sm text-rose-500">{error}</p>}
-        <div className="flex flex-wrap gap-3">
-          <Button type="submit" icon={Download} disabled={!ready || Boolean(downloading)}>
-            {downloading === 'letter' ? 'Preparing PDF…' : 'Download relieving letter'}
-          </Button>
-          <Button type="button" variant="secondary" icon={Download} disabled={!assetsReady || Boolean(downloading)} onClick={handleAssetsDownload}>
-            {downloading === 'assets' ? 'Preparing PDF…' : 'Download assets return'}
-          </Button>
-          <Button type="button" variant="secondary" icon={Download} disabled={!assetsReady || Boolean(downloading)} onClick={handleCredentialsDownload}>
-            {downloading === 'credentials' ? 'Preparing PDF…' : 'Download credentials revocation'}
-          </Button>
-          <Button type="button" variant="secondary" icon={Download} disabled={!assetsReady || Boolean(downloading)} onClick={handleNdaDownload}>
-            {downloading === 'nda' ? 'Preparing PDF…' : 'Download NDA'}
-          </Button>
-          <Button type="button" variant="secondary" icon={Download} disabled={!assetsReady || !form.settlementDeadline || Boolean(downloading)} onClick={handleFnfDownload}>
-            {downloading === 'fnf' ? 'Preparing PDF…' : 'Download F&F settlement'}
-          </Button>
-          <Button type="button" variant="secondary" icon={Download} disabled={!ready || Boolean(downloading)} onClick={handleExperienceDownload}>
-            {downloading === 'experience' ? 'Preparing PDF…' : 'Download experience certificate'}
-          </Button>
-        </div>
+        <Card>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">{letterIndex + 1} of 6</p>
+              <p className="mt-1 text-sm font-medium text-fg">{currentLetter.label}</p>
+            </div>
+            <Button type="button" icon={Download} disabled={!canDownload || Boolean(downloading)} onClick={handleDownload}>
+              {downloading === letter ? 'Preparing PDF…' : DOWNLOADS[letter].label}
+            </Button>
+          </div>
+          {!canDownload && downloadGap.length > 0 && (
+            <p className="mt-2 text-xs text-rose-500">Fill {downloadGap.join(', ')} to download.</p>
+          )}
+          <div className="mt-4 flex gap-1.5">
+            {LETTERS.map((item, index) => (
+              <span
+                key={item.id}
+                className={`h-1.5 flex-1 rounded-full ${index <= letterIndex ? 'bg-accent' : 'bg-chrome'}`}
+              />
+            ))}
+          </div>
+          <div className="mt-4">
+            {letter === 'letter' && (
+              <p className="text-sm text-muted">This letter uses the employee details already entered. Download it, then go to the next letter.</p>
+            )}
+            {letter === 'assets' && (
+              <div className="space-y-3">
+                <p className="text-xs text-muted">Write NIL when an item was not issued. The two extra rows are optional.</p>
+                {form.assets.map((row, index) => (
+                  <div key={index} className="grid grid-cols-1 gap-2 rounded-xl border border-border p-3 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
+                    {row.other ? (
+                      <input aria-label={`Other asset ${index + 1}`} placeholder="Other item" value={row.item} onChange={(event) => setRow('assets', index, 'item', event.target.value)} className={rowInputClass} />
+                    ) : (
+                      <p className="flex items-center text-xs font-medium text-fg">{index + 1}. {row.item}</p>
+                    )}
+                    <input aria-label={`Serial for ${row.item || 'other asset'}`} placeholder="Serial / details" value={row.serial} onChange={(event) => setRow('assets', index, 'serial', event.target.value)} className={rowInputClass} />
+                    <input aria-label={`Condition for ${row.item || 'other asset'}`} placeholder="Condition" value={row.condition} onChange={(event) => setRow('assets', index, 'condition', event.target.value)} className={rowInputClass} />
+                    <input aria-label={`Status for ${row.item || 'other asset'}`} placeholder="Status" value={row.status} onChange={(event) => setRow('assets', index, 'status', event.target.value)} className={rowInputClass} />
+                  </div>
+                ))}
+              </div>
+            )}
+            {letter === 'credentials' && (
+              <div className="space-y-3">
+                <p className="text-xs text-muted">Mark each platform as Revoked, Transferred, or N/A, and name who confirmed it.</p>
+                {form.credentials.map((row, index) => (
+                  <div key={index} className={`grid grid-cols-1 gap-2 rounded-xl border border-border p-3 ${row.other ? 'md:grid-cols-2' : 'md:grid-cols-[1.4fr_1fr_1fr]'}`}>
+                    {row.other ? (
+                      <>
+                        <input aria-label={`Other platform ${index + 1}`} placeholder="Other platform" value={row.platform} onChange={(event) => setRow('credentials', index, 'platform', event.target.value)} className={rowInputClass} />
+                        <input aria-label={`Access type ${index + 1}`} placeholder="Access type" value={row.access} onChange={(event) => setRow('credentials', index, 'access', event.target.value)} className={rowInputClass} />
+                      </>
+                    ) : (
+                      <p className="flex items-center text-xs font-medium text-fg">{index + 1}. {row.platform} <span className="ml-1 font-normal text-muted">· {row.access}</span></p>
+                    )}
+                    <input aria-label={`Action for ${row.platform || 'other platform'}`} placeholder="Action taken" value={row.action} onChange={(event) => setRow('credentials', index, 'action', event.target.value)} className={rowInputClass} />
+                    <input aria-label={`Confirmed by for ${row.platform || 'other platform'}`} placeholder="Confirmed by" value={row.confirmedBy} onChange={(event) => setRow('credentials', index, 'confirmedBy', event.target.value)} className={rowInputClass} />
+                  </div>
+                ))}
+              </div>
+            )}
+            {letter === 'nda' && (
+              <p className="text-sm text-muted">This agreement uses the employee details already entered. The 24-month non-solicitation period stays as printed.</p>
+            )}
+            {letter === 'fnf' && (
+              <div className="space-y-3">
+                <div className="max-w-md">
+                  <Input label="F&F deadline *" type="date" value={form.settlementDeadline} onChange={(event) => setField('settlementDeadline', event.target.value)} />
+                </div>
+                <p className="text-xs text-muted">Set the status printed for each settlement component.</p>
+                {form.settlement.map((row, index) => (
+                  <div key={row.component} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border p-3">
+                    <p className="text-xs font-medium text-fg">{row.component}</p>
+                    <select
+                      aria-label={`Status for ${row.component}`}
+                      value={row.status}
+                      onChange={(event) => setRow('settlement', index, 'status', event.target.value)}
+                      className={`${rowInputClass} max-w-[11rem] cursor-pointer`}
+                    >
+                      {SETTLEMENT_STATUSES.map((status) => (
+                        <option key={status} value={status}>{status}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            )}
+            {letter === 'experience' && (
+              <Input label="Conduct summary *" value={form.conductSummary} onChange={(event) => setField('conductSummary', event.target.value)} />
+            )}
+            {error && <p className="mt-3 text-sm text-rose-500">{error}</p>}
+          </div>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+            <Button type="button" variant="secondary" icon={ChevronLeft} disabled={letterIndex === 0} onClick={() => goStep(-1)}>
+              Back
+            </Button>
+            <Button type="button" variant="secondary" disabled={letterIndex === LETTERS.length - 1} onClick={() => goStep(1)}>
+              Next <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </Card>
       </form>
     </div>
   )

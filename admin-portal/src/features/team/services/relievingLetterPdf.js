@@ -37,6 +37,16 @@ const ASSETS = [
   'Other (specify)',
 ]
 
+export function emptyAssetRows() {
+  return ASSETS.map((item) => ({
+    item: item === 'Other (specify)' ? '' : item,
+    other: item === 'Other (specify)',
+    serial: '',
+    condition: '',
+    status: '',
+  }))
+}
+
 const CLEARANCE = [
   ['Company Assets (Laptop, Equipment & Peripherals)', 'Cleared', 'green'],
   ['Login Credentials & System Access', 'Revoked', 'green'],
@@ -157,7 +167,7 @@ function coverPage(data) {
       <div style="text-align:center;padding-top:36px;">
         <img src="${HALO_WORDMARK}" alt="" style="width:210px;height:auto;" />
         <div style="margin-top:28px;color:${GOLD};font-size:11px;letter-spacing:0.22em;font-weight:700;">EXIT FORMALITIES</div>
-        <div style="margin-top:10px;font-size:32px;color:#0f172a;font-weight:700;">Relieving Letter</div>
+        <div style="margin-top:10px;font-size:32px;color:#0f172a;font-weight:700;">Final Documentation</div>
         <div style="margin-top:6px;font-size:13px;font-style:italic;color:${MUTED};">The Halo Effect Consulting LLP</div>
       </div>
       <table style="width:100%;border-collapse:collapse;margin-top:36px;">${cells}</table>
@@ -236,14 +246,14 @@ function letterClose(data) {
           <div style="margin-top:4px;color:${TEAL};font-weight:700;font-size:13px;">${esc(data.signatoryName)}</div>
           <div style="margin-top:2px;font-size:11px;color:${MUTED};text-transform:uppercase;">${esc(data.signatoryTitle)}</div>
           <div style="margin-top:2px;font-size:11px;color:${MUTED};">The Halo Effect Consulting LLP</div>
-          <div style="margin-top:16px;font-size:12px;color:${INK};">Date: ____________________</div>
+          <div style="margin-top:16px;font-size:12px;color:${INK};">Date: ${esc(data.issueDate)}</div>
         </div>
         <div style="width:50%;padding-left:24px;">
           <div style="font-size:10px;letter-spacing:0.08em;color:${INK};font-weight:700;">EMPLOYEE ACKNOWLEDGEMENT</div>
           ${signImage(data.employeeSign)}
           <div style="margin-top:4px;color:${TEAL};font-weight:700;font-size:13px;">${esc(data.employeeName)}</div>
           <div style="margin-top:2px;font-size:11px;color:${MUTED};text-transform:uppercase;">${esc(data.designation)} · ${esc(data.department)}</div>
-          <div style="margin-top:16px;font-size:12px;color:${INK};">Date: ____________________</div>
+          <div style="margin-top:16px;font-size:12px;color:${INK};">Date: ${esc(data.issueDate)}</div>
         </div>
       </div>
       <div style="margin-top:auto;padding-top:28px;border-top:1px solid ${GOLD};text-align:center;color:${MUTED};font-size:9px;line-height:1.45;">
@@ -254,7 +264,7 @@ function letterClose(data) {
   `
 }
 
-function assetTable(start, end) {
+function assetTable(rows, start, end) {
   const header = `
     <tr>
       <td style="background:${TEAL};color:#fff;font-size:11px;font-weight:700;padding:8px 10px;width:36px;">#</td>
@@ -264,26 +274,28 @@ function assetTable(start, end) {
       <td style="background:${TEAL};color:#fff;font-size:11px;font-weight:700;padding:8px 10px;width:110px;">Status</td>
     </tr>
   `
-  const rows = ASSETS.slice(start, end).map((label, index) => {
+  const body = rows.slice(start, end).map((row, index) => {
     const number = start + index + 1
     const bg = number % 2 === 0 ? '#f8fafc' : '#ffffff'
-    const blank = `<td style="background:${bg};border-bottom:1px solid ${LINE};padding:10px;"><span style="display:block;border-bottom:1px solid #cbd5e1;height:14px;"></span></td>`
+    const cell = (value) => `<td style="background:${bg};border-bottom:1px solid ${LINE};padding:10px;font-size:12px;color:${INK};">${esc(value)}</td>`
     return `
       <tr>
         <td style="background:${bg};border-bottom:1px solid ${LINE};padding:10px;text-align:center;font-size:12px;color:${MUTED};">${number}</td>
-        <td style="background:${bg};border-bottom:1px solid ${LINE};padding:10px;font-size:12px;color:${INK};">${esc(label)}</td>
-        ${blank}${blank}${blank}
+        ${cell(row.item)}
+        ${cell(row.serial)}
+        ${cell(row.condition)}
+        ${cell(row.status)}
       </tr>
     `
   }).join('')
-  return `<table style="width:100%;border-collapse:collapse;margin-top:8px;">${header}${rows}</table>`
+  return `<table style="width:100%;border-collapse:collapse;margin-top:8px;">${header}${body}</table>`
 }
 
 function assetsOpen(data) {
   return `
     <section style="${pageStyle()}">
       ${letterHeader()}
-      ${goldBadge('EXIT FORMALITIES · DOCUMENT 2 OF 5')}
+      ${goldBadge('EXIT FORMALITIES · DOCUMENT 2 OF 6')}
       <div style="margin-top:12px;font-size:26px;color:${TEAL};font-weight:700;">Company Assets Return Acknowledgement</div>
       <div style="margin-top:8px;font-size:12px;color:${MUTED};">Ref: THEC/ASSETS/${esc(data.issueYear)} · Date: ${esc(data.issueDate)}</div>
       <div style="height:2px;background:${TEAL};margin-top:10px;"></div>
@@ -292,7 +304,7 @@ function assetsOpen(data) {
       </p>
       <div style="margin-top:18px;color:${TEAL};font-size:12px;font-weight:700;letter-spacing:0.06em;">ITEMISED ASSETS RETURN</div>
       <p style="margin:6px 0 0;font-size:11px;line-height:1.45;color:${MUTED};">List all items returned. Write "NIL" in Serial / Details column if item was not issued. Leave rows blank if additional items need to be added.</p>
-      ${assetTable(0, 6)}
+      ${assetTable(data.assets, 0, 6)}
     </section>
   `
 }
@@ -300,7 +312,7 @@ function assetsOpen(data) {
 function assetsClose(data) {
   return `
     <section style="${pageStyle()}">
-      ${assetTable(6, 10)}
+      ${assetTable(data.assets, 6, 10)}
       <div style="margin-top:16px;background:#fff6e8;border-left:4px solid #e8a23a;padding:10px 12px;font-size:12px;line-height:1.5;color:#9a5b10;">
         <strong>Note:</strong> Any unreturned or damaged asset will be assessed and the cost of recovery or repair may be deducted from the Full &amp; Final Settlement at the sole discretion of the management.
       </div>
@@ -313,14 +325,14 @@ function assetsClose(data) {
           ${signImage(data.coFounderSign)}
           <div style="margin-top:4px;color:${TEAL};font-weight:700;font-size:13px;">${esc(data.signatoryName)}</div>
           <div style="margin-top:2px;font-size:11px;color:${MUTED};">${esc(data.signatoryTitle)}, The Halo Effect Consulting LLP</div>
-          <div style="margin-top:16px;font-size:12px;color:${INK};">Date: ____________________</div>
+          <div style="margin-top:16px;font-size:12px;color:${INK};">Date: ${esc(data.issueDate)}</div>
         </div>
         <div style="width:50%;padding-left:24px;">
           <div style="font-size:10px;letter-spacing:0.08em;color:${INK};font-weight:700;">RETURNED BY — EMPLOYEE</div>
           ${signImage(data.employeeSign)}
           <div style="margin-top:4px;color:${TEAL};font-weight:700;font-size:13px;">${esc(data.employeeName)}</div>
           <div style="margin-top:2px;font-size:11px;color:${MUTED};text-transform:uppercase;">${esc(data.designation)}</div>
-          <div style="margin-top:16px;font-size:12px;color:${INK};">Date: ____________________</div>
+          <div style="margin-top:16px;font-size:12px;color:${INK};">Date: ${esc(data.issueDate)}</div>
         </div>
       </div>
       <div style="margin-top:auto;padding-top:14px;border-top:1px solid ${GOLD};display:flex;justify-content:space-between;color:${MUTED};font-size:9px;line-height:1.4;">
@@ -345,7 +357,20 @@ const CREDENTIALS = [
   ['Other (specify)', ''],
 ]
 
-function credentialTable(start, end) {
+export function emptyCredentialRows() {
+  return CREDENTIALS.map(([platform, access]) => {
+    const other = platform === 'Other (specify)'
+    return {
+      platform: other ? '' : platform,
+      access: other ? '' : access,
+      other,
+      action: '',
+      confirmedBy: '',
+    }
+  })
+}
+
+function credentialTable(rows, start, end) {
   const header = `
     <tr>
       <td style="background:${TEAL};color:#fff;font-size:11px;font-weight:700;padding:8px 10px;width:36px;">#</td>
@@ -355,30 +380,28 @@ function credentialTable(start, end) {
       <td style="background:${TEAL};color:#fff;font-size:11px;font-weight:700;padding:8px 10px;width:130px;">Confirmed By</td>
     </tr>
   `
-  const rows = CREDENTIALS.slice(start, end).map(([platform, access], index) => {
+  const body = rows.slice(start, end).map((row, index) => {
     const number = start + index + 1
     const bg = number % 2 === 0 ? '#f8fafc' : '#ffffff'
-    const blank = `<td style="background:${bg};border-bottom:1px solid ${LINE};padding:10px;"><span style="display:block;border-bottom:1px solid #cbd5e1;height:14px;"></span></td>`
-    const accessCell = access
-      ? `<td style="background:${bg};border-bottom:1px solid ${LINE};padding:10px;font-size:12px;color:${INK};">${esc(access)}</td>`
-      : blank
+    const cell = (value) => `<td style="background:${bg};border-bottom:1px solid ${LINE};padding:10px;font-size:12px;color:${INK};">${esc(value)}</td>`
     return `
       <tr>
         <td style="background:${bg};border-bottom:1px solid ${LINE};padding:10px;text-align:center;font-size:12px;color:${MUTED};">${number}</td>
-        <td style="background:${bg};border-bottom:1px solid ${LINE};padding:10px;font-size:12px;color:${INK};">${esc(platform)}</td>
-        ${accessCell}
-        ${blank}${blank}
+        ${cell(row.platform)}
+        ${cell(row.access)}
+        ${cell(row.action)}
+        ${cell(row.confirmedBy)}
       </tr>
     `
   }).join('')
-  return `<table style="width:100%;border-collapse:collapse;margin-top:8px;">${header}${rows}</table>`
+  return `<table style="width:100%;border-collapse:collapse;margin-top:8px;">${header}${body}</table>`
 }
 
 function credentialsOpen(data) {
   return `
     <section style="${pageStyle()}">
       ${letterHeader()}
-      ${goldBadge('EXIT FORMALITIES · DOCUMENT 3 OF 5')}
+      ${goldBadge('EXIT FORMALITIES · DOCUMENT 3 OF 6')}
       <div style="margin-top:12px;font-size:26px;color:${TEAL};font-weight:700;">Login Credentials &amp; System Access Revocation</div>
       <div style="margin-top:8px;font-size:12px;color:${MUTED};">Ref: THEC/CRED/${esc(data.issueYear)} · Date: ${esc(data.issueDate)}</div>
       <div style="height:2px;background:${TEAL};margin-top:10px;"></div>
@@ -387,7 +410,7 @@ function credentialsOpen(data) {
       </p>
       <div style="margin-top:18px;color:${TEAL};font-size:12px;font-weight:700;letter-spacing:0.06em;">ACCESS REVOCATION LOG</div>
       <p style="margin:6px 0 0;font-size:11px;line-height:1.45;color:${MUTED};">Mark each item as Revoked / Transferred / N/A. Add any additional tools in the blank rows.</p>
-      ${credentialTable(0, 7)}
+      ${credentialTable(data.credentials, 0, 7)}
     </section>
   `
 }
@@ -395,7 +418,7 @@ function credentialsOpen(data) {
 function credentialsClose(data) {
   return `
     <section style="${pageStyle()}">
-      ${credentialTable(7, 11)}
+      ${credentialTable(data.credentials, 7, 11)}
       <div style="margin-top:16px;background:#fff6e8;border-left:4px solid #e8a23a;padding:10px 12px;font-size:12px;line-height:1.5;color:#9a5b10;">
         <strong>Important:</strong> Any unauthorised access, use, or sharing of company systems, accounts, or client data after ${field(data.lastWorkingDay)} will be treated as a breach of confidentiality and may result in legal action.
       </div>
@@ -408,14 +431,14 @@ function credentialsClose(data) {
           ${signImage(data.coFounderSign)}
           <div style="margin-top:4px;color:${TEAL};font-weight:700;font-size:13px;">${esc(data.signatoryName)}</div>
           <div style="margin-top:2px;font-size:11px;color:${MUTED};">${esc(data.signatoryTitle)}, The Halo Effect Consulting LLP</div>
-          <div style="margin-top:16px;font-size:12px;color:${INK};">Date: ____________________</div>
+          <div style="margin-top:16px;font-size:12px;color:${INK};">Date: ${esc(data.issueDate)}</div>
         </div>
         <div style="width:50%;padding-left:24px;">
           <div style="font-size:10px;letter-spacing:0.08em;color:${INK};font-weight:700;">CONFIRMED BY — EMPLOYEE</div>
           ${signImage(data.employeeSign)}
           <div style="margin-top:4px;color:${TEAL};font-weight:700;font-size:13px;">${esc(data.employeeName)}</div>
           <div style="margin-top:2px;font-size:11px;color:${MUTED};text-transform:uppercase;">${esc(data.designation)}</div>
-          <div style="margin-top:16px;font-size:12px;color:${INK};">Date: ____________________</div>
+          <div style="margin-top:16px;font-size:12px;color:${INK};">Date: ${esc(data.issueDate)}</div>
         </div>
       </div>
       <div style="margin-top:auto;padding-top:14px;border-top:1px solid ${GOLD};display:flex;justify-content:space-between;color:${MUTED};font-size:9px;line-height:1.4;">
@@ -449,7 +472,7 @@ function ndaOpen(data) {
   return `
     <section style="${pageStyle()}">
       ${letterHeader()}
-      ${goldBadge('EXIT FORMALITIES · DOCUMENT 4 OF 5')}
+      ${goldBadge('EXIT FORMALITIES · DOCUMENT 4 OF 6')}
       <div style="margin-top:12px;font-size:26px;color:${TEAL};font-weight:700;">Post-Employment NDA &amp; Confidentiality Agreement</div>
       <div style="margin-top:8px;font-size:12px;color:${MUTED};">Ref: THEC/NDA/${esc(data.issueYear)} · Date: ${esc(data.issueDate)}</div>
       <div style="height:2px;background:${TEAL};margin-top:10px;"></div>
@@ -509,14 +532,14 @@ function ndaClose(data) {
           ${signImage(data.coFounderSign)}
           <div style="margin-top:4px;color:${TEAL};font-weight:700;font-size:13px;">${esc(data.signatoryName)}</div>
           <div style="margin-top:2px;font-size:11px;color:${MUTED};">${esc(data.signatoryTitle)}, The Halo Effect Consulting LLP</div>
-          <div style="margin-top:12px;font-size:12px;color:${INK};">Date: ____________________</div>
+          <div style="margin-top:12px;font-size:12px;color:${INK};">Date: ${esc(data.issueDate)}</div>
         </div>
         <div style="width:50%;padding-left:24px;">
           <div style="font-size:10px;letter-spacing:0.08em;color:${INK};font-weight:700;">AGREED &amp; SIGNED — EMPLOYEE</div>
           ${signImage(data.employeeSign)}
           <div style="margin-top:4px;color:${TEAL};font-weight:700;font-size:13px;">${esc(data.employeeName)}</div>
           <div style="margin-top:2px;font-size:11px;color:${MUTED};text-transform:uppercase;">${esc(data.designation)}</div>
-          <div style="margin-top:12px;font-size:12px;color:${INK};">Date: ____________________</div>
+          <div style="margin-top:12px;font-size:12px;color:${INK};">Date: ${esc(data.issueDate)}</div>
         </div>
       </div>
       ${ndaFooter(2)}
@@ -533,7 +556,17 @@ const SETTLEMENT_ROWS = [
   ['Gratuity (if applicable)', 'As per applicable law and tenure eligibility', 'To Be Assessed'],
 ]
 
-function settlementTable() {
+export const SETTLEMENT_STATUSES = ['Pending', 'To Be Assessed']
+
+export function emptySettlementRows() {
+  return SETTLEMENT_ROWS.map(([component, description, status]) => ({
+    component,
+    description,
+    status,
+  }))
+}
+
+function settlementTable(rows) {
   const header = `
     <tr>
       <td style="background:${TEAL};color:#fff;font-size:11px;font-weight:700;padding:8px 10px;">Component</td>
@@ -541,25 +574,25 @@ function settlementTable() {
       <td style="background:${TEAL};color:#fff;font-size:11px;font-weight:700;padding:8px 10px;width:130px;text-align:right;">Status</td>
     </tr>
   `
-  const rows = SETTLEMENT_ROWS.map(([component, description, status], index) => {
+  const body = rows.map((row, index) => {
     const bg = index % 2 === 1 ? '#f8fafc' : '#ffffff'
-    const tone = status === 'Pending' ? 'gold' : 'gold'
+    const status = SETTLEMENT_STATUSES.includes(row.status) ? row.status : 'Pending'
     return `
       <tr>
-        <td style="background:${bg};border-bottom:1px solid ${LINE};padding:10px;font-size:12px;font-weight:700;color:${INK};">${esc(component)}</td>
-        <td style="background:${bg};border-bottom:1px solid ${LINE};padding:10px;font-size:12px;color:${INK};">${esc(description)}</td>
-        <td style="background:${bg};border-bottom:1px solid ${LINE};padding:10px;text-align:right;">${statusPill(status, tone)}</td>
+        <td style="background:${bg};border-bottom:1px solid ${LINE};padding:10px;font-size:12px;font-weight:700;color:${INK};">${esc(row.component)}</td>
+        <td style="background:${bg};border-bottom:1px solid ${LINE};padding:10px;font-size:12px;color:${INK};">${esc(row.description)}</td>
+        <td style="background:${bg};border-bottom:1px solid ${LINE};padding:10px;text-align:right;">${statusPill(status, 'gold')}</td>
       </tr>
     `
   }).join('')
-  return `<table style="width:100%;border-collapse:collapse;margin-top:8px;">${header}${rows}</table>`
+  return `<table style="width:100%;border-collapse:collapse;margin-top:8px;">${header}${body}</table>`
 }
 
 function fnfOpen(data) {
   return `
     <section style="${pageStyle()}">
       ${letterHeader()}
-      ${goldBadge('EXIT FORMALITIES · DOCUMENT 5 OF 5')}
+      ${goldBadge('EXIT FORMALITIES · DOCUMENT 5 OF 6')}
       <div style="margin-top:12px;font-size:26px;color:${TEAL};font-weight:700;">Full &amp; Final Settlement Acknowledgement</div>
       <div style="margin-top:8px;font-size:12px;color:${MUTED};">Ref: THEC/FNF/${esc(data.issueYear)} · Date: ${esc(data.issueDate)}</div>
       <div style="height:2px;background:${TEAL};margin-top:10px;"></div>
@@ -570,7 +603,7 @@ function fnfOpen(data) {
         <strong>Settlement Status: Pending Processing</strong> — The Full &amp; Final Settlement for this employee is currently being computed and will be processed within <strong>1 to 2 months</strong> from the Last Working Day. The maximum deadline for settlement is ${field(data.settlementDeadline)}. Any delay beyond this date will be communicated in writing.
       </div>
       <div style="margin-top:16px;color:${TEAL};font-size:12px;font-weight:700;letter-spacing:0.04em;">WHAT THE F&amp;F SETTLEMENT COVERS</div>
-      ${settlementTable()}
+      ${settlementTable(data.settlement)}
     </section>
   `
 }
@@ -597,14 +630,14 @@ function fnfClose(data) {
           ${signImage(data.coFounderSign)}
           <div style="margin-top:4px;color:${TEAL};font-weight:700;font-size:13px;">${esc(data.signatoryName)}</div>
           <div style="margin-top:2px;font-size:11px;color:${MUTED};">${esc(data.signatoryTitle)}, The Halo Effect Consulting LLP</div>
-          <div style="margin-top:12px;font-size:12px;color:${INK};">Date: ____________________</div>
+          <div style="margin-top:12px;font-size:12px;color:${INK};">Date: ${esc(data.issueDate)}</div>
         </div>
         <div style="width:50%;padding-left:24px;">
           <div style="font-size:10px;letter-spacing:0.08em;color:${INK};font-weight:700;">ACKNOWLEDGED BY — EMPLOYEE</div>
           ${signImage(data.employeeSign)}
           <div style="margin-top:4px;color:${TEAL};font-weight:700;font-size:13px;">${esc(data.employeeName)}</div>
           <div style="margin-top:2px;font-size:11px;color:${MUTED};text-transform:uppercase;">${esc(data.designation)}</div>
-          <div style="margin-top:12px;font-size:12px;color:${INK};">Date: ____________________</div>
+          <div style="margin-top:12px;font-size:12px;color:${INK};">Date: ${esc(data.issueDate)}</div>
         </div>
       </div>
       <div style="margin-top:auto;padding-top:14px;border-top:1px solid ${GOLD};display:flex;justify-content:space-between;color:${MUTED};font-size:9px;line-height:1.4;">
@@ -642,6 +675,17 @@ async function paintPage(section) {
   return canvas
 }
 
+function cleanRows(rows, fallback, fields) {
+  const source = Array.isArray(rows) && rows.length ? rows : fallback()
+  return source.map((row) => {
+    const next = {}
+    fields.forEach((field) => {
+      next[field] = String(row?.[field] || '').trim()
+    })
+    return next
+  })
+}
+
 function letterData(input) {
   return {
     employeeName: String(input.employeeName || '').trim(),
@@ -659,6 +703,12 @@ function letterData(input) {
     employeeSign: signatureImage(input.employeeSign),
     settlementDeadline: formatLetterDate(input.settlementDeadline),
     conductSummary: String(input.conductSummary || '').trim(),
+    assets: cleanRows(input.assets, emptyAssetRows, ['item', 'serial', 'condition', 'status']),
+    credentials: cleanRows(input.credentials, emptyCredentialRows, ['platform', 'access', 'action', 'confirmedBy']),
+    settlement: cleanRows(input.settlement, emptySettlementRows, ['component', 'description', 'status']).map((row) => ({
+      ...row,
+      status: SETTLEMENT_STATUSES.includes(row.status) ? row.status : 'Pending',
+    })),
   }
 }
 
@@ -761,6 +811,7 @@ function experienceOpen(data) {
   return `
     <section style="${pageStyle()}">
       ${letterHeader()}
+      ${goldBadge('EXIT FORMALITIES · DOCUMENT 6 OF 6')}
       <table style="border-collapse:collapse;margin:22px auto 0;"><tr><td style="background:${GOLD};color:#ffffff;font-size:11px;font-weight:700;line-height:16px;padding:7px 12px 9px;">TO WHOMSOEVER IT MAY CONCERN</td></tr></table>
       <div style="margin-top:14px;text-align:center;font-size:28px;color:#0f172a;font-weight:700;">Experience Certificate</div>
       <div style="margin-top:8px;text-align:center;font-size:12px;color:${MUTED};">Ref: THEC/EXP/${esc(data.issueYear)} · Date: ${esc(data.issueDate)}</div>
@@ -795,14 +846,14 @@ function experienceClose(data) {
           <div style="margin-top:4px;border-top:1px solid ${INK};padding-top:8px;color:${TEAL};font-weight:700;font-size:13px;">${esc(data.signatoryName)}</div>
           <div style="margin-top:2px;font-size:11px;color:${MUTED};">${esc(data.signatoryTitle)}</div>
           <div style="margin-top:2px;font-size:11px;color:${MUTED};">The Halo Effect Consulting LLP</div>
-          <div style="margin-top:14px;font-size:12px;color:${INK};">Date: ____________________</div>
+          <div style="margin-top:14px;font-size:12px;color:${INK};">Date: ${esc(data.issueDate)}</div>
         </div>
         <div style="width:50%;padding-left:24px;">
           <div style="font-size:10px;letter-spacing:0.08em;color:${INK};font-weight:700;">RECEIVED &amp; ACKNOWLEDGED — EMPLOYEE</div>
           ${signImage(data.employeeSign)}
           <div style="margin-top:4px;border-top:1px solid ${INK};padding-top:8px;color:${TEAL};font-weight:700;font-size:13px;">${esc(data.employeeName)}</div>
           <div style="margin-top:2px;font-size:11px;color:${MUTED};text-transform:uppercase;">${esc(data.designation)}</div>
-          <div style="margin-top:14px;font-size:12px;color:${INK};">Date: ____________________</div>
+          <div style="margin-top:14px;font-size:12px;color:${INK};">Date: ${esc(data.issueDate)}</div>
         </div>
       </div>
       <div style="margin-top:auto;padding-top:14px;border-top:1px solid ${GOLD};text-align:center;color:${MUTED};font-size:9px;line-height:1.45;">
