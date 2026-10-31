@@ -16,6 +16,7 @@ import {
   getProjectStartDate,
 } from './services/projectService'
 import { useUserStore } from '../../stores/userStore'
+import { isDirectoryVisible } from '../../../../shared/employees/employmentStatus.js'
 import {
   Plus,
   Search,
@@ -171,6 +172,38 @@ export const ProjectList = () => {
     setMemberSearch('')
   }, [memberModalProj])
 
+  const [directoryKeys, setDirectoryKeys] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    getDocs(collection(db, 'employees')).then((snap) => {
+      if (cancelled) return
+      const keys = new Set()
+      snap.docs.forEach((row) => {
+        const data = row.data() || {}
+        if (!isDirectoryVisible(data)) return
+        ;[row.id, data.uid, data.employeeId, data.email].forEach((value) => {
+          if (value) keys.add(String(value).toLowerCase())
+        })
+      })
+      setDirectoryKeys(keys)
+    }).catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const visibleProjectMembers = (members) => {
+    if (!directoryKeys) return members || []
+    return (members || []).filter((member) => {
+      if (member == null) return false
+      if (typeof member !== 'object') return directoryKeys.has(String(member).toLowerCase())
+      const values = [member.uid, member.id, member.employeeId, member.email].filter(Boolean)
+      if (!values.length) return true
+      return values.some((value) => directoryKeys.has(String(value).toLowerCase()))
+    })
+  }
+
   const memberQuery = memberSearch.trim().toLowerCase()
   const visibleEmployees = allEmployees.filter((emp) => {
     if (!memberQuery) return true
@@ -205,7 +238,7 @@ export const ProjectList = () => {
         empSnap.docs.forEach((d) => {
           const data = d.data()
           const role = data.role || 'employee'
-          if (!isEmployeeOnly(role)) return
+          if (!isEmployeeOnly(role) || !isDirectoryVisible(data)) return
           const id = data.uid || data.authUid || d.id
           upsert({
             id,
@@ -423,6 +456,18 @@ export const ProjectList = () => {
       }
     }
 
+    const pickerIds = new Set()
+    allEmployees.forEach((emp) => {
+      ;[emp.id, emp.uid, emp.email].forEach((value) => {
+        if (value) pickerIds.add(String(value).toLowerCase())
+      })
+    })
+    ;(memberModalProj.members || []).forEach((member) => {
+      const values = typeof member === 'object' ? [member.uid, member.id, member.employeeId, member.email] : [member]
+      const present = values.filter(Boolean).some((value) => pickerIds.has(String(value).toLowerCase()))
+      if (!present) updatedMembersList.push(typeof member === 'object' ? member : { uid: member, id: member, name: String(member) })
+    })
+
     await updateProjectMembers(pId, updatedMembersList)
     setMemberModalProj(null)
   }
@@ -580,7 +625,7 @@ export const ProjectList = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filtered.map((proj) => {
             const pId = proj.projectId || proj.id
-            const membersList = proj.members || []
+            const membersList = visibleProjectMembers(proj.members)
             const isCreator =
               proj.createdBy && currentUserId && String(proj.createdBy) === String(currentUserId)
             const displayStatus = getProjectDisplayStatus(proj)

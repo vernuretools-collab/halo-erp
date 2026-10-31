@@ -187,6 +187,7 @@ export const getUserDoc = async (uid, emailHint) => {
       merged.departmentName = empData.departmentName
     }
     if (!merged.role) merged.role = 'employee'
+    merged.employmentStatus = empData?.status || 'active'
 
     const userQuoteAt = Date.parse(userData?.quoteUpdatedAt || '') || 0
     const empQuoteAt = Date.parse(empData?.quoteUpdatedAt || '') || 0

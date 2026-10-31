@@ -8,6 +8,7 @@ import { useUserStore } from '../../stores/userStore'
 import haloLogo from '../../assets/halologo.png'
 import { loginWithEmail, logoutUser, signupWithEmail, fetchCustomClaims, getUserDoc } from '../../shared/services/authService'
 import { isJoiningAccount } from '../../../../shared/supabase/employeeOnboarding.js'
+import { isSignInBlocked } from '../../../../shared/employees/employmentStatus.js'
 
 export const EmployeeLoginPage = () => {
   const navigate = useNavigate()
@@ -42,6 +43,11 @@ export const EmployeeLoginPage = () => {
         return
       }
       const userDoc = await getUserDoc(firebaseUser.uid, firebaseUser.email)
+      if (isSignInBlocked(userDoc)) {
+        await logoutUser()
+        setError('This account is an ex-employee and cannot sign in.')
+        return
+      }
       const orgId = claims?.orgId || userDoc?.orgId || 'org_demo'
       setUser(firebaseUser, userDoc || null, {
         ...claims,

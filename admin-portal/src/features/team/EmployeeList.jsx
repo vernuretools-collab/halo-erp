@@ -6,6 +6,15 @@ import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { useTeamStore } from './stores/teamStore'
 import { useSettingsStore } from '../settings/stores/settingsStore'
+import { useUserStore } from '../../stores/userStore'
+import { clearNoticePeriod, markAsExEmployee, markNoticePeriod } from './services/employeeExitService'
+import {
+  EMPLOYMENT_STATUS,
+  employeeDocId,
+  employmentStatusLabel,
+  isDirectoryVisible,
+  normalizeEmploymentStatus,
+} from '../../../../shared/employees/employmentStatus.js'
 import {
   getEmployees,
   getDepartments,
@@ -52,6 +61,8 @@ function todayDateStr() {
 export const EmployeeList = () => {
   const { employees, departments, setEmployees, setDepartments, addEmployee, deleteEmployee, updateEmployee } = useTeamStore()
   const { customRoles } = useSettingsStore()
+  const { user, userDoc } = useUserStore()
+  const actorName = userDoc?.displayName || user?.email || 'Admin'
 
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedDept, setSelectedDept] = useState('all')
@@ -61,6 +72,12 @@ export const EmployeeList = () => {
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingEmployee, setEditingEmployee] = useState(null)
   const [deleteConfirmEmp, setDeleteConfirmEmp] = useState(null)
+  const [exitEmp, setExitEmp] = useState(null)
+  const [exitDate, setExitDate] = useState('')
+  const [exitReason, setExitReason] = useState('')
+  const [exitError, setExitError] = useState('')
+  const [exitSaving, setExitSaving] = useState(false)
+  const [statusSavingId, setStatusSavingId] = useState('')
 
   // New member form
   const [name, setName] = useState('')
@@ -126,18 +143,20 @@ export const EmployeeList = () => {
     return () => unsub()
   }, [])
 
+  const directoryEmployees = employees.filter(isDirectoryVisible)
+
   const uniqueDepartments = Array.from(
-    new Set(employees.map((emp) => emp.departmentName || emp.department).filter(Boolean))
+    new Set(directoryEmployees.map((emp) => emp.departmentName || emp.department).filter(Boolean))
   )
 
   const uniqueRoles = Array.from(
     new Set([
       ...createdRoles.map((r) => r.name),
-      ...employees.map((emp) => emp.roleName || emp.role).filter(Boolean),
+      ...directoryEmployees.map((emp) => emp.roleName || emp.role).filter(Boolean),
     ])
   )
 
-  const filtered = employees.filter((emp) => {
+  const filtered = directoryEmployees.filter((emp) => {
     const matchesSearch =
       !searchQuery ||
       (emp.displayName && emp.displayName.toLowerCase().includes(searchQuery.toLowerCase())) ||
@@ -155,7 +174,57 @@ export const EmployeeList = () => {
   })
 
   // Team Metrics
-  const totalHeadcount = employees.length
+  const totalHeadcount = directoryEmployees.length
+
+  const applyEmploymentPatch = (emp, patch) => {
+    const id = patch.id || employeeDocId(emp)
+    updateEmployee(id, patch)
+  }
+
+  const changeNotice = async (emp, toNotice) => {
+    const id = employeeDocId(emp)
+    setStatusSavingId(id)
+    setListError('')
+    try {
+      const patch = toNotice ? await markNoticePeriod(emp, actorName) : await clearNoticePeriod(emp, actorName)
+      applyEmploymentPatch(emp, patch)
+      if (editingEmployee && employeeDocId(editingEmployee) === employeeDocId(emp)) {
+        setEditingEmployee({ ...editingEmployee, ...patch, status: patch.status })
+      }
+    } catch (err) {
+      setListError(err?.message || 'Could not update employment status.')
+    } finally {
+      setStatusSavingId('')
+    }
+  }
+
+  const submitExit = async (event) => {
+    event.preventDefault()
+    if (!exitEmp) return
+    setExitSaving(true)
+    setExitError('')
+    try {
+      const patch = await markAsExEmployee(exitEmp, {
+        lastWorkingDay: exitDate,
+        exitReason,
+        markedBy: actorName,
+      })
+      applyEmploymentPatch(exitEmp, patch)
+      setExitEmp(null)
+      setShowEditModal(false)
+      setEditingEmployee(null)
+    } catch (err) {
+      if (err?.saved && err.patch) applyEmploymentPatch(exitEmp, err.patch)
+      setExitError(err?.message || 'Could not mark this employee as Ex-Employee.')
+      if (err?.saved) {
+        setExitEmp(null)
+        setShowEditModal(false)
+        setEditingEmployee(null)
+      }
+    } finally {
+      setExitSaving(false)
+    }
+  }
 
   const handleInviteMember = async (e) => {
     e.preventDefault()
@@ -436,6 +505,9 @@ export const EmployeeList = () => {
                       {emp.displayName}
                     </h4>
                     <p className="text-xs text-muted truncate">{emp.roleName}</p>
+                    {normalizeEmploymentStatus(emp.status) === EMPLOYMENT_STATUS.NOTICE_PERIOD && (
+                      <p className="text-[10px] font-semibold text-amber-600">{employmentStatusLabel(emp.status)}</p>
+                    )}
                   </div>
                 </div>
                 <span
@@ -934,6 +1006,44 @@ export const EmployeeList = () => {
                 />
               </div>
 
+              <div className="pt-2 border-t border-border space-y-2">
+                <p className="text-[11px] font-semibold text-accent uppercase tracking-widest">Employment status</p>
+                <p className="text-xs text-muted">{employmentStatusLabel(editingEmployee.status)}</p>
+                <div className="flex flex-wrap gap-2">
+                  {normalizeEmploymentStatus(editingEmployee.status) === EMPLOYMENT_STATUS.NOTICE_PERIOD ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={statusSavingId === employeeDocId(editingEmployee)}
+                      onClick={() => changeNotice(editingEmployee, false)}
+                    >
+                      Clear notice
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={statusSavingId === employeeDocId(editingEmployee)}
+                      onClick={() => changeNotice(editingEmployee, true)}
+                    >
+                      Notice Period
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    variant="danger"
+                    onClick={() => {
+                      setExitEmp(editingEmployee)
+                      setExitDate('')
+                      setExitReason('')
+                      setExitError('')
+                    }}
+                  >
+                    Mark as Ex-Employee
+                  </Button>
+                </div>
+              </div>
+
               {/* Actions */}
               <div className="flex gap-3 pt-2 border-t border-border">
                 <Button
@@ -948,6 +1058,44 @@ export const EmployeeList = () => {
                 <Button type="submit" variant="primary" className="w-2/3" icon={Edit} disabled={loading}>
                   {loading ? 'Saving Changes...' : 'Save All Changes'}
                 </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
+
+      {exitEmp && (
+        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <Card className="w-full max-w-md p-6 space-y-4 border-border shadow-2xl relative bg-surface">
+            <div className="flex items-center justify-between pb-3 border-b border-border">
+              <h3 className="font-bold text-fg text-sm">Mark as Ex-Employee</h3>
+              <button
+                type="button"
+                onClick={() => setExitEmp(null)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-muted leading-relaxed">
+              {exitEmp.displayName || exitEmp.email} leaves the active directory now. Their attendance, timeline, and other records stay on this employee id.
+            </p>
+            {exitError && <p className="text-xs text-rose-600">{exitError}</p>}
+            <form onSubmit={submitExit} className="space-y-3">
+              <Input label="Relieving date *" type="date" value={exitDate} onChange={(event) => setExitDate(event.target.value)} required />
+              <label className="block space-y-1.5 text-left">
+                <span className="block text-xs font-medium text-fg">Exit reason *</span>
+                <textarea
+                  value={exitReason}
+                  onChange={(event) => setExitReason(event.target.value)}
+                  required
+                  rows={3}
+                  className="w-full bg-canvas border border-border text-fg text-sm rounded-xl py-2.5 px-3.5 focus:outline-none focus:border-accent"
+                />
+              </label>
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <Button type="button" variant="secondary" onClick={() => setExitEmp(null)} disabled={exitSaving}>Cancel</Button>
+                <Button type="submit" variant="danger" disabled={exitSaving}>{exitSaving ? 'Saving…' : 'Mark as Ex-Employee'}</Button>
               </div>
             </form>
           </Card>

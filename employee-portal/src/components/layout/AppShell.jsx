@@ -4,8 +4,10 @@ import { EmployeeSidebar } from './EmployeeSidebar'
 import { EmployeeTopBar } from './EmployeeTopBar'
 import { useUIStore } from '../../stores/uiStore'
 import { useUserStore } from '../../stores/userStore'
-import { auth } from '../../shared/services/firebaseService'
-import { getUserDoc, fetchCustomClaims } from '../../shared/services/authService'
+import { auth, db } from '../../shared/services/firebaseService'
+import { getUserDoc, fetchCustomClaims, logoutUser } from '../../shared/services/authService'
+import { doc, onSnapshot } from 'firebase/firestore'
+import { isSignInBlocked } from '../../../../shared/employees/employmentStatus.js'
 import { useLiveAuthSession } from '../../../../shared/supabase/useLiveAuthSession.js'
 import { useWellnessNotifications } from '../../features/wellness/hooks/useWellnessNotifications'
 import { useSocialPostReminders } from '../../features/social-posts/hooks/useSocialPostReminders'
@@ -62,6 +64,19 @@ export const AppShell = () => {
     // Refresh profile once per signed-in user so the sidebar shows the current job role.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid])
+
+  useEffect(() => {
+    if (!user) return undefined
+    if (isSignInBlocked(userDoc)) {
+      logoutUser()
+      return undefined
+    }
+    const docId = userDoc?.employeeDocId
+    if (!docId) return undefined
+    return onSnapshot(doc(db, 'employees', docId), (snap) => {
+      if (snap.exists() && isSignInBlocked(snap.data())) logoutUser()
+    })
+  }, [user, userDoc])
 
   useWellnessNotifications()
   useSocialPostReminders()

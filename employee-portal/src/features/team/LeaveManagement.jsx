@@ -3,6 +3,7 @@ import { PageHeader } from '../../components/layout/PageHeader'
 import { Card } from '../../components/ui/Card'
 import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
+import { NativePickerInput } from '../../components/ui/Input'
 import { useTeamStore } from './stores/teamStore'
 import { useUserStore } from '../../stores/userStore'
 import { getEmployees, createLeaveRequest, updateLeaveStatusInDb, deleteLeaveRequestFromDb, subscribeToCompanyHolidays } from './services/teamService'
@@ -24,6 +25,13 @@ import {
   hoursBetween,
   PERMISSION_LEAVE_TYPE,
   EMERGENCY_LEAVE_TYPE,
+  HOLIDAY_WORK_LEAVE_TYPE,
+  COMBO_OFFER_LEAVE_TYPE,
+  COMBO_OFFER_WINDOW_DAYS,
+  addCalendarDays,
+  comboOfferExpiryDate,
+  isHolidayWorkRequest,
+  isComboCreditHeld,
   resolveLeaveLimits,
   resolvePermissionHours,
 } from './services/leaveEntitlementUtils'
@@ -37,6 +45,7 @@ const SINGLE_DAY_LEAVE_TYPES = new Set([
   'Sick Leave',
   'Casual Leave',
   'Permission',
+  COMBO_OFFER_LEAVE_TYPE,
 ])
 
 const isSingleDayLeaveType = (type) => SINGLE_DAY_LEAVE_TYPES.has(type)
@@ -235,7 +244,7 @@ const formatHolidayLabel = (dateStr) => {
   return `${day} ${month}`
 }
 
-const InteractiveCalendarPicker = ({ startDate, setStartDate, endDate, setEndDate, leaveType, setValidationError, holidays = [] }) => {
+const InteractiveCalendarPicker = ({ startDate, setStartDate, endDate, setEndDate, leaveType, setValidationError, holidays = [], maxDate = '' }) => {
   const [isOpen, setIsOpen] = useState(false)
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear())
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth())
@@ -327,6 +336,11 @@ const InteractiveCalendarPicker = ({ startDate, setStartDate, endDate, setEndDat
     const clickedDate = `${currentYear}-${mStr}-${dStr}`
 
     const holiday = holidayByDate[clickedDate]
+    if (leaveType === COMBO_OFFER_LEAVE_TYPE && !maxDate) {
+      setValidationError('Choose the holiday you worked before selecting a leave date.')
+      return
+    }
+
     if (holiday) {
       setValidationError(
         `${formatHolidayLabel(clickedDate)} is ${holiday.name || 'Holiday'} (company holiday).`
@@ -351,9 +365,20 @@ const InteractiveCalendarPicker = ({ startDate, setStartDate, endDate, setEndDat
         setValidationError(
           `Casual Leave can only be selected at least 3 days in advance. Earliest available date is ${minAllowedDate}.`
         )
+      } else if (leaveType === COMBO_OFFER_LEAVE_TYPE) {
+        setValidationError(
+          `Combo Offer Leave can only be selected at least 3 days in advance. Earliest available date is ${minAllowedDate}.`
+        )
       } else {
         setValidationError(`Standard leaves require 3 days advance notice. Earliest available date is ${minAllowedDate}.`)
       }
+      return
+    }
+
+    if (maxDate && clickedDate > maxDate) {
+      setValidationError(
+        `Combo Offer Leave must be taken by ${maxDate}, within ${COMBO_OFFER_WINDOW_DAYS} days of the worked holiday.`
+      )
       return
     }
 
@@ -508,6 +533,8 @@ const InteractiveCalendarPicker = ({ startDate, setStartDate, endDate, setEndDat
             <span className="text-muted font-medium">
               {leaveType === 'Casual Leave'
                 ? `Casual Leave: select a date from ${minAllowedDate} onwards (3 days advance)`
+                : leaveType === COMBO_OFFER_LEAVE_TYPE
+                  ? `Combo Offer Leave: one working day from ${minAllowedDate}${maxDate ? ` through ${maxDate}` : ''} (3 days advance)`
                 : leaveType === 'On Duty'
                   ? `On Duty: from ${minAllowedDate} onwards (up to previous ${ON_DUTY_BACKDATE_DAYS} dates)`
                 : singleDayOnly
@@ -562,6 +589,7 @@ export const LeaveManagement = () => {
     .join('') || 'E'
 
   const [showAddModal, setShowAddModal] = useState(false)
+  const [showWorkModal, setShowWorkModal] = useState(false)
   const [leaveType, setLeaveType] = useState('Casual Leave')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
@@ -569,6 +597,13 @@ export const LeaveManagement = () => {
   const [endTime, setEndTime] = useState('')
   const [reason, setReason] = useState('')
   const [validationError, setValidationError] = useState('')
+  const [holidayWorkId, setHolidayWorkId] = useState('')
+  const [workDate, setWorkDate] = useState('')
+  const [workDayType, setWorkDayType] = useState('Public Holiday')
+  const [workHours, setWorkHours] = useState('')
+  const [workReason, setWorkReason] = useState('')
+  const [workError, setWorkError] = useState('')
+  const [workSubmitting, setWorkSubmitting] = useState(false)
   const [companyHolidays, setCompanyHolidays] = useState([])
   const [loadingLeave, setLoadingLeave] = useState(false)
   const [confirmAction, setConfirmAction] = useState(null) // { type: 'cancel' | 'delete', request }
@@ -643,6 +678,51 @@ export const LeaveManagement = () => {
     return false
   })
 
+  const todayYmd = (() => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const y = today.getFullYear()
+    const m = String(today.getMonth() + 1).padStart(2, '0')
+    const d = String(today.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  })()
+  const comboMinDate = addCalendarDays(todayYmd, 3)
+
+  const usableComboCredits = myLeaveRequests
+    .filter((leave) => {
+      if (!isHolidayWorkRequest(leave) || leave.status !== 'approved') return false
+      const worked = String(leave.startDate || '').slice(0, 10)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(worked)) return false
+      // Combo Offer appears only after the approved holiday has been worked.
+      if (worked > todayYmd) return false
+      const expiry = comboOfferExpiryDate(worked)
+      if (!expiry || expiry < comboMinDate) return false
+      const workId = leave.leaveId || leave.id
+      if (isComboCreditHeld(workId, myLeaveRequests)) return false
+      return true
+    })
+    .sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)))
+
+  const selectedComboCredit =
+    usableComboCredits.find((leave) => (leave.leaveId || leave.id) === holidayWorkId) || null
+  const comboMaxDate = selectedComboCredit
+    ? comboOfferExpiryDate(String(selectedComboCredit.startDate || '').slice(0, 10))
+    : ''
+  const usableCreditKey = usableComboCredits.map((leave) => leave.leaveId || leave.id).join('|')
+
+  useEffect(() => {
+    if (leaveType === COMBO_OFFER_LEAVE_TYPE && usableComboCredits.length === 0) {
+      setLeaveType('Casual Leave')
+      setHolidayWorkId('')
+      return
+    }
+    if (holidayWorkId && !usableComboCredits.some((leave) => (leave.leaveId || leave.id) === holidayWorkId)) {
+      setHolidayWorkId('')
+      setStartDate('')
+      setEndDate('')
+    }
+  }, [leaveType, holidayWorkId, usableCreditKey])
+
   const pendingRequests = myLeaveRequests.filter((l) => l.status === 'pending').length
   const approvedRequests = myLeaveRequests.filter((l) => l.status === 'approved')
 
@@ -652,6 +732,12 @@ export const LeaveManagement = () => {
 
   const leaveMonthKey = (date) => (date ? String(date).slice(0, 7) : '')
   const visibleLeaveRequests = myLeaveRequests.filter((l) => {
+    if (isHolidayWorkRequest(l)) {
+      if (l.status === 'pending') return true
+      const worked = String(l.startDate || '').slice(0, 10)
+      const expiry = comboOfferExpiryDate(worked)
+      if (l.status === 'approved' && expiry && expiry >= todayYmd) return true
+    }
     const startMonth = leaveMonthKey(l.startDate)
     const endMonth = leaveMonthKey(l.endDate || l.startDate)
     if (!startMonth && !endMonth) return true
@@ -783,6 +869,26 @@ export const LeaveManagement = () => {
       return
     }
 
+    const isCombo = leaveType === COMBO_OFFER_LEAVE_TYPE
+    if (isCombo) {
+      if (!selectedComboCredit) {
+        setValidationError('Choose the holiday you worked before requesting Combo Offer Leave.')
+        return
+      }
+      const worked = String(selectedComboCredit.startDate || '').slice(0, 10)
+      const expiry = comboOfferExpiryDate(worked)
+      if (startDate > expiry) {
+        setValidationError(
+          `Combo Offer Leave must be taken by ${expiry}, within ${COMBO_OFFER_WINDOW_DAYS} days of ${worked}.`
+        )
+        return
+      }
+      if (isComboCreditHeld(selectedComboCredit.leaveId || selectedComboCredit.id, myLeaveRequests)) {
+        setValidationError('That holiday work credit is already used on another leave request.')
+        return
+      }
+    }
+
     const isPermission = leaveType === PERMISSION_LEAVE_TYPE
     let permissionHours = 0
     if (isPermission) {
@@ -886,6 +992,13 @@ export const LeaveManagement = () => {
             ...(wfhAutoApproved ? { reviewedBy: 'WFH Policy' } : {}),
           }
         : {}),
+      ...(isCombo
+        ? {
+            holidayWorkId: selectedComboCredit.leaveId || selectedComboCredit.id,
+            workedDate: String(selectedComboCredit.startDate || '').slice(0, 10),
+            dayType: selectedComboCredit.dayType || '',
+          }
+        : {}),
     }
 
     try {
@@ -898,6 +1011,7 @@ export const LeaveManagement = () => {
       setStartTime('')
       setEndTime('')
       setReason('')
+      setHolidayWorkId('')
       setValidationError('')
       setShowAddModal(false)
     } catch (err) {
@@ -907,6 +1021,103 @@ export const LeaveManagement = () => {
           ? 'Failed to submit leave request due to invalid data. Please try again.'
           : 'Failed to submit leave request. Please try again.'
       )
+    }
+  }
+
+  const resetWorkForm = () => {
+    setWorkDate('')
+    setWorkDayType('Public Holiday')
+    setWorkHours('')
+    setWorkReason('')
+    setWorkError('')
+  }
+
+  const handleWorkOnHoliday = async (e) => {
+    e.preventDefault()
+    setWorkError('')
+
+    const worked = String(workDate || '').slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(worked)) {
+      setWorkError('Choose the date you want to work.')
+      return
+    }
+    if (worked < todayYmd) {
+      setWorkError('Choose today or a future date. This is a request to work that day.')
+      return
+    }
+
+    const hours = Number(workHours)
+    if (!Number.isFinite(hours) || hours <= 0 || hours > 24) {
+      setWorkError('Enter the hours you will work that day (more than 0 and up to 24).')
+      return
+    }
+    if (!workReason.trim()) {
+      setWorkError('Describe the work you will do that day.')
+      return
+    }
+
+    const workedDay = new Date(`${worked}T00:00:00`)
+    if (workDayType === 'Week Off') {
+      if (workedDay.getDay() !== 0) {
+        setWorkError('Week Off must be a Sunday.')
+        return
+      }
+    } else if (workDayType === 'Public Holiday') {
+      const holidaySet = new Set(
+        (companyHolidays || []).map((item) => String(item?.date || '').slice(0, 10))
+      )
+      if (!holidaySet.has(worked)) {
+        setWorkError('That date is not a company public holiday.')
+        return
+      }
+    } else {
+      setWorkError('Choose Public Holiday or Week Off.')
+      return
+    }
+
+    const duplicate = myLeaveRequests.some((leave) => {
+      if (!isHolidayWorkRequest(leave)) return false
+      if (leave.status !== 'pending' && leave.status !== 'approved') return false
+      return String(leave.startDate || '').slice(0, 10) === worked
+    })
+    if (duplicate) {
+      setWorkError('You already have a pending or granted holiday-work request for that date.')
+      return
+    }
+
+    const stableEmployeeId = user?.uid || userDoc?.uid || currentEmp?.uid || resolvedEmployeeId
+    const stableEmployeeEmail =
+      user?.email || userDoc?.email || currentEmp?.email || resolvedEmployeeEmail || ''
+    if (!stableEmployeeId && !stableEmployeeEmail) {
+      setWorkError('Unable to identify your account. Please sign in again and retry.')
+      return
+    }
+
+    setWorkSubmitting(true)
+    try {
+      const created = await createLeaveRequest({
+        employeeName: resolvedEmployeeName,
+        employeeId: stableEmployeeId || '',
+        employeeEmail: stableEmployeeEmail,
+        leaveType: HOLIDAY_WORK_LEAVE_TYPE,
+        requestedLeaveType: HOLIDAY_WORK_LEAVE_TYPE,
+        requestKind: 'holiday_work',
+        dayType: workDayType,
+        hours,
+        startDate: worked,
+        endDate: worked,
+        days: 0,
+        reason: workReason.trim(),
+        convertedToLop: false,
+      })
+      addLeaveRequest(created)
+      resetWorkForm()
+      setShowWorkModal(false)
+    } catch (err) {
+      console.error('Failed to submit holiday work:', err)
+      setWorkError('Failed to submit the holiday work request. Please try again.')
+    } finally {
+      setWorkSubmitting(false)
     }
   }
 
@@ -993,9 +1204,21 @@ export const LeaveManagement = () => {
           title="Monthly Leave & PTO Management"
           description={`Track monthly leave. Extra days beyond your entitlement are marked LOP (unpaid) (${currentMonthName}).`}
           actions={
-            <Button icon={Plus} variant="primary" onClick={() => setShowAddModal(true)}>
-              Request Leave
-            </Button>
+            <>
+              <Button
+                icon={Calendar}
+                variant="secondary"
+                onClick={() => {
+                  resetWorkForm()
+                  setShowWorkModal(true)
+                }}
+              >
+                Work on Holiday
+              </Button>
+              <Button icon={Plus} variant="primary" onClick={() => setShowAddModal(true)}>
+                Request Leave
+              </Button>
+            </>
           }
         />
 
@@ -1246,6 +1469,109 @@ export const LeaveManagement = () => {
         </div>
       )}
 
+      {showWorkModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <Card className="w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-4 border-border shadow-2xl relative rounded-2xl bg-surface">
+            <div className="flex items-center justify-between pb-3 border-b border-border sticky top-0 bg-surface/95 backdrop-blur-md z-10 py-1">
+              <h3 className="font-bold text-fg text-sm">Work on Holiday</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowWorkModal(false)
+                  setWorkError('')
+                }}
+                className="text-slate-400 hover:text-slate-900 dark:hover:text-white p-1 rounded-lg hover:bg-chrome transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-[11px] text-muted leading-relaxed">
+              Request to work a Sunday or public holiday. After an admin accepts it and that day has been worked, Combo Offer Leave appears under Request Leave. Apply for that extra day at least 3 days ahead, within {COMBO_OFFER_WINDOW_DAYS} days of the worked date.
+            </p>
+
+            {workError && (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-start gap-2.5 text-xs text-amber-600 dark:text-amber-300">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
+                <span>{workError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleWorkOnHoliday} className="space-y-4">
+              <div className="space-y-1.5 text-left">
+                <label className="block text-xs font-medium text-fg">Date to work</label>
+                <NativePickerInput
+                  value={workDate}
+                  min={todayYmd}
+                  onChange={(e) => setWorkDate(e.target.value)}
+                  className="w-full bg-surface border border-border text-fg text-sm rounded-xl py-2.5 px-3.5 focus:outline-none focus:border-accent"
+                  required
+                />
+                <p className="text-[11px] text-muted">
+                  Today or a future Sunday or public holiday. Past dates stay closed.
+                </p>
+              </div>
+
+              <div className="space-y-1.5 text-left">
+                <label className="block text-xs font-medium text-fg">Day type</label>
+                <select
+                  value={workDayType}
+                  onChange={(e) => setWorkDayType(e.target.value)}
+                  className="w-full bg-surface border border-border text-fg text-sm rounded-xl py-2.5 px-3.5 focus:outline-none focus:border-accent"
+                >
+                  <option value="Public Holiday">Public Holiday</option>
+                  <option value="Week Off">Week Off</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5 text-left">
+                <label className="block text-xs font-medium text-fg">Hours you will work</label>
+                <input
+                  type="number"
+                  min="0.5"
+                  max="24"
+                  step="0.5"
+                  value={workHours}
+                  onChange={(e) => setWorkHours(e.target.value)}
+                  placeholder="e.g. 8"
+                  className="w-full bg-surface border border-border text-fg text-sm rounded-xl py-2.5 px-3.5 focus:outline-none focus:border-accent"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5 text-left">
+                <label className="block text-xs font-medium text-fg">Reason / work planned</label>
+                <textarea
+                  placeholder="Briefly describe the work you will do..."
+                  value={workReason}
+                  onChange={(e) => setWorkReason(e.target.value)}
+                  className="w-full bg-surface border border-border text-fg text-xs rounded-xl p-3 h-20 focus:outline-none focus:border-accent placeholder-muted"
+                  required
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setShowWorkModal(false)
+                    setWorkError('')
+                  }}
+                  className="w-1/3"
+                  disabled={workSubmitting}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" variant="primary" className="w-2/3" icon={Plus} disabled={workSubmitting}>
+                  {workSubmitting ? 'Submitting…' : 'Submit Request'}
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
+
       {/* Request Leave Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
@@ -1286,7 +1612,7 @@ export const LeaveManagement = () => {
                       setEndDate(startDate)
                     }
                     // Casual Leave requires 3 calendar days advance — clear too-early dates
-                    if (nextType === 'Casual Leave' && startDate) {
+                    if ((nextType === 'Casual Leave' || nextType === COMBO_OFFER_LEAVE_TYPE) && startDate) {
                       const today = new Date()
                       today.setHours(0, 0, 0, 0)
                       const cursor = new Date(today)
@@ -1294,14 +1620,28 @@ export const LeaveManagement = () => {
                       const y = cursor.getFullYear()
                       const m = String(cursor.getMonth() + 1).padStart(2, '0')
                       const d = String(cursor.getDate()).padStart(2, '0')
-                      const minCasual = `${y}-${m}-${d}`
-                      if (startDate < minCasual) {
+                      const minAdvance = `${y}-${m}-${d}`
+                      if (startDate < minAdvance) {
                         setStartDate('')
                         setEndDate('')
                         setValidationError(
-                          `Casual Leave can only be selected at least 3 days in advance. Earliest available date is ${minCasual}.`
+                          `${nextType} can only be selected at least 3 days in advance. Earliest available date is ${minAdvance}.`
                         )
                       }
+                    }
+                    if (nextType === COMBO_OFFER_LEAVE_TYPE) {
+                      const only = usableComboCredits.length === 1 ? usableComboCredits[0] : null
+                      const nextId = only ? only.leaveId || only.id : ''
+                      setHolidayWorkId(nextId)
+                      if (only && startDate) {
+                        const expiry = comboOfferExpiryDate(String(only.startDate || '').slice(0, 10))
+                        if (expiry && startDate > expiry) {
+                          setStartDate('')
+                          setEndDate('')
+                        }
+                      }
+                    } else {
+                      setHolidayWorkId('')
                     }
                   }}
                   className="w-full bg-surface border border-border text-fg text-sm rounded-xl py-2.5 px-3.5 focus:outline-none focus:border-accent"
@@ -1317,6 +1657,11 @@ export const LeaveManagement = () => {
                   )}
                   <option value="On Duty">On Duty (outdoor / official work · previous {ON_DUTY_BACKDATE_DAYS} dates)</option>
                   <option value="LOP (Loss of Pay)">LOP (Loss of Pay)</option>
+                  {usableComboCredits.length > 0 && (
+                    <option value={COMBO_OFFER_LEAVE_TYPE}>
+                      Combo Offer Leave ({usableComboCredits.length} day{usableComboCredits.length === 1 ? '' : 's'} · 3 days advance)
+                    </option>
+                  )}
                 </select>
                 {wfhPolicy.leaveFormEnabled && leaveType === 'Work From Home' && remainingWfhDays !== null && (
                   <p className="text-[11px] text-muted mt-1">
@@ -1342,6 +1687,11 @@ export const LeaveManagement = () => {
                     You can apply for today and up to the previous {ON_DUTY_BACKDATE_DAYS} dates. Needs admin approval. Counts as present when approved.
                   </p>
                 )}
+                {leaveType === COMBO_OFFER_LEAVE_TYPE && (
+                  <p className="text-[11px] text-muted mt-1">
+                    One extra day for each holiday an admin accepted and you have worked. Apply at least 3 days ahead, the same as Casual Leave, and take it within {COMBO_OFFER_WINDOW_DAYS} days of that worked date. Needs admin approval. Does not use Casual or Sick quota.
+                  </p>
+                )}
                 {leaveType === PERMISSION_LEAVE_TYPE && (
                   <p className="text-[11px] text-muted mt-1">
                     Remaining this month: {formatHoursAsHrsMins(remainingPermissionHours)} of {formatHoursAsHrsMins(permissionHoursLimit)}. Granted immediately — no admin approval. Over-limit requests cannot be submitted.
@@ -1359,6 +1709,42 @@ export const LeaveManagement = () => {
                 )}
               </div>
 
+              {leaveType === COMBO_OFFER_LEAVE_TYPE && (
+                <div className="space-y-1.5 text-left">
+                  <label className="block text-xs font-medium text-fg">Holiday worked</label>
+                  <select
+                    value={holidayWorkId}
+                    onChange={(e) => {
+                      const nextId = e.target.value
+                      setHolidayWorkId(nextId)
+                      setValidationError('')
+                      const credit = usableComboCredits.find((leave) => (leave.leaveId || leave.id) === nextId)
+                      if (credit && startDate) {
+                        const expiry = comboOfferExpiryDate(String(credit.startDate || '').slice(0, 10))
+                        if (expiry && (startDate > expiry || startDate < comboMinDate)) {
+                          setStartDate('')
+                          setEndDate('')
+                        }
+                      }
+                    }}
+                    className="w-full bg-surface border border-border text-fg text-sm rounded-xl py-2.5 px-3.5 focus:outline-none focus:border-accent"
+                    required
+                  >
+                    <option value="">Select the holiday you worked</option>
+                    {usableComboCredits.map((credit) => {
+                      const worked = String(credit.startDate || '').slice(0, 10)
+                      const expiry = comboOfferExpiryDate(worked)
+                      const id = credit.leaveId || credit.id
+                      return (
+                        <option key={id} value={id}>
+                          {worked} · {credit.dayType || 'Holiday'} · use by {expiry}
+                        </option>
+                      )
+                    })}
+                  </select>
+                </div>
+              )}
+
               <div className="space-y-1.5 text-left">
                 <label className="block text-xs font-medium text-fg">
                   {singleDayOnly ? 'Select Leave Date' : 'Select Date Range'}
@@ -1371,6 +1757,7 @@ export const LeaveManagement = () => {
                   leaveType={leaveType}
                   setValidationError={setValidationError}
                   holidays={companyHolidays}
+                  maxDate={leaveType === COMBO_OFFER_LEAVE_TYPE ? comboMaxDate : ''}
                 />
               </div>
 

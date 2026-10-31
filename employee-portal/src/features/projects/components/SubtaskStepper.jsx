@@ -5,6 +5,7 @@ import { NativePickerInput } from '../../../components/ui/Input'
 import { useProjectStore } from '../stores/projectStore'
 import { useUserStore } from '../../../stores/userStore'
 import { useTeamStore } from '../../team/stores/teamStore'
+import { isDirectoryVisible } from '../../../../../shared/employees/employmentStatus.js'
 import { getAttendanceGatedElapsedMs, formatElapsed, isEmployeeActivelyWorking, DEFAULT_TASK_STATUSES } from '../services/projectService'
 import {
   Plus,
@@ -408,6 +409,7 @@ export const SubtaskStepper = ({
 
   const assigneeOptions = useMemo(() => {
     const list = (employees || [])
+      .filter(isDirectoryVisible)
       .map((emp) => ({
         id: emp.uid || emp.employeeId || '',
         name: emp.displayName || emp.name || emp.email || 'Employee',

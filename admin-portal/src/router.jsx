@@ -39,6 +39,12 @@ const RecurringBilling = lazy(() =>
 const EmployeeList = lazy(() =>
   import('./features/team/EmployeeList').then((m) => ({ default: m.EmployeeList }))
 )
+const ExEmployeeList = lazy(() =>
+  import('./features/team/ExEmployeeList').then((m) => ({ default: m.ExEmployeeList }))
+)
+const ExEmployeeProfile = lazy(() =>
+  import('./features/team/ExEmployeeProfile').then((m) => ({ default: m.ExEmployeeProfile }))
+)
 const EmployeeOnboardingList = lazy(() =>
   import('./features/team/EmployeeOnboardingList').then((m) => ({ default: m.EmployeeOnboardingList }))
 )
@@ -171,6 +177,8 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <Navigate to="/team/employees" replace /> },
           { path: 'employees', element: <EmployeeList /> },
+          { path: 'ex-employees', element: <ExEmployeeList /> },
+          { path: 'ex-employees/:employeeId', element: <ExEmployeeProfile /> },
           { path: 'onboarding', element: <EmployeeOnboardingList /> },
           { path: 'onboarding/new', element: <Navigate to="/team/onboarding?setup=1" replace /> },
           { path: 'onboarding/:id', element: <EmployeeOnboardingDetail /> },

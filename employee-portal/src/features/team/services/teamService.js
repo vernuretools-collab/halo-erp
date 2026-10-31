@@ -13,11 +13,14 @@ import {
   serverTimestamp,
 } from 'firebase/firestore'
 import { db } from '../../../shared/services/firebaseService'
+import { isDirectoryVisible } from '../../../../../shared/employees/employmentStatus.js'
 
 // ─── Fetch all employees ──────────────────────────────────────────────────────
 export const getEmployees = async () => {
   const snap = await getDocs(collection(db, 'employees'))
-  return snap.docs.map((d) => ({ uid: d.id, employeeId: d.id, ...d.data() }))
+  return snap.docs
+    .map((d) => ({ uid: d.id, employeeId: d.id, employeeDocId: d.id, ...d.data() }))
+    .filter(isDirectoryVisible)
 }
 
 // ─── Fetch all departments ────────────────────────────────────────────────────

@@ -13,6 +13,7 @@ import {
   Megaphone,
   LifeBuoy,
   ListChecks,
+  UserX,
 } from 'lucide-react'
 
 const linkClass = ({ isActive }) =>
@@ -32,6 +33,9 @@ export function TeamSubNav({ className = '' }) {
     >
       <NavLink to="/team/employees" className={linkClass}>
         <Users className="w-3.5 h-3.5" /> Employee Directory
+      </NavLink>
+      <NavLink to="/team/ex-employees" className={linkClass}>
+        <UserX className="w-3.5 h-3.5" /> Ex-Employees
       </NavLink>
       <NavLink to="/team/onboarding" className={linkClass}>
         <UserPlus className="w-3.5 h-3.5" /> Employee Onboarding

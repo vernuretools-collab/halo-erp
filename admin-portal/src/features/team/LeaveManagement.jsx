@@ -24,6 +24,10 @@ import {
   hoursBetween,
   PERMISSION_LEAVE_TYPE,
   EMERGENCY_LEAVE_TYPE,
+  HOLIDAY_WORK_LEAVE_TYPE,
+  COMBO_OFFER_LEAVE_TYPE,
+  isHolidayWorkRequest,
+  isComboCreditHeld,
   resolveLeaveLimits,
   resolvePermissionHours,
 } from './services/leaveEntitlementUtils'
@@ -55,6 +59,8 @@ const LEAVE_TYPE_OPTIONS = [
   'Work From Home',
   'On Duty',
   'LOP (Loss of Pay)',
+  HOLIDAY_WORK_LEAVE_TYPE,
+  COMBO_OFFER_LEAVE_TYPE,
 ]
 
 const STATUS_OPTIONS = ['pending', 'approved', 'rejected', 'cancelled']
@@ -128,6 +134,7 @@ export const LeaveManagement = () => {
   const [filterEmployee, setFilterEmployee] = useState('')
   const [filterLeaveType, setFilterLeaveType] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
+  const [statusError, setStatusError] = useState('')
 
   // Load employees from Firestore
   useEffect(() => {
@@ -378,6 +385,16 @@ export const LeaveManagement = () => {
   }
 
   const handleUpdateLeaveStatus = async (leaveId, newStatus) => {
+    if (newStatus === 'rejected') {
+      const target = leaveRequests.find((leave) => leave.leaveId === leaveId)
+      if (isHolidayWorkRequest(target) && isComboCreditHeld(leaveId, leaveRequests)) {
+        setStatusError(
+          'This holiday work already has a pending or granted Combo Offer Leave. Decline or cancel that leave before declining the holiday work.'
+        )
+        return
+      }
+    }
+    setStatusError('')
     updateLeaveStatus(leaveId, newStatus)
     await updateLeaveStatusInDb(leaveId, newStatus, adminName)
   }
@@ -521,6 +538,12 @@ export const LeaveManagement = () => {
 
         <TeamSubNav />
       </div>
+
+      {statusError && (
+        <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-700 dark:text-amber-300">
+          {statusError}
+        </div>
+      )}
 
       <Card className="p-4 border-border bg-surface">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-3">

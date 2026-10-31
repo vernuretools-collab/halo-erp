@@ -8,6 +8,7 @@ import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { useUserStore } from '../../stores/userStore'
 import { collectUserIdentityIds } from '../projects/services/projectService'
+import { isDirectoryVisible } from '../../../../shared/employees/employmentStatus.js'
 import {
   CONTENT_TYPES,
   NOTIFY_BEFORE_OPTIONS,
@@ -177,6 +178,7 @@ export const SocialPostRemindersPage = () => {
               employeeId: data.employeeId || docSnap.id,
             }
           })
+          .filter(isDirectoryVisible)
           .sort((a, b) => employeeName(a).localeCompare(employeeName(b)))
         setEmployees(rows)
       })

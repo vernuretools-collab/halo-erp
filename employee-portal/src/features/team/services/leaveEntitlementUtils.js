@@ -1,7 +1,44 @@
 export const LOP_LEAVE_TYPE = 'LOP (Loss of Pay)'
 export const EMERGENCY_LEAVE_TYPE = 'Emergency Leave'
 export const PERMISSION_LEAVE_TYPE = 'Permission'
+export const HOLIDAY_WORK_LEAVE_TYPE = 'Holiday Work'
+export const COMBO_OFFER_LEAVE_TYPE = 'Combo Offer Leave'
+export const COMBO_OFFER_WINDOW_DAYS = 30
+export const COMBO_OFFER_ADVANCE_DAYS = 3
 export const DEFAULT_PERMISSION_HOURS = 4
+
+export const isHolidayWorkRequest = (leave) =>
+  leave?.requestKind === 'holiday_work' ||
+  leave?.leaveType === HOLIDAY_WORK_LEAVE_TYPE ||
+  leave?.requestedLeaveType === HOLIDAY_WORK_LEAVE_TYPE
+
+export const isComboOfferLeave = (leave) =>
+  leave?.leaveType === COMBO_OFFER_LEAVE_TYPE ||
+  leave?.requestedLeaveType === COMBO_OFFER_LEAVE_TYPE
+
+export const addCalendarDays = (dateStr, days) => {
+  if (!dateStr) return ''
+  const cursor = new Date(`${String(dateStr).slice(0, 10)}T00:00:00`)
+  if (Number.isNaN(cursor.getTime())) return ''
+  cursor.setDate(cursor.getDate() + Number(days) || 0)
+  const y = cursor.getFullYear()
+  const m = String(cursor.getMonth() + 1).padStart(2, '0')
+  const d = String(cursor.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+export const comboOfferExpiryDate = (workedDate) =>
+  addCalendarDays(workedDate, COMBO_OFFER_WINDOW_DAYS)
+
+export const isComboCreditHeld = (workId, leaveRequests) => {
+  if (!workId) return false
+  return (Array.isArray(leaveRequests) ? leaveRequests : []).some(
+    (leave) =>
+      isComboOfferLeave(leave) &&
+      leave.holidayWorkId === workId &&
+      (leave.status === 'pending' || leave.status === 'approved')
+  )
+}
 
 export const DEFAULT_LEAVE_LIMITS = {
   casual: 1,
@@ -189,6 +226,18 @@ export const countUsedPermissionHours = (
 
 export const formatLeaveDuration = (req) => {
   if (!req) return ''
+  if (isHolidayWorkRequest(req)) {
+    const date = req.startDate || ''
+    const kind = req.dayType ? ` · ${req.dayType}` : ''
+    const hours = Number(req.hours)
+    const hrsLabel = Number.isFinite(hours) && hours > 0 ? ` · ${formatHoursAsHrsMins(hours)}` : ''
+    return `${date}${kind}${hrsLabel}`
+  }
+  if (isComboOfferLeave(req)) {
+    const date = req.startDate || ''
+    const redeemed = req.workedDate ? ` · for holiday ${req.workedDate}` : ''
+    return `${date} (1 Day)${redeemed}`
+  }
   if (isPermissionLeave(req)) {
     const hours = getPermissionHours(req)
     const hrsLabel = formatHoursAsHrsMins(hours)
@@ -316,6 +365,7 @@ export const classifyApprovedLeaveByDate = (leaveRequests, employeeFilter, limit
 
   const dayEntries = []
   list.forEach((leave) => {
+    if (isHolidayWorkRequest(leave)) return
     const requested = getRequestedLeaveType(leave)
     expandLeaveWorkingDates(leave.startDate, leave.endDate || leave.startDate, holidays).forEach((date) => {
       dayEntries.push({

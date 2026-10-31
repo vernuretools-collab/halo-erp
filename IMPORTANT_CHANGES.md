@@ -53,3 +53,10 @@ On Employee Onboarding **Setup new employee**, Department is only a text input. 
 
 - The admin types the department name. That text is what the joining record uses.
 - Saving still stores a new name with the other departments, without asking the admin to pick from a list.
+
+## 2026-10-31 — Employee exit is archival
+
+Marking someone Ex-Employee or Archived only patches `status`, `lastWorkingDay`, `exitReason`, and `exitHistory` on the existing `employees` row. Ex-Employee is stored as `relieved`.
+
+- The original employee id stays. Return to Active sets `status` back to `active` and appends exit history. It does not clear the last working day, exit reason, or earlier history.
+- Exit, archive, and return must not delete or reset the employee row, the login account, or any linked attendance, timeline, leave, scrum, project, task, document, onboarding, or notification record.

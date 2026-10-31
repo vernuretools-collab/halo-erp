@@ -21,6 +21,8 @@ site_url = "http://localhost:3001"
 # browser OPTIONS preflight (no Authorization header) can return 200 + CORS.
 [functions.create-user]
 verify_jwt = false
+[functions.set-employee-access]
+verify_jwt = false
 [functions.ask-admin-assistant]
 verify_jwt = false
 

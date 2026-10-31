@@ -738,44 +738,44 @@ async function savePdf(bodyHtml, filename) {
   }
 }
 
+const EXIT_PAGES = {
+  letter: (data) => [coverPage(data), letterOpen(data), letterClose(data)],
+  assets: (data) => [assetsOpen(data), assetsClose(data)],
+  credentials: (data) => [credentialsOpen(data), credentialsClose(data)],
+  nda: (data) => [ndaOpen(data), ndaClose(data)],
+  fnf: (data) => [fnfOpen(data), fnfClose(data)],
+  experience: (data) => [experienceOpen(data), experienceClose(data)],
+}
+
+export function exitDocumentHtml(kind, input) {
+  const build = EXIT_PAGES[kind]
+  if (!build) throw new Error('Unknown exit document.')
+  return build(letterData(input)).join('')
+}
+
 export async function downloadRelievingLetter(input) {
   const data = letterData(input)
-  await savePdf(
-    [coverPage(data), letterOpen(data), letterClose(data)].join(''),
-    `${fileSlug(data.employeeName)}-relieving-letter.pdf`,
-  )
+  await savePdf(exitDocumentHtml('letter', input), `${fileSlug(data.employeeName)}-relieving-letter.pdf`)
 }
 
 export async function downloadAssetsReturn(input) {
   const data = letterData(input)
-  await savePdf(
-    [assetsOpen(data), assetsClose(data)].join(''),
-    `${fileSlug(data.employeeName)}-assets-return.pdf`,
-  )
+  await savePdf(exitDocumentHtml('assets', input), `${fileSlug(data.employeeName)}-assets-return.pdf`)
 }
 
 export async function downloadCredentialsRevocation(input) {
   const data = letterData(input)
-  await savePdf(
-    [credentialsOpen(data), credentialsClose(data)].join(''),
-    `${fileSlug(data.employeeName)}-credentials-revocation.pdf`,
-  )
+  await savePdf(exitDocumentHtml('credentials', input), `${fileSlug(data.employeeName)}-credentials-revocation.pdf`)
 }
 
 export async function downloadNda(input) {
   const data = letterData(input)
-  await savePdf(
-    [ndaOpen(data), ndaClose(data)].join(''),
-    `${fileSlug(data.employeeName)}-nda.pdf`,
-  )
+  await savePdf(exitDocumentHtml('nda', input), `${fileSlug(data.employeeName)}-nda.pdf`)
 }
 
 export async function downloadFnfSettlement(input) {
   const data = letterData(input)
-  await savePdf(
-    [fnfOpen(data), fnfClose(data)].join(''),
-    `${fileSlug(data.employeeName)}-fnf-settlement.pdf`,
-  )
+  await savePdf(exitDocumentHtml('fnf', input), `${fileSlug(data.employeeName)}-fnf-settlement.pdf`)
 }
 
 function experienceTable(data) {
@@ -866,8 +866,5 @@ function experienceClose(data) {
 
 export async function downloadExperienceCertificate(input) {
   const data = letterData(input)
-  await savePdf(
-    [experienceOpen(data), experienceClose(data)].join(''),
-    `${fileSlug(data.employeeName)}-experience-certificate.pdf`,
-  )
+  await savePdf(exitDocumentHtml('experience', input), `${fileSlug(data.employeeName)}-experience-certificate.pdf`)
 }

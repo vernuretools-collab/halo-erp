@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Download, Eraser, PenLine, RotateCcw, Upload } from 'lucide-react'
+import { Download, Eraser, PenLine, Upload } from 'lucide-react'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
@@ -20,26 +20,6 @@ function sameName(left, right) {
   return Boolean(a) && a === normalize(right)
 }
 
-function drawCoFounderSignature() {
-  const canvas = document.createElement('canvas')
-  canvas.width = 720
-  canvas.height = 200
-  const ctx = canvas.getContext('2d')
-  ctx.fillStyle = '#ffffff'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-  ctx.fillStyle = '#12324a'
-  ctx.font = 'italic 86px "Segoe Script", "Brush Script MT", "Lucida Handwriting", cursive'
-  ctx.textBaseline = 'middle'
-  ctx.fillText(DEFAULT_SIGNATORY, 28, 104)
-  ctx.strokeStyle = '#12324a'
-  ctx.lineWidth = 2
-  ctx.beginPath()
-  ctx.moveTo(36, 158)
-  ctx.bezierCurveTo(160, 176, 300, 138, 470, 160)
-  ctx.stroke()
-  return canvas.toDataURL('image/png')
-}
-
 function initialCoFounderSign() {
   try {
     const saved = localStorage.getItem(COFOUNDER_SIGN_KEY)
@@ -47,7 +27,7 @@ function initialCoFounderSign() {
   } catch {
     /* storage unavailable */
   }
-  return drawCoFounderSignature()
+  return ''
 }
 
 function rememberCoFounderSign(value) {
@@ -99,7 +79,7 @@ async function findOnboardingSignature(name) {
   return ''
 }
 
-function SignCard({ title, hint, image, onUpload, onDraw, onReset, onClear }) {
+function SignCard({ title, hint, image, onUpload, onDraw, onClear }) {
   const inputRef = useRef(null)
   return (
     <div className="min-w-0 rounded-xl border border-border bg-surface p-2 text-left">
@@ -121,11 +101,6 @@ function SignCard({ title, hint, image, onUpload, onDraw, onReset, onClear }) {
         <button type="button" onClick={() => inputRef.current?.click()} className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[10px] text-fg cursor-pointer">
           <Upload className="h-3 w-3" /> Upload
         </button>
-        {onReset && (
-          <button type="button" onClick={onReset} className="ml-auto inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[10px] text-fg cursor-pointer">
-            <RotateCcw className="h-3 w-3" /> Default
-          </button>
-        )}
         {onClear && image && (
           <button type="button" onClick={onClear} className="ml-auto inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[10px] text-rose-500 cursor-pointer">
             <Eraser className="h-3 w-3" /> Clear
@@ -366,14 +341,9 @@ export function RelievingLetterPage() {
     row.other,
   )), [form.credentials])
 
-  const letterIndex = LETTERS.findIndex((item) => item.id === letter)
-  const currentLetter = LETTERS[letterIndex] || LETTERS[0]
-
-  const goStep = (delta) => {
-    const next = letterIndex + delta
-    if (next < 0 || next >= LETTERS.length) return
-    setLetter(LETTERS[next].id)
-  }
+  const showJoining = letter === 'letter' || letter === 'experience'
+  const showResignation = letter === 'letter'
+  const showTenure = letter === 'letter' || letter === 'experience'
 
   const canDownload = letter === 'letter'
     ? letterReady
@@ -448,12 +418,6 @@ export function RelievingLetterPage() {
     rememberCoFounderSign(value)
   }
 
-  const resetCoFounder = () => {
-    const next = drawCoFounderSignature()
-    setCoFounderSign(next)
-    rememberCoFounderSign('')
-  }
-
   const saveDrawnSign = (value) => {
     if (pad === 'cofounder') saveCoFounder(value)
     if (pad === 'employee') setEmployeeSign(value)
@@ -487,16 +451,16 @@ export function RelievingLetterPage() {
       <TeamSubNav />
       <PageHeader
         title="Final Documentation"
-        description="Enter the exit details, then open each letter and download its PDF. Files are not saved to the employee record."
+        description="Choose a document, fill the details it prints, then download its PDF. Files are not saved to the employee record."
         actions={(
           <div className="grid w-[24rem] max-w-full grid-cols-2 gap-2">
             <SignCard
               title="Co-founder sign"
-              hint="Default"
+              hint={coFounderSign ? 'Added' : 'Needed'}
               image={coFounderSign}
               onDraw={() => setPad('cofounder')}
               onUpload={(file) => uploadSignature(file, saveCoFounder)}
-              onReset={resetCoFounder}
+              onClear={() => saveCoFounder('')}
             />
             <SignCard
               title="Employee sign"
@@ -517,6 +481,21 @@ export function RelievingLetterPage() {
         />
       )}
       <form className="space-y-4" onSubmit={handleDownload}>
+        <div className="flex flex-wrap gap-2">
+          {LETTERS.map((item) => {
+            const selected = item.id === letter
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setLetter(item.id)}
+                className={`rounded-xl border px-3 py-2 text-xs font-medium cursor-pointer ${selected ? 'border-accent bg-accent text-white' : 'border-border bg-surface text-fg'}`}
+              >
+                {item.label}
+              </button>
+            )
+          })}
+        </div>
         <Card>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="w-full space-y-1.5 text-left md:col-span-2">
@@ -543,40 +522,28 @@ export function RelievingLetterPage() {
             <Input label="Employee name *" value={form.employeeName} onChange={(event) => setField('employeeName', event.target.value)} />
             <Input label="Designation *" value={form.designation} onChange={(event) => setField('designation', event.target.value)} />
             <Input label="Department *" value={form.department} onChange={(event) => setField('department', event.target.value)} />
-            <Input label="Date of joining *" type="date" value={form.dateOfJoining} onChange={(event) => setField('dateOfJoining', event.target.value)} />
-            <Input label="Resignation date *" type="date" value={form.resignationDate} onChange={(event) => setField('resignationDate', event.target.value)} />
+            {showJoining && (
+              <Input label="Date of joining *" type="date" value={form.dateOfJoining} onChange={(event) => setField('dateOfJoining', event.target.value)} />
+            )}
+            {showResignation && (
+              <Input label="Resignation date *" type="date" value={form.resignationDate} onChange={(event) => setField('resignationDate', event.target.value)} />
+            )}
             <Input label="Last working day *" type="date" value={form.lastWorkingDay} onChange={(event) => setField('lastWorkingDay', event.target.value)} />
             <Input label="Issue date *" type="date" value={form.issueDate} onChange={(event) => setField('issueDate', event.target.value)} />
-            <Input label="Total tenure *" value={form.totalTenure} onChange={(event) => setField('totalTenure', event.target.value)} />
+            {showTenure && (
+              <Input label="Total tenure *" value={form.totalTenure} onChange={(event) => setField('totalTenure', event.target.value)} />
+            )}
             <Input label="Authorised signatory *" value={form.signatoryName} onChange={(event) => setField('signatoryName', event.target.value)} />
             <Input label="Signatory title *" value={form.signatoryTitle} onChange={(event) => setField('signatoryTitle', event.target.value)} />
-          </div>
-        </Card>
-        <Card>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">{letterIndex + 1} of 6</p>
-              <p className="mt-1 text-sm font-medium text-fg">{currentLetter.label}</p>
-            </div>
-            <Button type="button" icon={Download} disabled={!canDownload || Boolean(downloading)} onClick={handleDownload}>
-              {downloading === letter ? 'Preparing PDF…' : DOWNLOADS[letter].label}
-            </Button>
-          </div>
-          {!canDownload && downloadGap.length > 0 && (
-            <p className="mt-2 text-xs text-rose-500">Fill {downloadGap.join(', ')} to download.</p>
-          )}
-          <div className="mt-4 flex gap-1.5">
-            {LETTERS.map((item, index) => (
-              <span
-                key={item.id}
-                className={`h-1.5 flex-1 rounded-full ${index <= letterIndex ? 'bg-accent' : 'bg-chrome'}`}
-              />
-            ))}
-          </div>
-          <div className="mt-4">
-            {letter === 'letter' && (
-              <p className="text-sm text-muted">This letter uses the employee details already entered. Download it, then go to the next letter.</p>
+            {letter === 'fnf' && (
+              <Input label="F&F deadline *" type="date" value={form.settlementDeadline} onChange={(event) => setField('settlementDeadline', event.target.value)} />
             )}
+            {letter === 'experience' && (
+              <Input label="Conduct summary *" value={form.conductSummary} onChange={(event) => setField('conductSummary', event.target.value)} />
+            )}
+          </div>
+          {(letter === 'assets' || letter === 'credentials' || letter === 'nda' || letter === 'fnf') && (
+          <div className="mt-4">
             {letter === 'assets' && (
               <div className="space-y-3">
                 <p className="text-xs text-muted">Write NIL when an item was not issued. The two extra rows are optional.</p>
@@ -614,13 +581,10 @@ export function RelievingLetterPage() {
               </div>
             )}
             {letter === 'nda' && (
-              <p className="text-sm text-muted">This agreement uses the employee details already entered. The 24-month non-solicitation period stays as printed.</p>
+              <p className="text-sm text-muted">The 24-month non-solicitation period stays as printed.</p>
             )}
             {letter === 'fnf' && (
               <div className="space-y-3">
-                <div className="max-w-md">
-                  <Input label="F&F deadline *" type="date" value={form.settlementDeadline} onChange={(event) => setField('settlementDeadline', event.target.value)} />
-                </div>
                 <p className="text-xs text-muted">Set the status printed for each settlement component.</p>
                 {form.settlement.map((row, index) => (
                   <div key={row.component} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border p-3">
@@ -639,19 +603,17 @@ export function RelievingLetterPage() {
                 ))}
               </div>
             )}
-            {letter === 'experience' && (
-              <Input label="Conduct summary *" value={form.conductSummary} onChange={(event) => setField('conductSummary', event.target.value)} />
-            )}
-            {error && <p className="mt-3 text-sm text-rose-500">{error}</p>}
           </div>
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-            <Button type="button" variant="secondary" icon={ChevronLeft} disabled={letterIndex === 0} onClick={() => goStep(-1)}>
-              Back
-            </Button>
-            <Button type="button" variant="secondary" disabled={letterIndex === LETTERS.length - 1} onClick={() => goStep(1)}>
-              Next <ChevronRight className="h-4 w-4" />
+          )}
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            {!canDownload && downloadGap.length > 0 ? (
+              <p className="text-xs text-rose-500">Fill {downloadGap.join(', ')} to download.</p>
+            ) : <span />}
+            <Button type="button" icon={Download} disabled={!canDownload || Boolean(downloading)} onClick={handleDownload}>
+              {downloading === letter ? 'Preparing PDF…' : DOWNLOADS[letter].label}
             </Button>
           </div>
+          {error && <p className="mt-3 text-sm text-rose-500">{error}</p>}
         </Card>
       </form>
     </div>
