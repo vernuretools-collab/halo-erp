@@ -10,6 +10,7 @@ import { setDoc, doc, getDoc } from 'firebase/firestore'
 import { updatePassword, sendPasswordResetEmail, updateProfile } from 'firebase/auth'
 import { EmployeeAvatar } from '../../../../shared/ui/EmployeeAvatar.jsx'
 import { mergeEmployeeFields, uploadProfilePhoto, deleteProfilePhoto } from './services/profilePhotoService'
+import { BreakHistoryCard } from './BreakHistoryCard'
 import {
   User,
   Mail,
@@ -463,6 +464,8 @@ export const EmployeeProfile = () => {
               </div>
             </form>
           </Card>
+
+          <BreakHistoryCard />
 
           <Card className="p-6 border-border space-y-4">
             <h3 className="font-bold text-fg text-sm">Security & Password</h3>
