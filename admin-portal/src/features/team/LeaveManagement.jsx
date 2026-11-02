@@ -6,7 +6,7 @@ import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { useTeamStore } from './stores/teamStore'
 import { useUserStore } from '../../stores/userStore'
-import { getEmployees, getLeaveRequests, createLeaveRequest, updateLeaveStatusInDb, deleteLeaveRequestFromDb } from './services/teamService'
+import { getEmployees, getLeaveRequests, createLeaveRequest, updateLeaveStatusInDb, deleteLeaveRequestFromDb, getEmployeeAttendanceLogs } from './services/teamService'
 import {
   resolveEmployeeWfhPolicy,
   countUsedWfhDays,
@@ -315,11 +315,14 @@ export const LeaveManagement = () => {
         employeeName,
       }
       if (!conversion.convertedToLop && policy.mode === 'weekly') {
+        const attendanceUid = matchedEmp?.uid || matchedEmp?.employeeId || ''
+        const attendanceLogs = attendanceUid ? await getEmployeeAttendanceLogs(attendanceUid) : []
         const usedForRequest = countUsedWfhDays(
           leaveRequests,
           employeeFilter,
           policy,
-          resolvedStart
+          resolvedStart,
+          attendanceLogs
         )
         const wfhError = validateWfhRequest(policy, usedForRequest, daysCount)
         if (wfhError) {
@@ -929,7 +932,7 @@ export const LeaveManagement = () => {
                     Employee WFH: {getWfhAllowanceLabel(selectedWfhPolicy)}
                     {selectedWfhPolicy.mode === 'full' ? ' (no leave request needed)' : ''}
                     {selectedWfhPolicy.mode === 'monthly' ? ' (admin approval for employee requests)' : ''}
-                    {selectedWfhPolicy.mode === 'weekly' ? ' (employee chooses WFH/Office at Check In)' : ''}
+                    {selectedWfhPolicy.mode === 'weekly' ? ' (office check-in does not use a day; away from the office uses one)' : ''}
                   </p>
                 )}
                 {leaveType === EMERGENCY_LEAVE_TYPE && (

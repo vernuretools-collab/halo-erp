@@ -762,6 +762,12 @@ export const useTeamStore = create(
 
           // First clock-in of the local day only — never reuse yesterday if they forgot to clock out
           const dayFirstClockIn = !isNewDay && state.clockInTime ? state.clockInTime : timeStr
+          const priorWfh =
+            !isNewDay &&
+            currentShiftLogs.some(
+              (entry) => entry?.type === 'clock_in' && /wfh/i.test(String(entry.label || ''))
+            )
+          const markWfh = gate.wfhExempt === true || priorWfh
           const newLogs = [
             {
               id: `log_${nowMs}`,
@@ -823,7 +829,7 @@ export const useTeamStore = create(
               shiftLogs: newLogs,
               replaceShiftLogs: isNewDay,
               locationVerified: gate.locationVerified === true,
-              wfhExempt: gate.wfhExempt === true,
+              wfhExempt: markWfh,
               clockInCoords: gate.coords || null,
             })
           }

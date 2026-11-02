@@ -6,6 +6,7 @@ import { Badge } from '../../components/ui/Badge'
 import { Modal } from '../../components/ui/Modal'
 import { TeamSubNav } from './components/TeamSubNav'
 import { deleteEmployeeOnboarding, getEmployeeOnboarding, updateEmployeeHandbook } from './services/employeeOnboardingService'
+import { EmploymentEditModal } from './components/EmploymentEditModal'
 import { HandbookEditor } from './components/HandbookFields'
 import { downloadAllOnboardingPacks, downloadEmploymentPack, downloadHandbookPack, downloadLegalPack, hasIssuedAssets } from './services/onboardingPacks'
 import { OnboardingPackViewer } from '../../../../shared/onboarding/OnboardingPackViewer.jsx'
@@ -75,6 +76,7 @@ export const EmployeeOnboardingDetail = () => {
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+  const [editingEmployment, setEditingEmployment] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -102,6 +104,11 @@ export const EmployeeOnboardingDetail = () => {
   const policies = answers.policies || {}
   const documents = Array.isArray(row?.documents) ? row.documents : []
   const submitted = row?.status === ONBOARDING_STATUS.SUBMITTED
+
+  const reloadRow = async () => {
+    const fresh = await getEmployeeOnboarding(row.id)
+    if (fresh) setRow(fresh)
+  }
 
   const saveHandbook = async (payload) => {
     const handbook = await updateEmployeeHandbook({
@@ -174,7 +181,12 @@ export const EmployeeOnboardingDetail = () => {
           </div>
 
           <Card>
-            <p className="text-xs font-semibold uppercase tracking-wide text-accent mb-4">Employment</p>
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-accent">Employment</p>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setEditingEmployment(true)}>
+                Edit
+              </Button>
+            </div>
             <FactGrid fields={SUMMARY_FIELDS} source={employment} />
             <div className="mt-4 pt-4 border-t border-border">
               <FactGrid fields={EXTRA_FIELDS.filter(([key]) => key !== 'assets' || hasIssuedAssets(employment.assets))} source={employment} />
@@ -182,6 +194,13 @@ export const EmployeeOnboardingDetail = () => {
           </Card>
 
           <HandbookEditor key={row.id} record={row} onSave={saveHandbook} />
+
+          <EmploymentEditModal
+            open={editingEmployment}
+            record={row}
+            onClose={() => setEditingEmployment(false)}
+            onSaved={reloadRow}
+          />
 
           {!submitted && (
             <Card>

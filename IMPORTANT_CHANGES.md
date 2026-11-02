@@ -60,3 +60,10 @@ Marking someone Ex-Employee or Archived only patches `status`, `lastWorkingDay`,
 
 - The original employee id stays. Return to Active sets `status` back to `active` and appends exit history. It does not clear the last working day, exit reason, or earlier history.
 - Exit, archive, and return must not delete or reset the employee row, the login account, or any linked attendance, timeline, leave, scrum, project, task, document, onboarding, or notification record.
+
+## 2026-11-02 — Onboarding employment stays editable
+
+After the joining login exists, an admin can change the employment details on Employee Onboarding. That includes department, designation, employee ID, name, reporting manager, joining date, work mode, CTC, probation, work location, assets, and issue date.
+
+- The joining username and password stay. This edit does not create a directory employee.
+- The change is saved on `employee_onboarding.employment` and on the joining profile. The list, the hire’s form, the pack view, and the PDF downloads read that updated employment.

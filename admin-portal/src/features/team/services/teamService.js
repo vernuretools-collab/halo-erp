@@ -1088,6 +1088,23 @@ export const getWorkIdleForMonth = async (month) => {
   }
 }
 
+/** Attendance rows for one employee (all dates). Used to count weekly WFH clock-ins. */
+export const getEmployeeAttendanceLogs = async (uid) => {
+  if (!uid) return []
+  try {
+    const q = query(collection(db, 'attendanceLogs'), where('uid', '==', String(uid)))
+    const snap = await getDocs(q)
+    return snap.docs.map((d) => {
+      const data = d.data() || {}
+      const date = data.date || String(d.id).split('_')[0]
+      return { id: d.id, ...data, date }
+    })
+  } catch (err) {
+    console.error('Error fetching employee attendance logs:', err)
+    return []
+  }
+}
+
 export const getAttendanceLogsForMonth = async (month) => {
   const { start, end } = getMonthDateBounds(month)
   try {

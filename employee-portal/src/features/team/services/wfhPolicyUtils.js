@@ -62,7 +62,8 @@ export const resolveEmployeeWfhPolicy = (emp) => {
 
   const limit = Math.max(1, Number(emp?.wfhLimit ?? emp?.wfhDaysPerMonth) || 1)
   const enabled = mode !== 'off'
-  // Weekly: consume at clock-in (no leave form). Monthly: leave request + admin approval.
+  // Weekly: office clock-in does not use a day; away from the office uses one flexible day.
+  // Monthly: leave request + admin approval.
   const leaveFormEnabled = mode === 'monthly'
   const clockInChoice = mode === 'weekly'
   const canRequest = leaveFormEnabled || clockInChoice
@@ -70,32 +71,103 @@ export const resolveEmployeeWfhPolicy = (emp) => {
   return { mode, limit, enabled, canRequest, leaveFormEnabled, clockInChoice }
 }
 
+const addCalendarDays = (dateStr, days) => {
+  const d = new Date(`${dateStr}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return dateStr
+  d.setDate(d.getDate() + days)
+  return toDateKey(d)
+}
+
+/** True when this attendance row was a work-from-home clock-in. */
+export const attendanceRecordIsWfh = (record) => {
+  if (!record || typeof record !== 'object') return false
+  if (record.wfhExempt === true) return true
+  const logs = []
+  if (Array.isArray(record.shiftLogs)) logs.push(...record.shiftLogs)
+  if (Array.isArray(record.todayShiftLogs)) logs.push(...record.todayShiftLogs)
+  return logs.some((entry) => entry?.type === 'clock_in' && /wfh/i.test(String(entry.label || '')))
+}
+
+const attendanceEntries = (attendanceByDate) => {
+  if (!attendanceByDate) return []
+  if (Array.isArray(attendanceByDate)) return attendanceByDate
+  if (typeof attendanceByDate !== 'object') return []
+  return Object.entries(attendanceByDate).map(([date, record]) => ({
+    ...(record || {}),
+    date: record?.date || date,
+  }))
+}
+
+const leaveSpanEnd = (leave, start) => {
+  const end = String(leave.endDate || '').slice(0, 10)
+  const byDays = addCalendarDays(start, Math.max(1, Number(leave.days) || 1) - 1)
+  if (end && end > byDays) return end
+  return byDays
+}
+
+const isWfhLeave = (leave) => {
+  const requested = leave?.requestedLeaveType || leave?.leaveType
+  if (requested !== 'Work From Home' && leave?.leaveType !== 'Work From Home') return false
+  const status = String(leave?.status || '').toLowerCase()
+  return status !== 'rejected' && status !== 'cancelled'
+}
+
+/**
+ * Distinct WFH dates in the Monday–Sunday week of referenceDate.
+ * A date counts once, whether it came from a leave request or a WFH clock-in.
+ */
+export const collectUsedWfhDates = (leaveRequests, employeeFilter, policy, referenceDateStr, attendanceByDate) => {
+  const dates = new Set()
+  if (!policy || policy.mode !== 'weekly') return dates
+
+  const ref = referenceDateStr || toDateKey(new Date())
+  const { start, end } = getWeekRangeForDate(ref)
+  const list = Array.isArray(leaveRequests) ? leaveRequests : []
+
+  list.forEach((leave) => {
+    const day = String(leave?.startDate || '').slice(0, 10)
+    if (!day || !isWfhLeave(leave) || !matchesEmployee(leave, employeeFilter)) return
+    let cursor = day < start ? start : day
+    const last = leaveSpanEnd(leave, day)
+    const clip = last > end ? end : last
+    for (let i = 0; i < 40 && cursor <= clip; i += 1) {
+      dates.add(cursor)
+      cursor = addCalendarDays(cursor, 1)
+    }
+  })
+
+  attendanceEntries(attendanceByDate).forEach((record) => {
+    const date = String(record?.date || '').slice(0, 10)
+    if (!date || date < start || date > end) return
+    if (!attendanceRecordIsWfh(record)) return
+    dates.add(date)
+  })
+
+  return dates
+}
+
 /**
  * Sum non-rejected WFH days for an employee in the policy period of referenceDate.
+ * Weekly mode counts unique dates from leave requests and WFH clock-ins.
+ * @param {object|object[]|null} [attendanceByDate] date → attendance row, or a list of rows
  */
-export const countUsedWfhDays = (leaveRequests, employeeFilter, policy, referenceDateStr) => {
+export const countUsedWfhDays = (leaveRequests, employeeFilter, policy, referenceDateStr, attendanceByDate) => {
   if (!policy || policy.mode === 'off' || policy.mode === 'full') return 0
 
   const ref = referenceDateStr || toDateKey(new Date())
   const list = Array.isArray(leaveRequests) ? leaveRequests : []
 
-  return list
-    .filter((l) => {
-      const requested = l.requestedLeaveType || l.leaveType
-      if (requested !== 'Work From Home' && l.leaveType !== 'Work From Home') return false
-      const status = String(l.status || '').toLowerCase()
-      if (status === 'rejected' || status === 'cancelled') return false
-      if (!l.startDate) return false
-      if (!matchesEmployee(l, employeeFilter)) return false
+  if (policy.mode === 'monthly') {
+    return list
+      .filter((l) => {
+        if (!isWfhLeave(l) || !l.startDate) return false
+        if (!matchesEmployee(l, employeeFilter)) return false
+        return String(l.startDate).startsWith(ref.slice(0, 7))
+      })
+      .reduce((sum, l) => sum + (Number(l.days) || 1), 0)
+  }
 
-      if (policy.mode === 'monthly') {
-        return l.startDate.startsWith(ref.slice(0, 7))
-      }
-
-      const { start, end } = getWeekRangeForDate(ref)
-      return l.startDate >= start && l.startDate <= end
-    })
-    .reduce((sum, l) => sum + (Number(l.days) || 1), 0)
+  return collectUsedWfhDates(leaveRequests, employeeFilter, policy, ref, attendanceByDate).size
 }
 
 /**

@@ -3,12 +3,14 @@
  */
 import {
   resolveEmployeeWfhPolicy,
+  collectUsedWfhDates,
   countUsedWfhDays,
 } from './wfhPolicyUtils'
 import { getOfficeLocation } from './teamService'
+import { getUserMonthlyAttendance } from './attendanceService'
 import { getRequestedLeaveType, leaveStatusKey } from './leaveEntitlementUtils'
 
-/** Set true to require office GPS / weekly WFH clock-in choice again. */
+/** Set true to require office GPS. Weekly WFH still reads location before using a day. */
 export const LOCATION_GATE_ENABLED = true
 
 const toDateKey = (date = new Date()) => {
@@ -55,8 +57,8 @@ export const hasApprovedWfhToday = (leaveRequests, employeeFilter, dateStr) => {
 }
 
 /**
- * Weekly employees choose WFH vs Office at clock-in (no leave form).
- * Prompt only when they still have remaining weekly days and no WFH leave today.
+ * Weekly employees do not pick WFH in a prompt. Location decides:
+ * inside the office does not use a day; away from the office uses one.
  */
 export const getWeeklyClockInPromptState = ({
   emp,
@@ -217,6 +219,88 @@ const collectClockInCoords = async (office) => {
   })
 }
 
+const weeklyLimit = (wfh) => Math.max(1, Number(wfh?.limit) || 1)
+
+/**
+ * Weekly WFH: read GPS first.
+ * Inside the office does not use a day. Outside, or with no location, uses one flexible day.
+ */
+const prepareWeeklyClockInGate = async ({ emp, leaveRequests, day, filter, wfh }) => {
+  const ids = [...new Set([filter.employeeId, filter.uid, emp?.uid, emp?.employeeId].filter(Boolean))]
+  let attendance = {}
+  try {
+    attendance = ids.length ? await getUserMonthlyAttendance(ids) : {}
+  } catch {
+    attendance = {}
+  }
+
+  const usedDates = collectUsedWfhDates(leaveRequests, filter, wfh, day, attendance)
+  const todayCounted = usedDates.has(day)
+  const limit = weeklyLimit(wfh)
+  const canUseWfh = todayCounted || usedDates.size < limit
+
+  const office = await getOfficeLocation()
+  const officeReady = office?.lat != null && office?.lng != null
+
+  let coords = null
+  let inside = false
+  let dist = null
+  let locationError = officeReady
+    ? null
+    : 'Office location is not configured. Contact your administrator.'
+
+  if (officeReady) {
+    const sample = await collectClockInCoords(office)
+    if (!sample.ok) {
+      locationError = sample.error
+    } else {
+      coords = sample
+      dist = nearestOfficeDistance(sample.lat, sample.lng, office)
+      inside = isWithinOfficeRadius(sample.lat, sample.lng, office, sample.accuracy)
+    }
+  }
+
+  if (inside) {
+    return {
+      ok: true,
+      requireOfficeLocation: true,
+      wfhExempt: false,
+      locationVerified: true,
+      reason: 'Inside office geofence',
+      coords: { lat: coords.lat, lng: coords.lng },
+      office,
+    }
+  }
+
+  if (canUseWfh) {
+    return {
+      ok: true,
+      requireOfficeLocation: false,
+      wfhExempt: true,
+      locationVerified: false,
+      reason: todayCounted
+        ? 'Weekly WFH already used today — location not required'
+        : 'Weekly WFH — location not required',
+      coords: coords ? { lat: coords.lat, lng: coords.lng } : null,
+    }
+  }
+
+  if (!coords) {
+    return {
+      ok: false,
+      requireOfficeLocation: true,
+      error: locationError || 'You must be at the office to clock in.',
+    }
+  }
+
+  return {
+    ok: false,
+    requireOfficeLocation: true,
+    error: `You must be at the office to clock in (about ${Math.round(dist)}m away; allowed radius ${office.radiusMeters}m). You have used ${limit} WFH day(s) this week.`,
+    coords,
+  }
+}
+
 /**
  * Full pre-check before clock-in.
  */
@@ -232,7 +316,20 @@ export const prepareClockInGate = async ({ emp, leaveRequests, dateStr, employee
     }
   }
 
-  const policy = resolveClockInLocationPolicy({ emp, leaveRequests, dateStr, employeeFilter })
+  const day = dateStr || toDateKey()
+  const wfh = resolveEmployeeWfhPolicy(emp || {})
+  const filter = employeeFilter || {
+    employeeId: emp?.uid || emp?.employeeId,
+    uid: emp?.uid || emp?.employeeId,
+    employeeEmail: emp?.email,
+    employeeName: emp?.displayName || emp?.name,
+  }
+
+  if (wfh.mode === 'weekly') {
+    return prepareWeeklyClockInGate({ emp, leaveRequests, day, filter, wfh })
+  }
+
+  const policy = resolveClockInLocationPolicy({ emp, leaveRequests, dateStr: day, employeeFilter: filter })
 
   if (!policy.requireOfficeLocation) {
     return {

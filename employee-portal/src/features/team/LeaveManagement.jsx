@@ -7,6 +7,7 @@ import { NativePickerInput } from '../../components/ui/Input'
 import { useTeamStore } from './stores/teamStore'
 import { useUserStore } from '../../stores/userStore'
 import { getEmployees, createLeaveRequest, updateLeaveStatusInDb, deleteLeaveRequestFromDb, subscribeToCompanyHolidays } from './services/teamService'
+import { getUserMonthlyAttendance } from './services/attendanceService'
 import {
   resolveEmployeeWfhPolicy,
   countUsedWfhDays,
@@ -614,6 +615,25 @@ export const LeaveManagement = () => {
   const currentMonthName = new Date().toLocaleString('default', { month: 'long', year: 'numeric' })
 
   const wfhPolicy = resolveEmployeeWfhPolicy(currentEmp || userDoc || {})
+  const [wfhAttendance, setWfhAttendance] = useState({})
+
+  useEffect(() => {
+    if (wfhPolicy.mode !== 'weekly' || !resolvedEmployeeId) {
+      setWfhAttendance({})
+      return undefined
+    }
+    let cancelled = false
+    getUserMonthlyAttendance(resolvedEmployeeId)
+      .then((map) => {
+        if (!cancelled) setWfhAttendance(map || {})
+      })
+      .catch(() => {
+        if (!cancelled) setWfhAttendance({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [wfhPolicy.mode, resolvedEmployeeId])
   const leaveLimits = resolveLeaveLimits(currentEmp || userDoc || {})
   const permissionHoursLimit = resolvePermissionHours(currentEmp || userDoc || {})
 
@@ -790,7 +810,13 @@ export const LeaveManagement = () => {
   )
 
   const wfhReferenceDate = startDate || new Date().toISOString().split('T')[0]
-  const usedWfhDays = countUsedWfhDays(myLeaveRequests, employeeWfhFilter, wfhPolicy, wfhReferenceDate)
+  const usedWfhDays = countUsedWfhDays(
+    myLeaveRequests,
+    employeeWfhFilter,
+    wfhPolicy,
+    wfhReferenceDate,
+    wfhAttendance
+  )
   const remainingWfhDays =
     wfhPolicy.leaveFormEnabled || wfhPolicy.clockInChoice
       ? Math.max(0, (Number(wfhPolicy.limit) || 1) - usedWfhDays)
@@ -942,7 +968,7 @@ export const LeaveManagement = () => {
       if (!wfhPolicy.leaveFormEnabled) {
         setValidationError(
           wfhPolicy.clockInChoice
-            ? 'Weekly WFH is selected at Check In on Attendance — no leave request needed.'
+            ? 'Weekly WFH is applied at Check In. At the office it does not use a day. Away from the office it uses one day.'
             : 'Work From Home leave requests are not available for your account.'
         )
         return
@@ -952,7 +978,8 @@ export const LeaveManagement = () => {
           myLeaveRequests,
           employeeWfhFilter,
           wfhPolicy,
-          startDate
+          startDate,
+          wfhAttendance
         )
         const wfhError = validateWfhRequest(wfhPolicy, usedForRequest, daysCount)
         if (wfhError) {
@@ -1699,7 +1726,7 @@ export const LeaveManagement = () => {
                 )}
                 {wfhPolicy.clockInChoice && remainingWfhDays !== null && (
                   <p className="text-[11px] text-muted mt-1">
-                    Weekly WFH ({remainingWfhDays} of {wfhPolicy.limit} remaining this week) — choose WFH or Office when you Check In. No leave request needed.
+                    Weekly WFH ({remainingWfhDays} of {wfhPolicy.limit} remaining this week). Check In at the office does not use a day. Check In away from the office uses one day, on any day you choose.
                   </p>
                 )}
                 {wfhPolicy.mode === 'full' && (

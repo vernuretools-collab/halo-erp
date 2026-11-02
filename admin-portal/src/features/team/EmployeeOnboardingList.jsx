@@ -8,6 +8,7 @@ import { Modal } from '../../components/ui/Modal'
 import { TeamSubNav } from './components/TeamSubNav'
 import { deleteEmployeeOnboarding, listEmployeeOnboarding } from './services/employeeOnboardingService'
 import { EmployeeOnboardingSetup } from './EmployeeOnboardingSetup'
+import { EmploymentEditModal } from './components/EmploymentEditModal'
 import { ONBOARDING_STATUS, joiningPageUrl } from '../../../../shared/supabase/employeeOnboarding.js'
 import { Trash2, UserPlus, Copy } from 'lucide-react'
 
@@ -26,6 +27,7 @@ export const EmployeeOnboardingList = () => {
   const [searchParams, setSearchParams] = useSearchParams()
   const [setupOpen, setSetupOpen] = useState(() => searchParams.get('setup') === '1')
   const [copied, setCopied] = useState(false)
+  const [editing, setEditing] = useState(null)
   const joiningUrl = joiningPageUrl()
 
   const loadRows = useCallback(() => {
@@ -206,6 +208,9 @@ export const EmployeeOnboardingList = () => {
                   <td className="px-4 py-3 font-mono text-sm text-fg break-all">{password || 'Not saved'}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-2">
+                      <Button type="button" variant="secondary" size="sm" onClick={() => setEditing(row)}>
+                        Edit
+                      </Button>
                       <Link to={`/team/onboarding/${row.id}`}>
                         <Button type="button" variant="secondary" size="sm">Open</Button>
                       </Link>
@@ -239,6 +244,13 @@ export const EmployeeOnboardingList = () => {
       >
         <EmployeeOnboardingSetup embedded onClose={closeSetup} onCreated={() => { loadRows() }} />
       </Modal>
+
+      <EmploymentEditModal
+        open={Boolean(editing)}
+        record={editing}
+        onClose={() => setEditing(null)}
+        onSaved={() => loadRows()}
+      />
 
       <Modal
         open={Boolean(pending)}

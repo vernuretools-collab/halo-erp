@@ -33,7 +33,7 @@ const MODE_OPTIONS = [
   {
     value: 'weekly',
     title: 'Weekly',
-    description: 'At Check In, employee chooses WFH or Office within the weekly day limit. No leave request needed.',
+    description: 'Any of these days in the week. Check In at the office does not use a WFH day. Check In away from the office, or without location, uses one day.',
   },
   {
     value: 'monthly',

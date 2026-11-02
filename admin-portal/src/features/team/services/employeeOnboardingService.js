@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { supabase } from '../../../shared/services/firebaseService'
-import { FIXED_KRAS, JOINING_ROLE, isJoiningEmail, joiningUsernameToAuthEmail, learningPoints, onboardingFromProfile } from '../../../../../shared/supabase/employeeOnboarding.js'
+import { FIXED_KRAS, JOINING_ROLE, isJoiningEmail, isJoiningRole, joiningUsernameToAuthEmail, learningPoints, onboardingFromProfile } from '../../../../../shared/supabase/employeeOnboarding.js'
 
 async function invokeCreateUser(body) {
   if (!supabase) throw new Error('Supabase is not configured')
@@ -336,6 +336,99 @@ export async function createEmployeeOnboarding({ username, password, employment,
     kras: handbook,
     login_password: password,
   }
+}
+
+const EMPLOYMENT_FIELDS = [
+  'employeeId',
+  'fullName',
+  'designation',
+  'department',
+  'reportingManager',
+  'dateOfJoining',
+  'workMode',
+  'monthlyCtc',
+  'probationPeriod',
+  'workLocation',
+  'assets',
+  'issueDate',
+]
+
+const REQUIRED_EMPLOYMENT = [
+  ['employeeId', 'Employee ID'],
+  ['fullName', 'Full name'],
+  ['designation', 'Designation'],
+  ['department', 'Department'],
+  ['reportingManager', 'Reporting manager'],
+  ['dateOfJoining', 'Date of joining'],
+  ['workMode', 'Work mode'],
+  ['monthlyCtc', 'Monthly CTC'],
+]
+
+export function employmentDetails(source = {}) {
+  const next = {}
+  for (const key of EMPLOYMENT_FIELDS) {
+    next[key] = String(source[key] ?? '').trim()
+  }
+  return next
+}
+
+function requiredEmploymentError(employment) {
+  for (const [key, label] of REQUIRED_EMPLOYMENT) {
+    if (!employment[key]) return `${label} is required`
+  }
+  return ''
+}
+
+async function profilesForEmploymentUpdate({ id, authId, savedId }) {
+  const ids = [...new Set([authId, id, savedId].filter(Boolean))]
+  const found = []
+  const seen = new Set()
+  const add = (row) => {
+    if (!row?.id || seen.has(row.id)) return
+    seen.add(row.id)
+    found.push(row)
+  }
+  for (const profileId of ids) {
+    const { data, error } = await supabase.from('profiles').select('id, data').eq('id', profileId).maybeSingle()
+    if (error) throw error
+    add(data)
+  }
+  if (authId && isUuid(authId)) {
+    const { data, error } = await supabase.from('profiles').select('id, data').eq('auth_id', authId)
+    if (error) throw error
+    for (const row of data || []) add(row)
+  }
+  return found
+}
+
+export async function updateEmployeeEmployment({ id, authId, employment }) {
+  const next = employmentDetails(employment)
+  const invalid = requiredEmploymentError(next)
+  if (invalid) throw new Error(invalid)
+  const now = new Date().toISOString()
+  const savedId = await saveOnboardingPatch({ employment: next }, { id, authId })
+  const profiles = await profilesForEmploymentUpdate({ id, authId, savedId })
+  let profileSaved = false
+  let joiningProfiles = 0
+  for (const profile of profiles) {
+    const current = profile.data && typeof profile.data === 'object' ? profile.data : {}
+    const joiningProfile = isJoiningRole(current.role) || isJoiningEmail(current.email) || (current.employment && typeof current.employment === 'object')
+    if (!joiningProfile) continue
+    joiningProfiles += 1
+    const { data: updated, error } = await supabase.from('profiles').update({
+      data: {
+        ...current,
+        employment: next,
+        displayName: next.fullName || current.displayName || '',
+      },
+      updated_at: now,
+    }).eq('id', profile.id).select('id')
+    if (error) throw error
+    if (updated?.length) profileSaved = true
+  }
+  if (joiningProfiles && !profileSaved) throw new Error('Could not save these employment details on the joining profile.')
+  if (!savedId && !profileSaved) throw new Error('Could not save these employment details.')
+  return next
 }
 
 export async function updateEmployeeHandbook({ id, authId, kras, learningPlan, reviews }) {
