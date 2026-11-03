@@ -1,35 +1,70 @@
 import { collection, doc, getDocs, query, where, writeBatch, serverTimestamp } from 'firebase/firestore'
 import { db } from '../../../shared/services/firebaseService'
+import {
+  collectEmployeeIdentityIds,
+  isDirectoryVisible,
+} from '../../../../../shared/employees/employmentStatus.js'
+
+const blockedFromNotify = (data) => {
+  const status = String(data?.status || '').trim().toLowerCase()
+  if (status === 'inactive' || status === 'terminated') return true
+  return !isDirectoryVisible(data)
+}
+
+const rememberBlocked = (ids, emails, rowId, data) => {
+  collectEmployeeIdentityIds({ ...data, id: rowId, uid: data.uid || rowId }).forEach((id) => ids.add(String(id)))
+  ids.add(String(rowId))
+  const email = String(data.email || '').trim().toLowerCase()
+  if (email) emails.add(email)
+}
+
+const addCurrentIds = (employeeIds, rowId, data) => {
+  employeeIds.add(rowId)
+  if (data.uid) employeeIds.add(data.uid)
+  if (data.auth_id) employeeIds.add(data.auth_id)
+  if (data.authId) employeeIds.add(data.authId)
+  if (data.employeeId) employeeIds.add(data.employeeId)
+}
+
+const collectEmployeeIds = async () => {
+  const employeeIds = new Set()
+  const blockedIds = new Set()
+  const blockedEmails = new Set()
+  const empSnap = await getDocs(collection(db, 'employees')).catch(() => ({ docs: [] }))
+
+  empSnap.docs?.forEach((d) => {
+    const data = d.data() || {}
+    if (blockedFromNotify(data)) {
+      rememberBlocked(blockedIds, blockedEmails, d.id, data)
+      return
+    }
+    addCurrentIds(employeeIds, d.id, data)
+  })
+
+  try {
+    const userSnap = await getDocs(collection(db, 'users'))
+    userSnap.docs?.forEach((d) => {
+      const data = d.data() || {}
+      const email = String(data.email || '').trim().toLowerCase()
+      if (data.role === 'admin' || data.role === 'owner') return
+      if (blockedFromNotify(data)) return
+      if (data.status === 'inactive' || data.status === 'terminated') return
+      const linked = [d.id, data.uid, data.auth_id, data.authId, data.employeeId]
+        .filter((value) => value != null && value !== '')
+        .some((value) => blockedIds.has(String(value)))
+      if (linked || (email && blockedEmails.has(email))) return
+      addCurrentIds(employeeIds, d.id, data)
+    })
+  } catch {
+    // users collection may be restricted
+  }
+
+  return employeeIds
+}
 
 export const notifyEmployeesOnAnnouncement = async ({ announcementId, title, body, priority, author }) => {
   try {
-    const empSnap = await getDocs(collection(db, 'employees')).catch(() => ({ docs: [] }))
-    const employeeIds = new Set()
-
-    empSnap.docs?.forEach((d) => {
-      const data = d.data()
-      if (data.status !== 'inactive' && data.status !== 'terminated') {
-        employeeIds.add(d.id)
-        if (data.uid) employeeIds.add(data.uid)
-        if (data.auth_id) employeeIds.add(data.auth_id)
-        if (data.employeeId) employeeIds.add(data.employeeId)
-      }
-    })
-
-    try {
-      const userSnap = await getDocs(collection(db, 'users'))
-      userSnap.docs?.forEach((d) => {
-        const data = d.data()
-        if (data.role !== 'admin' && data.status !== 'inactive') {
-          employeeIds.add(d.id)
-          if (data.uid) employeeIds.add(data.uid)
-          if (data.auth_id) employeeIds.add(data.auth_id)
-        }
-      })
-    } catch {
-      // users collection may be restricted
-    }
-
+    const employeeIds = await collectEmployeeIds()
     if (employeeIds.size === 0) return
 
     const previewMessage = body.length > 120 ? `${body.slice(0, 120)}...` : body
@@ -63,38 +98,6 @@ export const notifyEmployeesOnAnnouncement = async ({ announcementId, title, bod
   } catch (notifErr) {
     console.error('Failed to dispatch notifications to employees:', notifErr)
   }
-}
-
-const collectEmployeeIds = async () => {
-  const employeeIds = new Set()
-  const empSnap = await getDocs(collection(db, 'employees')).catch(() => ({ docs: [] }))
-
-  empSnap.docs?.forEach((d) => {
-    const data = d.data()
-    if (data.status !== 'inactive' && data.status !== 'terminated') {
-      employeeIds.add(d.id)
-      if (data.uid) employeeIds.add(data.uid)
-      if (data.auth_id) employeeIds.add(data.auth_id)
-      if (data.employeeId) employeeIds.add(data.employeeId)
-    }
-  })
-
-  try {
-    const userSnap = await getDocs(collection(db, 'users'))
-    userSnap.docs?.forEach((d) => {
-      const data = d.data()
-      if (data.role !== 'admin' && data.status !== 'inactive') {
-        employeeIds.add(d.id)
-        if (data.uid) employeeIds.add(data.uid)
-        if (data.auth_id) employeeIds.add(data.auth_id)
-        if (data.employeeId) employeeIds.add(data.employeeId)
-      }
-    })
-  } catch {
-    // users collection may be restricted
-  }
-
-  return employeeIds
 }
 
 export const removeEmployeeNotificationsForAnnouncement = async (announcementId) => {

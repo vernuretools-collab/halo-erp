@@ -6,6 +6,7 @@ import {
   limit,
 } from 'firebase/firestore'
 import { db } from '../../../shared/services/firebaseService'
+import { isDirectoryVisible, recordMatchesEmployee } from '../../../../../shared/employees/employmentStatus.js'
 
 const emptySnap = { docs: [], empty: true, size: 0 }
 
@@ -321,13 +322,17 @@ export const computeOrgStats = (snaps) => {
   const leaveSnap = asSnap(snaps.leaveRequests)
   const ticketSnap = asSnap(snaps.helpDeskTickets)
 
-  const totalEmployees = empSnap.docs ? empSnap.docs.length : 0
+  const allEmployees = (empSnap.docs || []).map((d) => {
+    const emp = d.data() || {}
+    return { ...emp, id: d.id, uid: emp.uid || d.id }
+  })
+  const directoryEmployees = allEmployees.filter(isDirectoryVisible)
+  const formerEmployees = allEmployees.filter((emp) => !isDirectoryVisible(emp))
+  const totalEmployees = directoryEmployees.length
   const employeeUids = new Set()
-  const employeeRecords = []
-  empSnap.docs?.forEach((d) => {
-    const emp = d.data()
-    employeeRecords.push({ ...emp, id: d.id })
-    ;[emp.uid, emp.employeeId, d.id].forEach((id) => {
+  const employeeRecords = directoryEmployees
+  directoryEmployees.forEach((emp) => {
+    ;[emp.uid, emp.employeeId, emp.id].forEach((id) => {
       const uid = String(id || '').trim()
       if (uid) employeeUids.add(uid)
     })
@@ -358,6 +363,7 @@ export const computeOrgStats = (snaps) => {
     if (String(data.leaveType || '') === 'On Duty') return
     if ((data.status || '').toLowerCase() !== 'approved') return
     if (!leaveCoversDay(data, todayYmd)) return
+    if (formerEmployees.some((emp) => recordMatchesEmployee(data, emp))) return
     approvedLeaves++
     matchEmployeeIds(data).forEach((id) => onLeaveUids.add(id))
   })

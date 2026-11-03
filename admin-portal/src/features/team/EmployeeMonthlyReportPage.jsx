@@ -12,7 +12,7 @@ import { TeamSubNav } from './components/TeamSubNav'
 import { EmployeeAttendanceCalendar } from './components/EmployeeAttendanceCalendar'
 import { DayLeaveModal } from './components/DayLeaveModal'
 import {
-  getEmployees,
+  getDirectoryEmployees,
   getMonthlyReport,
   listMonthlyReports,
   generateEmployeeMonthlyReport,
@@ -28,6 +28,7 @@ import {
   currentMonthStr,
   monthlyReportToCsv,
 } from './services/monthlyReportEngine'
+import { isDirectoryVisible } from '../../../../shared/employees/employmentStatus.js'
 import {
   buildOverallMonthlyWorkbook,
   overallReportFilename,
@@ -111,23 +112,28 @@ export function EmployeeMonthlyReportPage() {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [dayEditDate, setDayEditDate] = useState('')
+  const directoryEmployees = useMemo(() => employees.filter(isDirectoryVisible), [employees])
 
   useEffect(() => {
-    getEmployees().then((emps) => {
+    getDirectoryEmployees().then((emps) => {
       if (emps?.length) setEmployees(emps)
     }).catch(() => {})
   }, [setEmployees])
 
   useEffect(() => {
-    if (!selectedUid && employees.length > 0) {
-      const fromQuery = searchParams.get('uid')
-      if (fromQuery && employees.some((e) => (e.uid || e.employeeId) === fromQuery)) {
-        setSelectedUid(fromQuery)
-      } else {
-        setSelectedUid(employees[0].uid || employees[0].employeeId || '')
-      }
+    if (directoryEmployees.length === 0) {
+      if (selectedUid && employees.length > 0) setSelectedUid('')
+      return
     }
-  }, [employees, selectedUid, searchParams])
+    const inDirectory = directoryEmployees.some((e) => (e.uid || e.employeeId) === selectedUid)
+    if (selectedUid && inDirectory) return
+    const fromQuery = searchParams.get('uid')
+    if (fromQuery && directoryEmployees.some((e) => (e.uid || e.employeeId) === fromQuery)) {
+      setSelectedUid(fromQuery)
+      return
+    }
+    setSelectedUid(directoryEmployees[0].uid || directoryEmployees[0].employeeId || '')
+  }, [directoryEmployees, employees.length, selectedUid, searchParams])
 
   // Sync URL when month/uid change
   useEffect(() => {
@@ -138,8 +144,8 @@ export function EmployeeMonthlyReportPage() {
   }, [selectedUid, month, setSearchParams])
 
   const selectedEmployee = useMemo(
-    () => employees.find((e) => (e.uid || e.employeeId) === selectedUid),
-    [employees, selectedUid]
+    () => directoryEmployees.find((e) => (e.uid || e.employeeId) === selectedUid),
+    [directoryEmployees, selectedUid]
   )
 
   const accountStartDate = useMemo(() => {
@@ -265,7 +271,7 @@ export function EmployeeMonthlyReportPage() {
         getTimelineEntriesForMonth(targetMonth),
         getCompanyHolidays(),
         getWorkIdleForMonth(targetMonth),
-        employees.length ? Promise.resolve(employees) : getEmployees(),
+        employees.length ? Promise.resolve(directoryEmployees) : getDirectoryEmployees(),
       ])
     const rosterEmployees = roster?.length ? roster : employees
     const reports = (rosterEmployees || []).map((employee) =>
@@ -357,8 +363,8 @@ export function EmployeeMonthlyReportPage() {
             onChange={(e) => setSelectedUid(e.target.value)}
             className="bg-canvas border border-border text-sm text-fg rounded-xl px-3 py-2 focus:outline-none min-w-[200px]"
           >
-            {employees.length === 0 && <option value="">No employees</option>}
-            {employees.map((emp) => {
+            {directoryEmployees.length === 0 && <option value="">No employees</option>}
+            {directoryEmployees.map((emp) => {
               const id = emp.uid || emp.employeeId
               return (
                 <option key={id} value={id}>

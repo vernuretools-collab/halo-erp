@@ -67,3 +67,11 @@ After the joining login exists, an admin can change the employment details on Em
 
 - The joining username and password stay. This edit does not create a directory employee.
 - The change is saved on `employee_onboarding.employment` and on the joining profile. The list, the hire’s form, the pack view, and the PDF downloads read that updated employment.
+
+## 2026-11-02 — Former staff stay off live team screens
+
+Ex-employees (`relieved`) and archived employees stay on the Ex-Employees page. They stay out of the live team screens: attendance, work timeline, scrum, leave, leave and WFH policy, payslips, employee documents, monthly reports, task and project assignment lists, announcement notifications, and the dashboard’s current-staff counts.
+
+- People on notice period stay on those screens.
+- Final Documentation can still load them so a relieving letter can be generated.
+- Exit does not delete the employee row or linked attendance, timeline, leave, scrum, project, task, or document records. The Ex-Employees profile still shows that history.

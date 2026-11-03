@@ -4,7 +4,8 @@ import { PageHeader } from '../../components/layout/PageHeader'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
 import { useTeamStore } from './stores/teamStore'
-import { getEmployees } from './services/teamService'
+import { getDirectoryEmployees } from './services/teamService'
+import { isDirectoryVisible } from '../../../../shared/employees/employmentStatus.js'
 import {
   fetchEmployeeTimelineEntries,
   getWeekDates,
@@ -78,24 +79,30 @@ export function EmployeeTimelinePage() {
   const [loading, setLoading] = useState(false)
 
   const weekDays = useMemo(() => getWeekDates(weekAnchor), [weekAnchor])
+  const directoryEmployees = useMemo(() => employees.filter(isDirectoryVisible), [employees])
 
   useEffect(() => {
-    getEmployees().then((emps) => {
+    getDirectoryEmployees().then((emps) => {
       if (emps?.length) setEmployees(emps)
     }).catch(() => {})
   }, [setEmployees])
 
-  // Initialize selection once (from URL, else first employee). Do not sync URL → state
-  // on every selectedUid change — that races the dropdown and snaps back to the old uid.
+  // Keep the dropdown on current staff. A valid choice is left alone so the URL
+  // cannot snap the selection back to a previous employee.
   useEffect(() => {
-    if (selectedUid || employees.length === 0) return
-    const fromQuery = searchParams.get('uid')
-    if (fromQuery && employees.some((e) => (e.uid || e.employeeId) === fromQuery)) {
-      setSelectedUid(fromQuery)
-    } else {
-      setSelectedUid(employees[0].uid || employees[0].employeeId || '')
+    if (directoryEmployees.length === 0) {
+      if (selectedUid && employees.length > 0) setSelectedUid('')
+      return
     }
-  }, [employees, selectedUid, searchParams])
+    const inDirectory = directoryEmployees.some((e) => (e.uid || e.employeeId) === selectedUid)
+    if (selectedUid && inDirectory) return
+    const fromQuery = searchParams.get('uid')
+    if (fromQuery && directoryEmployees.some((e) => (e.uid || e.employeeId) === fromQuery)) {
+      setSelectedUid(fromQuery)
+      return
+    }
+    setSelectedUid(directoryEmployees[0].uid || directoryEmployees[0].employeeId || '')
+  }, [directoryEmployees, employees.length, selectedUid, searchParams])
 
   useEffect(() => {
     if (!selectedUid) return
@@ -149,7 +156,7 @@ export function EmployeeTimelinePage() {
     [entries]
   )
 
-  const selectedEmployee = employees.find(
+  const selectedEmployee = directoryEmployees.find(
     (e) => (e.uid || e.employeeId) === selectedUid
   )
   const todayStr = toDateStr(new Date())
@@ -172,10 +179,10 @@ export function EmployeeTimelinePage() {
             onChange={(e) => setSelectedUid(e.target.value)}
             className="bg-canvas border border-border text-sm text-fg rounded-xl px-3 py-2 focus:outline-none min-w-[200px]"
           >
-            {employees.length === 0 && (
+            {directoryEmployees.length === 0 && (
               <option value="">No employees</option>
             )}
-            {employees.map((emp) => {
+            {directoryEmployees.map((emp) => {
               const id = emp.uid || emp.employeeId
               const name = emp.displayName || emp.name || emp.email || 'Employee'
               return (

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { collection, getDocs, query, where } from 'firebase/firestore'
 import { db } from '../../shared/services/firebaseService'
+import { isDirectoryVisible } from '../../../../shared/employees/employmentStatus.js'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Card } from '../../components/ui/Card'
 import { Badge } from '../../components/ui/Badge'
@@ -124,11 +125,14 @@ export const ProjectList = () => {
 
         const clientList = Array.from(clientCompaniesMap.values())
 
-        const empList = empSnap.docs.map((d) => ({
-          id: d.id,
-          name: d.data().name || d.data().fullName || d.data().displayName || 'Unknown',
-          role: d.data().role || d.data().roleName || d.data().jobTitle || d.data().department || '',
-        }))
+        const empList = empSnap.docs
+          .map((d) => ({
+            id: d.id,
+            name: d.data().name || d.data().fullName || d.data().displayName || 'Unknown',
+            role: d.data().role || d.data().roleName || d.data().jobTitle || d.data().department || '',
+            status: d.data().status || 'active',
+          }))
+          .filter(isDirectoryVisible)
 
         setClients(clientList)
         setEmployees(empList)
@@ -161,7 +165,7 @@ export const ProjectList = () => {
           const name = data.name || data.fullName || data.displayName || 'Employee'
           const email = data.email || ''
           const role = data.role || 'employee'
-          return { id, uid: id, name, email, role }
+          return { id, uid: id, name, email, role, status: data.status || 'active' }
         })
 
         setAllEmployees(empList)
@@ -669,13 +673,13 @@ export const ProjectList = () => {
                 <div className="flex items-center justify-center py-8 text-xs text-slate-400">
                   <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading team directory...
                 </div>
-              ) : allEmployees.length === 0 ? (
+              ) : allEmployees.filter(isDirectoryVisible).length === 0 ? (
                 <div className="text-center py-6 text-xs text-slate-400">
                   No registered employees found.
                 </div>
               ) : (
                 <div className="space-y-2 max-h-60 overflow-y-auto">
-                  {allEmployees.map((emp) => {
+                  {allEmployees.filter(isDirectoryVisible).map((emp) => {
                     const empIdStr = String(emp.id || emp.uid)
                     const isChecked = selectedMemberIds.has(empIdStr)
 
@@ -792,7 +796,7 @@ export const ProjectList = () => {
                     className="w-full bg-canvas border border-border text-fg text-sm rounded-xl py-2.5 px-3.5 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all cursor-pointer"
                   >
                     <option value="">Unassigned</option>
-                    {employees.map((emp) => (
+                    {employees.filter(isDirectoryVisible).map((emp) => (
                       <option key={emp.id} value={emp.id} className="bg-surface text-fg">
                         {emp.name}{emp.role && emp.role.toLowerCase() !== 'employee' ? ` (${emp.role})` : ''}
                       </option>

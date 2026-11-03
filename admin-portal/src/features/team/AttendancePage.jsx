@@ -8,7 +8,7 @@ import { useTeamStore } from './stores/teamStore'
 import { useUserStore } from '../../stores/userStore'
 import { db } from '../../shared/services/firebaseService'
 import {
-  getEmployees,
+  getDirectoryEmployees,
   setEmployeeAttendanceStatus,
   subscribeToOfficeLocation,
   saveOfficeLocation,
@@ -26,6 +26,7 @@ import {
   setDoc,
 } from 'firebase/firestore'
 import { mergeShiftLogs, pairedShiftLogs } from '../../../../shared/shiftLogs.js'
+import { isDirectoryVisible } from '../../../../shared/employees/employmentStatus.js'
 import {
   Users,
   CheckCircle2,
@@ -252,6 +253,7 @@ function TimerWheel({ label, value, onUp, onDown }) {
 
 function isTeamEmployee(emp) {
   if (!emp?.uid) return false
+  if (!isDirectoryVisible(emp)) return false
   const role = String(emp.role || '').toLowerCase()
   if (role === 'admin' || role === 'owner') return false
   if (emp.accountType === 'admin') return false
@@ -333,7 +335,7 @@ export const AttendancePage = () => {
   const [locatingDevice, setLocatingDevice] = useState(false)
 
   useEffect(() => {
-    getEmployees().then((emps) => {
+    getDirectoryEmployees().then((emps) => {
       if (emps?.length) setEmployees(emps)
     }).catch(() => {})
   }, [setEmployees])

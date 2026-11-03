@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { TeamSubNav } from './components/TeamSubNav'
 import { Card } from '../../components/ui/Card'
 import { Badge } from '../../components/ui/Badge'
 import { Input } from '../../components/ui/Input'
 import { getEmployees } from './services/teamService'
+import { isDirectoryVisible } from '../../../../shared/employees/employmentStatus.js'
 import { db, storage } from '../../shared/services/firebaseService'
 import {
   collection,
@@ -112,24 +113,26 @@ export const EmployeeDocumentManager = () => {
             uniqueIds(extraIdsByEmail.get(email), d.id, data.uid, data.id, data.auth_id, data.authId)
           )
         })
-        setEmployees(
-          (emps || []).map((emp) => ({
-            ...emp,
-            identityIds: uniqueIds(
-              emp.identityIds,
-              emp.uid,
-              emp.employeeDocId,
-              emp.employeeId,
-              extraIdsByEmail.get(normalizeEmail(emp.email))
-            ),
-          }))
-        )
+        const enriched = (emps || []).map((emp) => ({
+          ...emp,
+          identityIds: uniqueIds(
+            emp.identityIds,
+            emp.uid,
+            emp.employeeDocId,
+            emp.employeeId,
+            extraIdsByEmail.get(normalizeEmail(emp.email))
+          ),
+        }))
+        setEmployees(enriched)
       } catch (err) {
         console.error('Error fetching employees:', err)
       }
     }
     fetchEmps()
   }, [])
+
+  const directoryEmployees = useMemo(() => employees.filter(isDirectoryVisible), [employees])
+  const formerEmployees = useMemo(() => employees.filter((emp) => !isDirectoryVisible(emp)), [employees])
 
   // Listen to every uploaded document, then match it to directory employees
   useEffect(() => {
@@ -142,7 +145,7 @@ export const EmployeeDocumentManager = () => {
         const selectedEmp =
           selectedEmployeeUid === 'all'
             ? null
-            : employees.find(
+            : directoryEmployees.find(
                 (e) =>
                   e.uid === selectedEmployeeUid ||
                   e.employeeDocId === selectedEmployeeUid ||
@@ -154,7 +157,7 @@ export const EmployeeDocumentManager = () => {
             const data = d.data() || {}
             const ownerIds = ownerIdsFromDocSnap(d)
             const ownerUserId = d.ownerUserId || ownerIds[0] || ''
-            const emp = employees.find((employee) =>
+            const emp = directoryEmployees.find((employee) =>
               employeeMatchesDoc(employee, { ownerIds, employeeEmail: data.employeeEmail })
             )
             return {
@@ -170,6 +173,7 @@ export const EmployeeDocumentManager = () => {
             }
           })
           .filter((docItem) => {
+            if (formerEmployees.some((emp) => employeeMatchesDoc(emp, docItem))) return false
             if (selectedEmployeeUid === 'all') return true
             return employeeMatchesDoc(
               selectedEmp || { uid: selectedEmployeeUid, identityIds: [selectedEmployeeUid] },
@@ -188,7 +192,7 @@ export const EmployeeDocumentManager = () => {
     )
 
     return () => unsub()
-  }, [selectedEmployeeUid, employees])
+  }, [selectedEmployeeUid, directoryEmployees, formerEmployees])
 
   const handleDownload = async (docItem) => {
     try {
@@ -306,8 +310,8 @@ export const EmployeeDocumentManager = () => {
               onChange={(e) => setSelectedEmployeeUid(e.target.value)}
               className="w-full flex h-10 rounded-xl border border-border bg-surface px-3 py-2 text-sm text-fg focus:outline-none focus:ring-2 focus:ring-accent transition-colors"
             >
-              <option value="all">👥 All Employees ({employees.length})</option>
-              {employees.map((emp) => (
+              <option value="all">👥 All Employees ({directoryEmployees.length})</option>
+              {directoryEmployees.map((emp) => (
                 <option key={emp.uid} value={emp.uid}>
                   {emp.displayName || emp.email}
                 </option>

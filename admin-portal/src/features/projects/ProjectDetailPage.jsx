@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { collection, getDocs, query, where } from 'firebase/firestore'
 import { db } from '../../shared/services/firebaseService'
+import { isDirectoryVisible } from '../../../../shared/employees/employmentStatus.js'
 import { Card } from '../../components/ui/Card'
 import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
@@ -259,11 +260,13 @@ export const ProjectDetailPage = () => {
           name: d.data().companyName || d.data().displayName || d.data().name || 'Client',
         }))
 
-        const empList = empSnap.docs.map((d) => ({
-          id: d.id,
-          name: d.data().name || d.data().fullName || 'Employee',
-          role: d.data().role || '',
-        }))
+        const empList = empSnap.docs
+          .filter((d) => isDirectoryVisible(d.data()))
+          .map((d) => ({
+            id: d.id,
+            name: d.data().name || d.data().fullName || 'Employee',
+            role: d.data().role || '',
+          }))
 
         setClients(clientList)
         setEmployees(empList)
@@ -1230,7 +1233,7 @@ export const ProjectDetailPage = () => {
                     className="w-full bg-canvas border border-border text-fg text-sm rounded-xl py-2 px-3 focus:outline-none focus:border-accent cursor-pointer"
                   >
                     <option value="">Unassigned</option>
-                    {employees.map((emp) => (
+                    {employees.filter(isDirectoryVisible).map((emp) => (
                       <option key={emp.id} value={emp.name}>
                         {emp.name}
                       </option>

@@ -15,6 +15,7 @@ import {
   deleteField,
 } from 'firebase/firestore'
 import { db } from '../../../shared/services/firebaseService'
+import { isDirectoryVisible } from '../../../../../shared/employees/employmentStatus.js'
 import {
   buildEmployeeMonthlyReport,
   getMonthDateBounds,
@@ -72,6 +73,12 @@ export const getEmployees = async () => {
       identityIds: collectEmployeeIdentityIds(d.id, data),
     }
   })
+}
+
+/** Current staff only. Ex-employees and archived rows stay out of live team screens. */
+export const getDirectoryEmployees = async () => {
+  const employees = await getEmployees()
+  return employees.filter(isDirectoryVisible)
 }
 
 /**
@@ -1294,7 +1301,7 @@ export const generateEmployeeMonthlyReport = async (
 export const generateAllEmployeesMonthlyReports = async (month, generatedBy = 'Admin') => {
   let employees = []
   try {
-    employees = await getEmployees()
+    employees = await getDirectoryEmployees()
   } catch (err) {
     console.error('Error fetching employees for monthly reports:', err)
     return []

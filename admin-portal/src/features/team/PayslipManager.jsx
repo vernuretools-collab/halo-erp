@@ -4,7 +4,8 @@ import { TeamSubNav } from './components/TeamSubNav'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
-import { getEmployees } from './services/teamService'
+import { getDirectoryEmployees } from './services/teamService'
+import { isDirectoryVisible } from '../../../../shared/employees/employmentStatus.js'
 import {
   draftsFromRecord,
   loadPayslipForMonth,
@@ -32,9 +33,6 @@ const formatInr = (amount) =>
     currency: 'INR',
     maximumFractionDigits: 2,
   }).format(Number(amount) || 0)
-
-const isActiveEmployee = (emp) =>
-  emp.status !== 'inactive' && emp.status !== 'terminated'
 
 const AmountInput = ({ value, onChange, placeholder }) => (
   <div className="relative min-w-[120px] max-w-[150px]">
@@ -70,8 +68,15 @@ export const PayslipManager = () => {
     const fetchEmployees = async () => {
       setLoading(true)
       try {
-        const data = await getEmployees()
-        setEmployees((data || []).filter(isActiveEmployee))
+        const data = await getDirectoryEmployees()
+        setEmployees(
+          (data || []).filter(
+            (emp) =>
+              isDirectoryVisible(emp) &&
+              emp.status !== 'inactive' &&
+              emp.status !== 'terminated'
+          )
+        )
       } catch (error) {
         console.error('Error fetching employees', error)
       } finally {

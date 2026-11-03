@@ -6,7 +6,8 @@ import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { useTeamStore } from './stores/teamStore'
 import { useUserStore } from '../../stores/userStore'
-import { getEmployees, getLeaveRequests, createLeaveRequest, updateLeaveStatusInDb, deleteLeaveRequestFromDb, getEmployeeAttendanceLogs } from './services/teamService'
+import { getEmployees, createLeaveRequest, updateLeaveStatusInDb, deleteLeaveRequestFromDb, getEmployeeAttendanceLogs } from './services/teamService'
+import { isDirectoryVisible, recordMatchesEmployee } from '../../../../shared/employees/employmentStatus.js'
 import {
   resolveEmployeeWfhPolicy,
   countUsedWfhDays,
@@ -113,6 +114,8 @@ const leaveOverlapsRange = (req, from, to) => {
 
 export const LeaveManagement = () => {
   const { employees, setEmployees, leaveRequests, setLeaveRequests, addLeaveRequest, updateLeaveStatus, removeLeaveRequest } = useTeamStore()
+  const [formerEmployees, setFormerEmployees] = useState([])
+  const directoryEmployees = useMemo(() => employees.filter(isDirectoryVisible), [employees])
   const { user } = useUserStore()
   const adminName = user?.displayName || user?.email || 'Admin'
 
@@ -139,7 +142,10 @@ export const LeaveManagement = () => {
   // Load employees from Firestore
   useEffect(() => {
     getEmployees().then((empData) => {
-      if (empData && empData.length > 0) setEmployees(empData)
+      const rows = empData || []
+      setFormerEmployees(rows.filter((emp) => !isDirectoryVisible(emp)))
+      const directory = rows.filter(isDirectoryVisible)
+      if (directory.length > 0) setEmployees(directory)
     }).catch(() => {})
   }, [setEmployees])
 
@@ -160,12 +166,16 @@ export const LeaveManagement = () => {
 
   // Set default employee once employees are loaded
   useEffect(() => {
-    if (employees.length > 0 && !employeeName) {
-      setEmployeeName(employees[0].displayName || employees[0].name || '')
+    const names = directoryEmployees
+      .map((emp) => emp.displayName || emp.name)
+      .filter(Boolean)
+    if (!names.length) return
+    if (!employeeName || !names.includes(employeeName)) {
+      setEmployeeName(names[0])
     }
-  }, [employees, employeeName])
+  }, [directoryEmployees, employeeName])
 
-  const selectedEmployee = employees.find(
+  const selectedEmployee = directoryEmployees.find(
     (emp) => (emp.displayName || emp.name) === employeeName
   )
   const selectedWfhPolicy = resolveEmployeeWfhPolicy(selectedEmployee || {})
@@ -418,7 +428,7 @@ export const LeaveManagement = () => {
 
   // Helper to resolve employee name, avatar, and email details from employee list or email
   const getEmployeeInfo = (req) => {
-    const matched = employees.find(
+    const matched = directoryEmployees.find(
       (e) =>
         (req.employeeId && (e.uid === req.employeeId || e.employeeId === req.employeeId)) ||
         (req.employeeEmail && e.email?.toLowerCase() === req.employeeEmail.toLowerCase()) ||
@@ -458,12 +468,13 @@ export const LeaveManagement = () => {
   const visibleRequests = useMemo(() => {
     return leaveRequests.filter((req) => {
       if (req.hiddenFromAdmin) return false
+      if (formerEmployees.some((emp) => recordMatchesEmployee(req, emp))) return false
       if (!leaveCoversDate(req, viewDate)) return false
       if (!leaveOverlapsRange(req, rangeFrom, rangeTo)) return false
       if (filterLeaveType && req.leaveType !== filterLeaveType) return false
       if (filterStatus && (req.status || 'pending') !== filterStatus) return false
       if (filterEmployee) {
-        const matchedEmp = employees.find(
+        const matchedEmp = directoryEmployees.find(
           (emp) =>
             emp.uid === filterEmployee ||
             emp.employeeId === filterEmployee ||
@@ -487,7 +498,7 @@ export const LeaveManagement = () => {
       }
       return true
     })
-  }, [leaveRequests, viewDate, rangeFrom, rangeTo, filterEmployee, filterLeaveType, filterStatus, employees])
+  }, [leaveRequests, viewDate, rangeFrom, rangeTo, filterEmployee, filterLeaveType, filterStatus, directoryEmployees, formerEmployees])
 
   const employeeFilterOptions = useMemo(() => {
     const seen = new Set()
@@ -500,16 +511,17 @@ export const LeaveManagement = () => {
       seen.add(nameKey)
       options.push({ value, label })
     }
-    employees.forEach((emp) => {
+    directoryEmployees.forEach((emp) => {
       addOption(emp.uid || emp.employeeId || emp.email || emp.displayName || emp.name, emp.displayName || emp.name)
     })
     leaveRequests.forEach((req) => {
       if (req.hiddenFromAdmin) return
+      if (formerEmployees.some((emp) => recordMatchesEmployee(req, emp))) return
       const info = getEmployeeInfo(req)
       addOption(req.employeeId || req.employeeEmail || info.name, info.name)
     })
     return options.sort((a, b) => a.label.localeCompare(b.label))
-  }, [employees, leaveRequests])
+  }, [directoryEmployees, formerEmployees, leaveRequests])
 
   const leaveTypeFilterOptions = useMemo(() => {
     const fromData = leaveRequests.map((req) => req.leaveType).filter(Boolean)
@@ -554,7 +566,7 @@ export const LeaveManagement = () => {
             <Filter className="w-4 h-4 text-accent" />
             <h3 className="text-xs font-semibold">Filter leave & WFH requests</h3>
             <span className="text-[11px] text-muted">
-              Showing {visibleRequests.length} of {leaveRequests.filter((r) => !r.hiddenFromAdmin).length}
+              Showing {visibleRequests.length} of {leaveRequests.filter((r) => !r.hiddenFromAdmin && !formerEmployees.some((emp) => recordMatchesEmployee(r, emp))).length}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -769,7 +781,7 @@ export const LeaveManagement = () => {
                     )}
                     <button
                       onClick={() => {
-                        const matched = employees.find(
+                        const matched = directoryEmployees.find(
                           (emp) =>
                             (req.employeeId && (emp.uid === req.employeeId || emp.employeeId === req.employeeId)) ||
                             (req.employeeEmail && emp.email?.toLowerCase() === req.employeeEmail.toLowerCase())
@@ -890,7 +902,7 @@ export const LeaveManagement = () => {
                   onChange={(e) => setEmployeeName(e.target.value)}
                   className="w-full bg-canvas border border-border text-fg text-sm rounded-xl py-2.5 px-3.5 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all cursor-pointer"
                 >
-                  {employees.map((emp) => (
+                  {directoryEmployees.map((emp) => (
                     <option key={emp.uid || emp.employeeId} value={emp.displayName} className="bg-surface text-fg">
                       {emp.displayName}
                     </option>

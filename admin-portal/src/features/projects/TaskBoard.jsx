@@ -7,7 +7,8 @@ import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { useProjectStore } from './stores/projectStore'
 import { createTask, updateTaskStatusInDb, deleteTaskFromDb } from './services/projectService'
-import { getEmployees } from '../team/services/teamService'
+import { getDirectoryEmployees } from '../team/services/teamService'
+import { isDirectoryVisible } from '../../../../shared/employees/employmentStatus.js'
 import { TaskListView } from './components/TaskListView'
 import { TaskCalendarView } from './components/TaskCalendarView'
 import { formatLoggedVsEstimate } from './formatWorkDuration'
@@ -185,6 +186,7 @@ export const TaskBoard = () => {
   const [selectedTask, setSelectedTask] = useState(null)
   const [deleteConfirmTask, setDeleteConfirmTask] = useState(null)
   const [employees, setEmployees] = useState([])
+  const directoryEmployees = useMemo(() => employees.filter(isDirectoryVisible), [employees])
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('all')
   const [viewMode, setViewMode] = useState('board') // board | list | calendar
 
@@ -245,9 +247,9 @@ export const TaskBoard = () => {
       try {
         const [, employeesData] = await Promise.all([
           fetchProjectsAndTasks(),
-          getEmployees(),
+          getDirectoryEmployees(),
         ])
-        if (employeesData) setEmployees(employeesData)
+        if (employeesData) setEmployees(employeesData.filter(isDirectoryVisible))
       } catch (err) {
         console.error('Error loading task board data:', err)
       }
@@ -269,8 +271,8 @@ export const TaskBoard = () => {
 
   const handleOpenAddModal = () => {
     setProjectId(currentProjId)
-    if (!assigneeId && employees.length > 0) {
-      setAssigneeId(String(employees[0].uid || employees[0].employeeId || employees[0].id || ''))
+    if (!assigneeId && directoryEmployees.length > 0) {
+      setAssigneeId(String(directoryEmployees[0].uid || directoryEmployees[0].employeeId || directoryEmployees[0].id || ''))
     }
     setShowAddModal(true)
   }
@@ -447,8 +449,8 @@ export const TaskBoard = () => {
                 onChange={(e) => setSelectedEmployeeId(e.target.value)}
                 className="bg-canvas border border-border text-xs text-fg font-semibold rounded-xl px-3 py-1.5 focus:outline-none focus:border-accent cursor-pointer transition-colors max-w-[200px]"
               >
-                <option value="all">All Employees ({employees.length})</option>
-                {employees.map((emp) => {
+                <option value="all">All Employees ({directoryEmployees.length})</option>
+                {directoryEmployees.map((emp) => {
                   const id = String(emp.uid || emp.employeeId || emp.id)
                   return (
                     <option key={id} value={id}>
@@ -706,12 +708,12 @@ export const TaskBoard = () => {
                     onChange={(e) => setAssigneeId(e.target.value)}
                     className="w-full bg-canvas border border-border text-fg text-sm rounded-xl py-2.5 px-3.5 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all cursor-pointer"
                   >
-                    {employees.length === 0 ? (
+                    {directoryEmployees.length === 0 ? (
                       <option value="" className="bg-surface text-fg">
                         No employees found
                       </option>
                     ) : (
-                      employees.map((emp) => {
+                      directoryEmployees.map((emp) => {
                         const id = String(emp.uid || emp.employeeId || emp.id)
                         return (
                           <option

@@ -5,7 +5,8 @@ import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { useUserStore } from '../../stores/userStore'
 import { useTeamStore } from './stores/teamStore'
-import { getEmployees, saveEmployeeWfhPolicy } from './services/teamService'
+import { getDirectoryEmployees, saveEmployeeWfhPolicy } from './services/teamService'
+import { isDirectoryVisible } from '../../../../shared/employees/employmentStatus.js'
 import {
   resolveEmployeeWfhPolicy,
   getWfhAllowanceLabel,
@@ -65,21 +66,23 @@ export const WfhPolicyPage = () => {
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    getEmployees().then((list) => {
+    getDirectoryEmployees().then((list) => {
       if (list?.length) setEmployees(list)
     }).catch(() => {})
   }, [setEmployees])
 
+  const directoryEmployees = useMemo(() => employees.filter(isDirectoryVisible), [employees])
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return employees
-    return employees.filter((emp) => {
+    if (!q) return directoryEmployees
+    return directoryEmployees.filter((emp) => {
       const name = (emp.displayName || emp.name || '').toLowerCase()
       const email = (emp.email || '').toLowerCase()
       const dept = (emp.department || emp.role || '').toLowerCase()
       return name.includes(q) || email.includes(q) || dept.includes(q)
     })
-  }, [employees, search])
+  }, [directoryEmployees, search])
 
   const openEditor = (emp) => {
     const policy = resolveEmployeeWfhPolicy(emp)
