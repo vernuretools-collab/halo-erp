@@ -25,7 +25,7 @@ import {
   doc,
   setDoc,
 } from 'firebase/firestore'
-import { mergeShiftLogs, pairedShiftLogs } from '../../../../shared/shiftLogs.js'
+import { mergeShiftLogs, openPause, pairedShiftLogs } from '../../../../shared/shiftLogs.js'
 import { isDirectoryVisible } from '../../../../shared/employees/employmentStatus.js'
 import {
   Users,
@@ -41,6 +41,8 @@ import {
   WifiOff,
   Edit,
   Save,
+  Trash2,
+  Plus,
   X,
   UserCheck,
   UserX,
@@ -135,16 +137,6 @@ function pad2(n) {
   return String(n).padStart(2, '0')
 }
 
-function timePartsFromStr(timeStr, fallback = { hour: 9, minute: 0, ampm: 'AM' }) {
-  const mins = timeStrToMinutes(timeStr)
-  if (mins === null) return fallback
-  const hrs24 = Math.floor(mins / 60) % 24
-  const minute = Math.round(mins % 60)
-  const ampm = hrs24 >= 12 ? 'PM' : 'AM'
-  const hour = hrs24 % 12 === 0 ? 12 : hrs24 % 12
-  return { hour, minute, ampm }
-}
-
 function timePartsToStr({ hour, minute, ampm }) {
   return `${pad2(hour)}:${pad2(minute)} ${ampm}`
 }
@@ -198,6 +190,177 @@ function officialClockEvents({
   return events
 }
 
+function toEpochMs(value) {
+  if (value == null || value === '') return null
+  if (typeof value === 'number' && Number.isFinite(value)) return value < 1e12 ? value * 1000 : value
+  if (typeof value?.toMillis === 'function') return value.toMillis()
+  if (typeof value?.seconds === 'number') return value.seconds * 1000
+  const numeric = Number(value)
+  if (Number.isFinite(numeric) && numeric > 1e11) return numeric
+  const parsed = Date.parse(value)
+  return Number.isNaN(parsed) ? null : parsed
+}
+
+function timeStrToInputValue(timeStr) {
+  const mins = timeStrToMinutes(timeStr)
+  if (mins === null) return ''
+  const hrs = Math.floor(mins / 60) % 24
+  const minute = Math.round(mins % 60)
+  return `${pad2(hrs)}:${pad2(minute)}`
+}
+
+function inputValueToTimeStr(value) {
+  if (!value || !value.includes(':')) return ''
+  const [hRaw, mRaw] = value.split(':')
+  const hrs24 = Number(hRaw)
+  const minute = Number(mRaw)
+  if (!Number.isFinite(hrs24) || !Number.isFinite(minute)) return ''
+  const ampm = hrs24 >= 12 ? 'PM' : 'AM'
+  const hour = hrs24 % 12 === 0 ? 12 : hrs24 % 12
+  return timePartsToStr({ hour, minute, ampm })
+}
+
+function timeStrFromMs(ms) {
+  const d = new Date(Number(ms))
+  if (Number.isNaN(d.getTime())) return null
+  const hrs24 = d.getHours()
+  const minute = d.getMinutes()
+  const ampm = hrs24 >= 12 ? 'PM' : 'AM'
+  const hour = hrs24 % 12 === 0 ? 12 : hrs24 % 12
+  return timePartsToStr({ hour, minute, ampm })
+}
+
+function eventMs(entry, dateStr) {
+  return toEpochMs(entry?.timestamp) || timestampFromDateAndTime(dateStr, entry?.time)
+}
+
+/** Finished and still-open break windows, oldest first. */
+function listBreakPairs(logs, dateStr) {
+  const ordered = [...(Array.isArray(logs) ? logs : [])]
+    .filter((entry) => entry?.type === 'break_start' || entry?.type === 'break_end')
+    .sort((a, b) => (eventMs(a, dateStr) || 0) - (eventMs(b, dateStr) || 0))
+  const pairs = []
+  let start = null
+  for (const entry of ordered) {
+    if (entry.type === 'break_start') start = entry
+    else if (entry.type === 'break_end' && start) {
+      pairs.push({ start, end: entry })
+      start = null
+    }
+  }
+  if (start) pairs.push({ start, end: null })
+  return pairs
+}
+
+function validateBreakWindow(dateStr, startTime, endTime) {
+  const startMs = timestampFromDateAndTime(dateStr, startTime)
+  const endMs = timestampFromDateAndTime(dateStr, endTime)
+  if (!startMs) return 'Choose a start time.'
+  if (!endMs) return 'Choose an end time.'
+  if (endMs <= startMs) return 'End time must be after the break started.'
+  if (dateStr === todayStr()) {
+    const now = Date.now()
+    if (startMs > now) return 'Start time cannot be in the future.'
+    if (endMs > now) return 'End time cannot be in the future.'
+  }
+  return ''
+}
+
+function endTimeForOpenBreak(dateStr, startMs) {
+  const isToday = dateStr === todayStr()
+  let endMs = isToday ? Date.now() : startMs + 15 * 60 * 1000
+  if (isToday && endMs > Date.now()) endMs = Date.now()
+  if (!startMs || endMs <= startMs) endMs = (startMs || Date.now()) + 60 * 1000
+  if (isToday && endMs > Date.now()) endMs = Date.now()
+  return timeStrFromMs(endMs) || '01:15 PM'
+}
+
+/** Every break on the selected day, oldest first. An open break gets an end the admin can change. */
+function breaksFromRow(row, dateStr) {
+  let pairs = listBreakPairs(row?.shiftLogs, dateStr)
+  if (!pairs.length && (row?.isOnBreak || toEpochMs(row?.breakStartTime))) {
+    const startMs = toEpochMs(row?.breakStartTime) || timestampFromDateAndTime(dateStr, '01:00 PM')
+    pairs = [{ start: { id: 'open_flag', timestamp: startMs }, end: null }]
+  }
+  return pairs.map((pair, index) => {
+    const startMs = eventMs(pair.start, dateStr)
+    const endMs = pair.end ? eventMs(pair.end, dateStr) : null
+    return {
+      id: `${pair.start?.id || 'break'}_${index}`,
+      start: timeStrFromMs(startMs) || '01:00 PM',
+      end: endMs ? timeStrFromMs(endMs) || '01:15 PM' : endTimeForOpenBreak(dateStr, startMs),
+      wasOpen: !pair.end,
+    }
+  })
+}
+
+function validateBreakList(dateStr, breaks) {
+  const windows = []
+  for (let index = 0; index < breaks.length; index += 1) {
+    const item = breaks[index]
+    const message = validateBreakWindow(dateStr, item.start, item.end)
+    if (message) return `Break ${index + 1}: ${message}`
+    windows.push({
+      startMs: timestampFromDateAndTime(dateStr, item.start),
+      endMs: timestampFromDateAndTime(dateStr, item.end),
+    })
+  }
+  const sorted = [...windows].sort((a, b) => a.startMs - b.startMs)
+  for (let index = 1; index < sorted.length; index += 1) {
+    if (sorted[index].startMs < sorted[index - 1].endMs) return 'Breaks cannot overlap.'
+  }
+  return ''
+}
+
+function breakListSeconds(dateStr, breaks) {
+  return breaks.reduce((sum, item) => {
+    const startMs = timestampFromDateAndTime(dateStr, item.start)
+    const endMs = timestampFromDateAndTime(dateStr, item.end)
+    if (!startMs || !endMs || endMs <= startMs) return sum
+    return sum + Math.floor((endMs - startMs) / 1000)
+  }, 0)
+}
+
+/** Replace the day's break events with the admin's list. Lunch and clock events stay. */
+function applyAdminBreakList(existingLogs, dateStr, breaks) {
+  const others = (Array.isArray(existingLogs) ? existingLogs : []).filter(
+    (entry) => entry?.type !== 'break_start' && entry?.type !== 'break_end'
+  )
+  const ordered = [...breaks].sort(
+    (a, b) =>
+      (timestampFromDateAndTime(dateStr, a.start) || 0) - (timestampFromDateAndTime(dateStr, b.start) || 0)
+  )
+  const events = [...others]
+  let accumulatedBreakSeconds = 0
+  ordered.forEach((item, index) => {
+    const startTime = canonicalTimeOrDefault(item.start, '01:00 PM')
+    const endTime = canonicalTimeOrDefault(item.end, '01:15 PM')
+    const startMs = timestampFromDateAndTime(dateStr, startTime)
+    const endMs = timestampFromDateAndTime(dateStr, endTime)
+    accumulatedBreakSeconds += Math.max(0, Math.floor((endMs - startMs) / 1000))
+    events.push(
+      {
+        id: `log_admin_break_start_${startMs}_${index}`,
+        type: 'break_start',
+        label: 'Started Break',
+        time: startTime,
+        timestamp: startMs,
+      },
+      {
+        id: `log_admin_break_end_${endMs}_${index}`,
+        type: 'break_end',
+        label: 'Ended Break',
+        time: endTime,
+        timestamp: endMs,
+      }
+    )
+  })
+  return {
+    shiftLogs: pairedShiftLogs(events),
+    accumulatedBreakSeconds,
+  }
+}
+
 /** Replace leftover clock-in/out history with the edited table times. */
 function patchShiftLogsForEditedTimes(existingLogs, times) {
   const wfhClockIn = (existingLogs || []).some((entry) => entry.type === 'clock_in' && /wfh/i.test(entry.label || ''))
@@ -224,33 +387,6 @@ function shiftEventsForDisplay(row, dateStr) {
   ]
 }
 
-function TimerWheel({ label, value, onUp, onDown }) {
-  return (
-    <div className="flex flex-col items-center gap-1">
-      <button
-        type="button"
-        onClick={onUp}
-        className="p-1 rounded-lg text-muted hover:text-accent hover:bg-accent-soft transition-colors"
-        aria-label={`Increase ${label}`}
-      >
-        <ChevronUp className="w-5 h-5" />
-      </button>
-      <div className="w-16 h-14 rounded-xl bg-canvas border border-border flex items-center justify-center font-mono text-2xl font-black text-fg tabular-nums">
-        {value}
-      </div>
-      <button
-        type="button"
-        onClick={onDown}
-        className="p-1 rounded-lg text-muted hover:text-accent hover:bg-accent-soft transition-colors"
-        aria-label={`Decrease ${label}`}
-      >
-        <ChevronDown className="w-5 h-5" />
-      </button>
-      <span className="text-[10px] uppercase tracking-wider font-semibold text-muted">{label}</span>
-    </div>
-  )
-}
-
 function isTeamEmployee(emp) {
   if (!emp?.uid) return false
   if (!isDirectoryVisible(emp)) return false
@@ -258,49 +394,6 @@ function isTeamEmployee(emp) {
   if (role === 'admin' || role === 'owner') return false
   if (emp.accountType === 'admin') return false
   return true
-}
-
-function AttendanceTimer({ value, onChange, disabled = false }) {
-  const parts = timePartsFromStr(value)
-  const commit = (next) => onChange(timePartsToStr({ ...parts, ...next }))
-
-  const bumpHour = (dir) => {
-    let hour = parts.hour + dir
-    if (hour > 12) hour = 1
-    if (hour < 1) hour = 12
-    commit({ hour })
-  }
-
-  const bumpMinute = (dir) => {
-    let minute = parts.minute + dir
-    if (minute > 59) minute = 0
-    if (minute < 0) minute = 59
-    commit({ minute })
-  }
-
-  return (
-    <div className={`flex items-end justify-center gap-2 select-none ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
-      <TimerWheel label="Hour" value={pad2(parts.hour)} onUp={() => bumpHour(1)} onDown={() => bumpHour(-1)} />
-      <span className="text-2xl font-black text-muted pb-8">:</span>
-      <TimerWheel label="Min" value={pad2(parts.minute)} onUp={() => bumpMinute(1)} onDown={() => bumpMinute(-1)} />
-      <div className="flex flex-col gap-1.5 pb-6 ml-1">
-        {['AM', 'PM'].map((period) => (
-          <button
-            key={period}
-            type="button"
-            onClick={() => commit({ ampm: period })}
-            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${
-              parts.ampm === period
-                ? 'bg-accent text-white border-accent'
-                : 'bg-canvas text-muted border-border hover:border-accent/50'
-            }`}
-          >
-            {period}
-          </button>
-        ))}
-      </div>
-    </div>
-  )
 }
 
 export const AttendancePage = () => {
@@ -321,6 +414,9 @@ export const AttendancePage = () => {
   const [editClockIn, setEditClockIn] = useState('')
   const [editClockOut, setEditClockOut] = useState('')
   const [savingEdit, setSavingEdit] = useState(false)
+  const [endingBreakRow, setEndingBreakRow] = useState(null)
+  const [editBreaks, setEditBreaks] = useState([])
+  const [savingBreak, setSavingBreak] = useState(false)
   const [togglingAttendanceUid, setTogglingAttendanceUid] = useState(null)
 
   // Office location geofence
@@ -523,6 +619,74 @@ export const AttendancePage = () => {
     }
   }
 
+  const breakEndError = endingBreakRow ? validateBreakList(selectedDate, editBreaks) : ''
+  const breakEndDurationSec = breakListSeconds(selectedDate, editBreaks)
+
+  const openBreakEditor = (row) => {
+    const liveLog = attendanceLogs.find((log) => log.uid === row.uid) || {}
+    const source = { ...row, shiftLogs: resolveShiftLogs({ ...liveLog, ...row }) }
+    setEndingBreakRow(row)
+    setEditBreaks(breaksFromRow(source, selectedDate))
+  }
+
+  const updateBreak = (id, patch) => {
+    setEditBreaks((list) => list.map((item) => (item.id === id ? { ...item, ...patch } : item)))
+  }
+
+  const addBreak = () => {
+    const isToday = selectedDate === todayStr()
+    const endMs = isToday ? Date.now() : timestampFromDateAndTime(selectedDate, '01:15 PM')
+    const startMs = isToday ? endMs - 15 * 60 * 1000 : timestampFromDateAndTime(selectedDate, '01:00 PM')
+    setEditBreaks((list) => [
+      ...list,
+      {
+        id: `new_${Date.now()}`,
+        start: timeStrFromMs(startMs) || '01:00 PM',
+        end: timeStrFromMs(endMs) || '01:15 PM',
+        wasOpen: false,
+      },
+    ])
+  }
+
+  const handleSaveBreakEnd = async (e) => {
+    e.preventDefault()
+    if (!endingBreakRow || savingBreak) return
+    if (validateBreakList(selectedDate, editBreaks)) return
+
+    setSavingBreak(true)
+    try {
+      const liveLog = attendanceLogs.find((log) => log.uid === endingBreakRow.uid) || {}
+      const nextBreak = applyAdminBreakList(
+        resolveShiftLogs({ ...liveLog, ...endingBreakRow }),
+        selectedDate,
+        editBreaks
+      )
+      const docId = `${selectedDate}_${endingBreakRow.uid}`
+
+      await setDoc(
+        doc(db, 'attendanceLogs', docId),
+        {
+          uid: endingBreakRow.uid,
+          displayName: endingBreakRow.displayName,
+          departmentName: endingBreakRow.departmentName,
+          date: selectedDate,
+          isOnBreak: false,
+          breakStartTime: null,
+          accumulatedBreakSeconds: nextBreak.accumulatedBreakSeconds,
+          shiftLogs: nextBreak.shiftLogs,
+          todayShiftLogs: nextBreak.shiftLogs,
+          source: 'admin_edit',
+        },
+        { merge: true }
+      )
+      setEndingBreakRow(null)
+    } catch (err) {
+      console.error('Error saving break time:', err)
+    } finally {
+      setSavingBreak(false)
+    }
+  }
+
   const editPreviewRegularHours = useMemo(
     () =>
       secToHrsStr(
@@ -621,6 +785,8 @@ export const AttendancePage = () => {
       let resolvedClockOut = log.clockOutTime || null
       let isAutoClockOut = Boolean(log.autoClockOut)
       const breakSec = log.accumulatedBreakSeconds || 0
+      const shiftLogs = resolveShiftLogs(log)
+      const openBreak = openPause(shiftLogs, 'break_start', 'break_end')
 
       if (isToday) {
         // Keep showing live clock-in; do not invent auto clock-out.
@@ -670,15 +836,16 @@ export const AttendancePage = () => {
         clockedIn: isCurrentlyClockedIn,
         onDuty: isOnDuty,
         present: isPresentFlag,
-        isOnBreak: log.isOnBreak || false,
+        isOnBreak: Boolean(log.isOnBreak) || Boolean(openBreak),
         isInExtraTime: log.isInExtraTime || false,
+        breakStartTime: log.breakStartTime || openBreak?.timestamp || null,
         accumulatedBreakSeconds: breakSec,
         regularHours: secToHrsStr(calculatedRegularSec),
         extraHours: log.extraHours || secToHrsStr(log.extraSeconds),
         regularSeconds: calculatedRegularSec,
         extraSeconds: log.extraSeconds || 0,
         autoClockOut: isAutoClockOut,
-        shiftLogs: resolveShiftLogs(log),
+        shiftLogs,
       }
     }
 
@@ -693,6 +860,8 @@ export const AttendancePage = () => {
       present: false,
       isOnBreak: false,
       isInExtraTime: false,
+      breakStartTime: null,
+      accumulatedBreakSeconds: 0,
       regularHours: '0h 0m',
       extraHours: '0h 0m',
       regularSeconds: 0,
@@ -1070,14 +1239,15 @@ export const AttendancePage = () => {
                   <td className="p-4">{getStatusBadge(row)}</td>
 
                   {/* Admin Edit Actions */}
-                  <td className="p-4 text-right">
-                    <div className="inline-flex items-center justify-end gap-1.5 flex-wrap">
+                  <td className="p-4 text-right whitespace-nowrap">
+                    <div className="inline-flex flex-nowrap items-center justify-end gap-1.5">
                       <button
                         type="button"
                         onClick={() => handleTogglePresentAbsent(row)}
                         disabled={togglingAttendanceUid === row.uid}
                         title={isRowPresent(row) ? 'Mark as Absent' : 'Mark as Present'}
-                        className={`p-1.5 rounded-lg border transition-colors inline-flex items-center gap-1 text-[11px] font-medium disabled:opacity-60 disabled:cursor-wait ${
+                        aria-label={isRowPresent(row) ? 'Mark as Absent' : 'Mark as Present'}
+                        className={`p-1.5 rounded-lg border transition-colors inline-flex items-center justify-center cursor-pointer disabled:opacity-60 disabled:cursor-wait ${
                           isRowPresent(row)
                             ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border-rose-500/30'
                             : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
@@ -1090,9 +1260,9 @@ export const AttendancePage = () => {
                         ) : (
                           <UserCheck className="w-3.5 h-3.5" />
                         )}
-                        {isRowPresent(row) ? 'Mark Absent' : 'Mark Present'}
                       </button>
                       <button
+                        type="button"
                         onClick={() => {
                           setEditingRow(row)
                           setEditClockIn(canonicalTimeOrDefault(row.clockInTime))
@@ -1102,10 +1272,20 @@ export const AttendancePage = () => {
                               : 'In office'
                           )
                         }}
-                        className="p-1.5 bg-canvas hover:bg-surface text-accent rounded-lg border border-border transition-colors inline-flex items-center gap-1 text-[11px] font-medium"
+                        className="p-1.5 bg-canvas hover:bg-surface text-accent rounded-lg border border-border transition-colors inline-flex items-center justify-center cursor-pointer"
                         title="Edit Employee Time"
+                        aria-label="Edit Employee Time"
                       >
-                        <Edit className="w-3.5 h-3.5" /> Edit Time
+                        <Edit className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openBreakEditor(row)}
+                        title="Edit breaks"
+                        aria-label="Edit breaks"
+                        className="p-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors inline-flex items-center justify-center cursor-pointer"
+                      >
+                        <Coffee className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </td>
@@ -1217,8 +1397,8 @@ export const AttendancePage = () => {
       {/* Edit Attendance Modal */}
       {editingRow && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <Card className="w-full max-w-md p-6 space-y-4 border-border shadow-2xl relative rounded-2xl bg-surface text-fg">
-            <div className="flex items-center justify-between pb-3 border-b border-border">
+          <Card className="w-full max-w-xl p-4 space-y-3 border-border shadow-2xl relative rounded-2xl bg-surface text-fg">
+            <div className="flex items-center justify-between pb-2 border-b border-border">
               <div>
                 <h3 className="font-bold text-sm">Edit Attendance Record</h3>
                 <p className="text-xs text-muted">
@@ -1226,74 +1406,57 @@ export const AttendancePage = () => {
                 </p>
               </div>
               <button
+                type="button"
                 onClick={() => setEditingRow(null)}
-                className="text-muted hover:text-fg p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                className="text-muted hover:text-fg p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                aria-label="Close"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveEdit} className="space-y-4">
-              <div className="space-y-2 text-left">
-                <label className="block text-xs font-medium text-fg">
-                  Clock In
-                </label>
-                <AttendanceTimer value={editClockIn} onChange={setEditClockIn} />
+            <form onSubmit={handleSaveEdit} className="space-y-2">
+              <div className="grid grid-cols-[1fr_1fr_5.5rem_3.25rem] items-center gap-2 px-1 text-[10px] uppercase tracking-wider font-semibold text-muted">
+                <span>Clock in</span>
+                <span>Clock out</span>
+                <span />
+                <span>Hours</span>
               </div>
-
-              <div className="space-y-2 text-left">
-                <label className="block text-xs font-medium text-fg">
-                  Clock Out
-                </label>
-                <div className="flex rounded-xl border border-border overflow-hidden">
-                  <button
-                    type="button"
-                    onClick={() => setEditClockOut('In office')}
-                    className={`flex-1 py-1.5 text-[11px] font-semibold transition-colors ${
-                      editClockOut === 'In office'
-                        ? 'bg-emerald-500/20 text-emerald-400'
-                        : 'bg-transparent text-muted hover:text-fg'
-                    }`}
-                  >
-                    In office
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (editClockOut === 'In office') {
-                        setEditClockOut(canonicalTimeOrDefault(null, '06:00 PM'))
-                      }
+              <div className="grid grid-cols-[1fr_1fr_5.5rem_3.25rem] items-center gap-2 rounded-lg border border-border bg-canvas px-2 py-1.5">
+                <input
+                  type="time"
+                  value={timeStrToInputValue(editClockIn)}
+                  onChange={(event) => {
+                    const next = inputValueToTimeStr(event.target.value)
+                    if (next) setEditClockIn(next)
+                  }}
+                  aria-label="Clock in"
+                  className="h-8 w-full min-w-0 rounded-md border border-border bg-surface px-2 text-xs font-mono text-fg [color-scheme:dark]"
+                />
+                <input
+                  type="time"
+                  value={editClockOut === 'In office' ? '' : timeStrToInputValue(editClockOut)}
+                  onChange={(event) => {
+                    const next = inputValueToTimeStr(event.target.value)
+                    if (next) setEditClockOut(next)
+                  }}
+                  disabled={editClockOut === 'In office'}
+                  aria-label="Clock out"
+                  className="h-8 w-full min-w-0 rounded-md border border-border bg-surface px-2 text-xs font-mono text-fg disabled:opacity-40 [color-scheme:dark]"
+                />
+                <label className="inline-flex items-center gap-1.5 text-[11px] text-fg whitespace-nowrap">
+                  <input
+                    type="checkbox"
+                    checked={editClockOut === 'In office'}
+                    onChange={(event) => {
+                      if (event.target.checked) setEditClockOut('In office')
+                      else setEditClockOut(timeStrFromMs(Date.now()) || '06:00 PM')
                     }}
-                    className={`flex-1 py-1.5 text-[11px] font-semibold transition-colors ${
-                      editClockOut !== 'In office'
-                        ? 'bg-accent text-white'
-                        : 'bg-transparent text-muted hover:text-fg'
-                    }`}
-                  >
-                    Clock out time
-                  </button>
-                </div>
-                {editClockOut === 'In office' ? (
-                  <p className="text-[11px] text-muted text-center py-3 rounded-xl border border-dashed border-border">
-                    Still in office — hours count up to now
-                  </p>
-                ) : (
-                  <AttendanceTimer value={editClockOut} onChange={setEditClockOut} />
-                )}
-              </div>
-
-              <div className="rounded-xl border border-accent/20 bg-accent-soft px-3 py-2.5 flex items-center justify-between gap-3">
-                <div className="text-left">
-                  <div className="text-[10px] uppercase tracking-wider font-semibold text-accent">
-                    Regular Hours (auto)
-                  </div>
-                  <p className="text-[11px] text-muted mt-0.5">
-                    Recalculated from clock-in → clock-out (max 8h)
-                  </p>
-                </div>
-                <div className="font-mono text-sm font-bold text-accent shrink-0">
-                  {editPreviewRegularHours}
-                </div>
+                    className="accent-emerald-500"
+                  />
+                  In office
+                </label>
+                <span className="font-mono text-[11px] font-semibold text-accent">{editPreviewRegularHours}</span>
               </div>
 
               <div className="flex gap-3 pt-2">
@@ -1315,6 +1478,138 @@ export const AttendancePage = () => {
                     <Save className="w-3.5 h-3.5" />
                   )}
                   Save Changes
+                </button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
+
+      {endingBreakRow && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <Card className="w-full max-w-xl max-h-[80vh] overflow-y-auto p-4 space-y-3 border-border shadow-2xl relative rounded-2xl bg-surface text-fg">
+            <div className="flex items-center justify-between pb-2 border-b border-border">
+              <div>
+                <h3 className="font-bold text-sm">Edit breaks</h3>
+                <p className="text-xs text-muted">
+                  {endingBreakRow.displayName} ({formatDate(selectedDate)})
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEndingBreakRow(null)}
+                className="text-muted hover:text-fg p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveBreakEnd} className="space-y-2">
+              <div className="grid grid-cols-[4.5rem_1fr_1fr_3.25rem_1.75rem] items-center gap-2 px-1 text-[10px] uppercase tracking-wider font-semibold text-muted">
+                <span />
+                <span>Start</span>
+                <span>End</span>
+                <span>Time</span>
+                <span />
+              </div>
+              {editBreaks.length === 0 ? (
+                <p className="text-xs text-muted text-left rounded-lg border border-dashed border-border px-3 py-2">
+                  No breaks recorded for this day.
+                </p>
+              ) : (
+                editBreaks.map((item, index) => {
+                  const itemError = validateBreakWindow(selectedDate, item.start, item.end)
+                  const itemSeconds = itemError
+                    ? 0
+                    : Math.max(
+                        0,
+                        Math.floor(
+                          ((timestampFromDateAndTime(selectedDate, item.end) || 0) -
+                            (timestampFromDateAndTime(selectedDate, item.start) || 0)) /
+                            1000
+                        )
+                      )
+                  return (
+                    <div
+                      key={item.id}
+                      className="grid grid-cols-[4.5rem_1fr_1fr_3.25rem_1.75rem] items-center gap-2 rounded-lg border border-border bg-canvas px-2 py-1.5"
+                    >
+                      <span className="text-[11px] font-semibold text-fg truncate" title={item.wasOpen ? 'This break was still open' : undefined}>
+                        Break {index + 1}
+                      </span>
+                      <input
+                        type="time"
+                        value={timeStrToInputValue(item.start)}
+                        onChange={(event) => {
+                          const start = inputValueToTimeStr(event.target.value)
+                          if (start) updateBreak(item.id, { start })
+                        }}
+                        aria-label={`Break ${index + 1} start`}
+                        className="h-8 w-full min-w-0 rounded-md border border-border bg-surface px-2 text-xs font-mono text-fg [color-scheme:dark]"
+                      />
+                      <input
+                        type="time"
+                        value={timeStrToInputValue(item.end)}
+                        onChange={(event) => {
+                          const end = inputValueToTimeStr(event.target.value)
+                          if (end) updateBreak(item.id, { end })
+                        }}
+                        aria-label={`Break ${index + 1} end`}
+                        className="h-8 w-full min-w-0 rounded-md border border-border bg-surface px-2 text-xs font-mono text-fg [color-scheme:dark]"
+                      />
+                      <span className="font-mono text-[11px] font-semibold text-amber-400">{secToHrsStr(itemSeconds)}</span>
+                      <button
+                        type="button"
+                        onClick={() => setEditBreaks((list) => list.filter((entry) => entry.id !== item.id))}
+                        className="p-1 rounded-md text-rose-400 hover:bg-rose-500/10 justify-self-end cursor-pointer"
+                        title="Remove this break"
+                        aria-label={`Remove break ${index + 1}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )
+                })
+              )}
+
+              <div className="flex items-center justify-between gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={addBreak}
+                  className="py-1.5 px-2 rounded-lg text-amber-400 text-xs font-semibold inline-flex items-center gap-1 hover:bg-amber-500/10"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add break
+                </button>
+                <span className="text-[11px] text-muted">
+                  Total <span className="font-mono font-semibold text-amber-400">{secToHrsStr(breakEndError ? 0 : breakEndDurationSec)}</span>
+                </span>
+              </div>
+
+              {breakEndError && (
+                <p className="text-[11px] text-rose-400 text-left">{breakEndError}</p>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEndingBreakRow(null)}
+                  className="w-1/3 py-2 px-3 bg-canvas hover:bg-surface text-fg font-semibold rounded-xl text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingBreak || Boolean(breakEndError)}
+                  className="w-2/3 py-2 px-3 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {savingBreak ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Coffee className="w-3.5 h-3.5" />
+                  )}
+                  Save breaks
                 </button>
               </div>
             </form>
