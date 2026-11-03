@@ -5,6 +5,8 @@ export const HOLIDAY_WORK_LEAVE_TYPE = 'Holiday Work'
 export const COMBO_OFFER_LEAVE_TYPE = 'Combo Offer Leave'
 export const COMBO_OFFER_WINDOW_DAYS = 30
 export const COMBO_OFFER_ADVANCE_DAYS = 3
+export const COMBO_OFFER_OT_MIN_HOURS = 8
+export const OT_DAY_TYPE = 'OT - Overtime'
 export const DEFAULT_PERMISSION_HOURS = 4
 
 export const isHolidayWorkRequest = (leave) =>
@@ -145,6 +147,21 @@ export const hoursBetween = (startTime, endTime) => {
   return Math.round(((end - start) / 60) * 100) / 100
 }
 
+/** Same-day span, or through the next morning when the end clock time is earlier. */
+export const hoursAcrossMidnight = (startTime, endTime) => {
+  const start = parseTimeToMinutes(startTime)
+  const end = parseTimeToMinutes(endTime)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end === start) return 0
+  const minutes = end > start ? end - start : end + 24 * 60 - start
+  return Math.round((minutes / 60) * 100) / 100
+}
+
+export const shiftEndsNextDay = (startTime, endTime) => {
+  const start = parseTimeToMinutes(startTime)
+  const end = parseTimeToMinutes(endTime)
+  return Number.isFinite(start) && Number.isFinite(end) && end < start
+}
+
 export const formatHoursAsHrsMins = (hours) => {
   const totalMinutes = Math.round(Number(hours) * 60)
   if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) return '0 min'
@@ -171,6 +188,33 @@ export const getPermissionHours = (leave) => {
   const stored = Number(leave?.hours)
   if (Number.isFinite(stored) && stored > 0) return stored
   return hoursBetween(leave?.startTime, leave?.endTime)
+}
+
+export const isOtDayType = (dayType) =>
+  String(dayType || '').trim().toLowerCase().startsWith('ot')
+
+export const holidayWorkHours = (leave) => {
+  const stored = Number(leave?.hours)
+  if (Number.isFinite(stored) && stored > 0) return stored
+  return hoursAcrossMidnight(leave?.startTime, leave?.endTime)
+}
+
+/** Public Holiday and Week Off always earn a day. OT earns one only at 8 hours or more. */
+export const earnsComboOfferLeave = (leave) => {
+  if (!isHolidayWorkRequest(leave)) return false
+  if (!isOtDayType(leave?.dayType)) return true
+  return holidayWorkHours(leave) >= COMBO_OFFER_OT_MIN_HOURS
+}
+
+const formatClockLabel = (time) => {
+  if (!time || typeof time !== 'string') return ''
+  const [hRaw, mRaw] = time.split(':')
+  const h = Number(hRaw)
+  const m = Number(mRaw)
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return time
+  const period = h >= 12 ? 'PM' : 'AM'
+  const hour12 = h % 12 || 12
+  return `${hour12}:${String(m).padStart(2, '0')} ${period}`
 }
 
 export const leaveStatusKey = (leave) => String(leave?.status || '').toLowerCase()
@@ -229,9 +273,12 @@ export const formatLeaveDuration = (req) => {
   if (isHolidayWorkRequest(req)) {
     const date = req.startDate || ''
     const kind = req.dayType ? ` · ${req.dayType}` : ''
-    const hours = Number(req.hours)
+    const hours = holidayWorkHours(req)
+    const range = req.startTime && req.endTime
+      ? ` · ${formatClockLabel(req.startTime)}–${formatClockLabel(req.endTime)}${shiftEndsNextDay(req.startTime, req.endTime) ? ' next day' : ''}`
+      : ''
     const hrsLabel = Number.isFinite(hours) && hours > 0 ? ` · ${formatHoursAsHrsMins(hours)}` : ''
-    return `${date}${kind}${hrsLabel}`
+    return `${date}${kind}${range}${hrsLabel}`
   }
   if (isComboOfferLeave(req)) {
     const date = req.startDate || ''
@@ -388,7 +435,13 @@ export const classifyApprovedLeaveByDate = (leaveRequests, employeeFilter, limit
         ? EMERGENCY_LEAVE_TYPE
         : entry.requested
     const status =
-      type === LOP_LEAVE_TYPE ? 'lop' : type === EMERGENCY_LEAVE_TYPE ? 'emergency' : 'leave'
+      type === LOP_LEAVE_TYPE
+        ? 'lop'
+        : type === EMERGENCY_LEAVE_TYPE
+          ? 'emergency'
+          : type === COMBO_OFFER_LEAVE_TYPE
+            ? 'combo'
+            : 'leave'
     if (map[entry.date]?.status === 'lop') return
     map[entry.date] = {
       status,
@@ -433,6 +486,31 @@ export const classifyApprovedLeaveByDate = (leaveRequests, employeeFilter, limit
   return map
 }
 
+/** Approved OT, public-holiday, and Sunday work, keyed by the worked date. */
+export const approvedExtraWorkByDate = (leaveRequests, employeeFilter) => {
+  const map = {}
+  ;(Array.isArray(leaveRequests) ? leaveRequests : []).forEach((leave) => {
+    if (leaveStatusKey(leave) !== 'approved') return
+    if (!leaveMatchesEmployeeFilter(leave, employeeFilter)) return
+    if (!isHolidayWorkRequest(leave)) return
+    const date = String(leave.startDate || leave.endDate || '').slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return
+    map[date] = {
+      dayType: leave.dayType || 'Worked',
+      hours: holidayWorkHours(leave),
+    }
+  })
+  return map
+}
+
+export const extraWorkTooltip = (work) => {
+  if (!work) return 'Worked'
+  const kind = work.dayType || 'Worked'
+  const hours = Number(work.hours)
+  const hrs = Number.isFinite(hours) && hours > 0 ? ` · ${formatHoursAsHrsMins(hours)}` : ''
+  return `${kind}${hrs}`
+}
+
 export const countClassifiedLopDays = (classifiedByDate, monthStr) =>
   Object.entries(classifiedByDate || {}).filter(
     ([date, info]) =>
@@ -463,6 +541,8 @@ export const attendanceStatusDotClass = (status) => {
   if (status === 'holiday') return 'bg-[#EAB308]'
   if (status === 'lop') return 'bg-[#EC4899]'
   if (status === 'emergency') return 'bg-[#7F1D1D]'
+  if (status === 'extraWork') return 'bg-[#3B82F6]'
+  if (status === 'combo') return 'bg-[#14B8A6]'
   if (status === 'leave') return 'bg-[#A855F7]'
   return 'bg-[#EF4444]'
 }
@@ -476,6 +556,8 @@ export const attendanceStatusDayClass = (status) => {
   if (status === 'casual') return 'bg-[#A855F7]/15 text-[#A855F7] font-bold'
   if (status === 'sick') return 'bg-[#F97316]/20 text-[#F97316] font-bold'
   if (status === 'emergency') return 'bg-[#7F1D1D]/20 text-[#7F1D1D] font-bold'
+  if (status === 'extraWork') return 'bg-[#3B82F6]/20 text-[#3B82F6] font-bold'
+  if (status === 'combo') return 'bg-[#14B8A6]/20 text-[#14B8A6] font-bold'
   if (status === 'leave') return 'bg-[#A855F7]/15 text-[#A855F7] font-bold'
   if (status === 'present') return 'text-[#22C55E] font-bold'
   if (status === 'absent') return 'text-[#EF4444] font-bold'
@@ -489,6 +571,8 @@ export const attendanceStatusTooltip = (status, leaveType, holidayName) => {
   if (status === 'casual') return 'Casual Leave'
   if (status === 'sick') return 'Sick Leave'
   if (status === 'emergency') return 'Emergency Leave'
+  if (status === 'extraWork') return leaveType || 'Worked'
+  if (status === 'combo') return 'Combo Offer Leave'
   if (status === 'leave') return leaveType || 'Leave'
   return null
 }

@@ -635,7 +635,13 @@ export function EmployeeMonthlyReportPage() {
                     <tr key={row.date} className="text-fg">
                       <td className="p-3 font-medium whitespace-nowrap">{row.date}</td>
                       <td className="p-3">
-                        {row.present ? (
+                        {row.isCombo ? (
+                          <Badge className="bg-[#14B8A6]/15 text-[#14B8A6] border-[#14B8A6]/30">Combo Offer</Badge>
+                        ) : row.extraWork ? (
+                          <Badge className="bg-[#3B82F6]/15 text-[#3B82F6] border-[#3B82F6]/30">
+                            {row.extraWorkLabel || 'Worked'}
+                          </Badge>
+                        ) : row.present ? (
                           <Badge variant="success">{row.onDuty ? 'On Duty' : 'Present'}</Badge>
                         ) : row.leaveType ? (
                           <Badge variant="warning">Leave</Badge>

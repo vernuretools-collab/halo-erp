@@ -6,6 +6,8 @@ import { getUserMonthlyAttendance, attendanceRecordLooksPresent } from '../../te
 import { subscribeToCompanyHolidays } from '../../team/services/teamService'
 import {
   classifyApprovedLeaveByDate,
+  approvedExtraWorkByDate,
+  extraWorkTooltip,
   resolveLeaveLimits,
   attendanceStatusDotClass,
   attendanceStatusDotSizeClass,
@@ -129,6 +131,17 @@ export const AttendanceCalendarWidget = () => {
     }
     return classifyApprovedLeaveByDate(leaveRequests, emp, resolveLeaveLimits(employeeProfile), companyHolidays)
   }, [leaveRequests, activeUid, activeEmail, activeName, employeeProfile, companyHolidays, identityIds])
+
+  const extraWorkByDate = useMemo(() => {
+    const emp = {
+      employeeId: employeeProfile?.id || activeUid,
+      uid: activeUid,
+      employeeEmail: activeEmail,
+      employeeName: activeName,
+      identityIds,
+    }
+    return approvedExtraWorkByDate(leaveRequests, emp)
+  }, [leaveRequests, activeUid, activeEmail, activeName, employeeProfile, identityIds])
 
   // Month name formatting e.g. "July 2026"
   const monthName = currentViewDate.toLocaleDateString('en-US', {
@@ -258,11 +271,15 @@ export const AttendanceCalendarWidget = () => {
     // Before account creation / effective start: show nothing (no full-month Absent)
     if (cellDate < attendanceStart) return null
 
-    // ── Company holiday takes priority ──
+    // Combo Offer, then approved extra work, then the usual holiday and leave rules
+    const approvedLeave = approvedLeaveByDate[dateKey]
+    if (approvedLeave?.status === 'combo') return 'combo'
+    if (extraWorkByDate[dateKey]) return 'extraWork'
+
+    // ── Company holiday takes priority over ordinary leave ──
     if (companyHolidays[dateKey]) return 'holiday'
 
     // ── Live approved leave overlays ──
-    const approvedLeave = approvedLeaveByDate[dateKey]
     if (approvedLeave?.status === 'lop') return 'lop'
     if (approvedLeave?.status === 'wfh') return 'wfh'
     if (approvedLeave?.status === 'casual') return 'casual'
@@ -382,6 +399,8 @@ export const AttendanceCalendarWidget = () => {
               const status = getAttendanceStatus(cell.day, cell.isCurrentMonth)
               const dateKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(cell.day).padStart(2, '0')}`
               const leaveOverlay = approvedLeaveByDate[dateKey]
+              const extraWork = extraWorkByDate[dateKey]
+              const tooltipLabel = status === 'extraWork' ? extraWorkTooltip(extraWork) : leaveOverlay?.leaveType
               const isSelected =
                 cell.isCurrentMonth &&
                 cell.day === selectedDay &&
@@ -420,14 +439,14 @@ export const AttendanceCalendarWidget = () => {
                         />
                         {attendanceStatusTooltip(
                           status,
-                          leaveOverlay?.leaveType,
+                          tooltipLabel,
                           companyHolidays[dateKey]?.name
                         ) && (
                           <div className="absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 z-20 hidden group-hover/dot:block pointer-events-none">
                             <div className="bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-[8px] font-semibold rounded-lg px-2 py-1 whitespace-nowrap shadow-xl">
                               {attendanceStatusTooltip(
                                 status,
-                                leaveOverlay?.leaveType,
+                                tooltipLabel,
                                 companyHolidays[dateKey]?.name
                               )}
                             </div>
@@ -447,6 +466,14 @@ export const AttendanceCalendarWidget = () => {
           <div className="flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E]" />
             <span>Present</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#3B82F6]" />
+            <span>Worked</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#14B8A6]" />
+            <span>Combo Offer</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-[#06B6D4]" />

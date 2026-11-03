@@ -15,6 +15,8 @@ import {
 } from './attendanceStatsUtils'
 import {
   classifyApprovedLeaveByDate,
+  approvedExtraWorkByDate,
+  COMBO_OFFER_LEAVE_TYPE,
   resolveLeaveLimits,
   formatLeaveTypeLabel,
   getMorningPermissionExpectedStartMinutes,
@@ -238,14 +240,16 @@ export function buildEmployeeMonthlyReport({
   })
 
   const empLeaves = (leaveRequests || []).filter((l) => leaveMatchesEmployee(l, employee))
+  const empFilter = {
+    employeeId: uid,
+    uid,
+    employeeEmail: employee?.email || '',
+    employeeName: employee?.displayName || employee?.name || '',
+  }
+  const extraWorkByDate = approvedExtraWorkByDate(empLeaves, empFilter)
   const classifiedByDate = classifyApprovedLeaveByDate(
     empLeaves,
-    {
-      employeeId: uid,
-      uid,
-      employeeEmail: employee?.email || '',
-      employeeName: employee?.displayName || employee?.name || '',
-    },
+    empFilter,
     resolveLeaveLimits(employee),
     holidays
   )
@@ -295,7 +299,13 @@ export function buildEmployeeMonthlyReport({
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
   const accountStart = getEmployeeAccountStartDate(employee)
 
-  const daily = workingDaysList.map((date) => {
+  const officeDaySet = new Set(workingDaysList)
+  const extraDates = Object.keys(extraWorkByDate).filter(
+    (date) => date >= start && date <= end && !officeDaySet.has(date)
+  )
+  const reportDates = [...workingDaysList, ...extraDates].sort()
+
+  const daily = reportDates.map((date) => {
     const log = logsByDate[date]
     const classified = classifiedByDate[date]
     const isPaidWfh = classified?.status === 'wfh'
@@ -310,12 +320,6 @@ export function buildEmployeeMonthlyReport({
         : log?.clockOutTime === 'In office'
           ? 'In office'
           : null
-    const empFilter = {
-      employeeId: uid,
-      uid,
-      employeeEmail: employee?.email || '',
-      employeeName: employee?.displayName || employee?.name || '',
-    }
     const expectedStart = getMorningPermissionExpectedStartMinutes(
       empLeaves,
       empFilter,
@@ -333,6 +337,12 @@ export function buildEmployeeMonthlyReport({
     const approvedLeave = dayLeaves.find((l) => l.status === 'approved')
     const leaveType = classified?.leaveType || approvedLeave?.leaveType || (dayLeaves[0]?.leaveType ?? null)
 
+    const extraWork = extraWorkByDate[date] || null
+    const isCombo =
+      classified?.status === 'combo' ||
+      classified?.leaveType === COMBO_OFFER_LEAVE_TYPE ||
+      leaveType === COMBO_OFFER_LEAVE_TYPE
+    const isOfficeDay = officeDaySet.has(date)
     const isFuture = date > todayStr
     const isBeforeJoin = Boolean(accountStart && date < accountStart)
     const fullDayApprovedLeave = dayLeaves.find(
@@ -345,7 +355,7 @@ export function buildEmployeeMonthlyReport({
     // Eligible for absence: on/after account start, not future, no full-day approved leave
     const canBeAbsent = !isFuture && !isBeforeJoin && !fullDayApprovedLeave
 
-    if (present && !isBeforeJoin) {
+    if (isOfficeDay && present && !isBeforeJoin) {
       presentDays += 1
       if (onDuty) onDutyDays += 1
       if (presentFromLog && clockInTime) {
@@ -357,7 +367,7 @@ export function buildEmployeeMonthlyReport({
         totalExtraSeconds += extraSeconds
         totalBreakSeconds += breakSeconds
       }
-    } else if (canBeAbsent && !present && !isPaidWfh) {
+    } else if (isOfficeDay && canBeAbsent && !present && !isPaidWfh && !extraWork) {
       absentDays += 1
     }
 
@@ -374,6 +384,9 @@ export function buildEmployeeMonthlyReport({
       breakSeconds,
       idleSeconds: idleByDate[date] || 0,
       leaveType,
+      extraWork: Boolean(extraWork),
+      extraWorkLabel: extraWork?.dayType || '',
+      isCombo,
       timelineHours: timelineByDate[date] || 0,
       onDuty,
       isFuture,
