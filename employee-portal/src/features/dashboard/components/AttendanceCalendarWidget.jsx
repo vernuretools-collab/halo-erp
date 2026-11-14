@@ -268,8 +268,7 @@ export const AttendanceCalendarWidget = () => {
     cellDate.setHours(0, 0, 0, 0)
 
     const attendanceStart = getAttendanceStartMidnight()
-    // Before account creation / effective start: show nothing (no full-month Absent)
-    if (cellDate < attendanceStart) return null
+    const beforeAccount = cellDate < attendanceStart
 
     // Combo Offer, then approved extra work, then the usual holiday and leave rules
     const approvedLeave = approvedLeaveByDate[dateKey]
@@ -309,7 +308,7 @@ export const AttendanceCalendarWidget = () => {
       if (isPresentToday) {
         return 'present'
       }
-      if (isWeekend) {
+      if (isWeekend || beforeAccount) {
         return null
       }
       return 'absent'
@@ -333,6 +332,9 @@ export const AttendanceCalendarWidget = () => {
     if (isLoadingRecords) {
       return null
     }
+
+    // Before the account start, do not invent Absent. A saved clock-in above still shows Present.
+    if (beforeAccount) return null
 
     // Past working weekday without presence and without approved leave: unexcused absent
     return 'absent'

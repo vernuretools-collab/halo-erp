@@ -163,7 +163,11 @@ export const AttendanceMetricsBar = () => {
   let statusColor = 'text-rose-600 dark:text-rose-400'
   let statusBg = 'bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-200/50 dark:border-rose-500/20'
 
-  if (clockedIn && isOnBreak) {
+  if (clockedIn && isOnLunch) {
+    statusText = 'On Lunch'
+    statusColor = 'text-amber-600 dark:text-amber-400'
+    statusBg = 'bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-200/50 dark:border-amber-500/20'
+  } else if (clockedIn && isOnBreak) {
     statusText = 'On Break'
     statusColor = 'text-amber-600 dark:text-amber-400'
     statusBg = 'bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-200/50 dark:border-amber-500/20'

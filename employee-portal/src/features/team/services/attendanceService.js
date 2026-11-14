@@ -1,6 +1,7 @@
 import { doc, setDoc, getDoc, collection, query, where, getDocs, serverTimestamp } from 'firebase/firestore'
 import { db } from '../../../shared/services/firebaseService'
 import { mergeShiftLogs, pairedShiftLogs } from '../../../../../shared/shiftLogs.js'
+import { preferAttendanceLog } from '../../../../../shared/employees/employmentStatus.js'
 import {
   ATTENDANCE_OUTBOX_KEY,
   dropAttendanceSave,
@@ -206,46 +207,47 @@ export const getUserMonthlyAttendance = async (uidOrIds) => {
       const data = docSnap.data() || {}
       const date = dateFromAttendanceRow(docSnap.id, data)
       const uid = rowUid(docSnap.id, data)
-      if (!date) return
-      if (uid && !ids.includes(uid)) return
-      recordMap[date] = { ...data, date, uid: uid || data.uid }
+      const suffix = /^\d{4}-\d{2}-\d{2}_/.test(String(docSnap.id || '')) ? String(docSnap.id).slice(11) : ''
+      const belongs =
+        (uid && ids.includes(uid)) ||
+        (suffix && ids.includes(suffix)) ||
+        ids.includes(String(data.employeeId || '')) ||
+        ids.includes(String(data.userId || ''))
+      if (!date || !belongs) return
+      const row = { ...data, id: docSnap.id, date, uid: uid || suffix || data.uid }
+      recordMap[date] = preferAttendanceLog(recordMap[date], row)
     }
 
     const logsRef = collection(db, 'attendanceLogs')
-    const logQuery =
-      ids.length === 1
-        ? query(logsRef, where('uid', '==', ids[0]))
-        : query(logsRef, where('uid', 'in', ids))
-    const logSnap = await getDocs(logQuery)
-    logSnap.docs.forEach(absorb)
-
-    if (Object.keys(recordMap).length === 0) {
-      const allLogs = await getDocs(logsRef)
-      allLogs.docs.forEach((docSnap) => {
-        const data = docSnap.data() || {}
-        const date = dateFromAttendanceRow(docSnap.id, data)
-        const uid = rowUid(docSnap.id, data)
-        if (!date) return
-        if (uid && ids.includes(uid)) {
-          recordMap[date] = { ...data, date, uid }
-          return
-        }
-        if (!uid && /^\d{4}-\d{2}-\d{2}_/.test(docSnap.id)) {
-          const suffix = docSnap.id.slice(11)
-          if (ids.includes(suffix)) recordMap[date] = { ...data, date, uid: suffix }
+    const batches = await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const snap = await getDocs(query(logsRef, where('uid', '==', id)))
+          return snap.docs
+        } catch (err) {
+          console.error('[attendanceService] attendance uid query error:', err)
+          return []
         }
       })
+    )
+    batches.flat().forEach(absorb)
+
+    try {
+      const allLogs = await getDocs(logsRef)
+      allLogs.docs.forEach(absorb)
+    } catch (err) {
+      console.error('[attendanceService] attendance scan error:', err)
     }
 
     const attendanceSnap = await getDocs(collection(db, 'attendance'))
     attendanceSnap.docs.forEach((docSnap) => {
       const data = docSnap.data() || {}
       const uid = String(data.uid || data.employeeId || data.userId || '')
-      if (uid && !ids.includes(uid)) return
-      if (!uid) return
+      if (!uid || !ids.includes(uid)) return
       const date = dateFromAttendanceRow(docSnap.id, data)
-      if (!date || recordMap[date]) return
-      recordMap[date] = { ...data, date, uid }
+      if (!date) return
+      const row = { ...data, id: docSnap.id, date, uid }
+      recordMap[date] = preferAttendanceLog(recordMap[date], row)
     })
 
     return recordMap

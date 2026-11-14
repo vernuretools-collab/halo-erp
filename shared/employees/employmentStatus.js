@@ -154,3 +154,71 @@ export function recordMatchesEmployee(record, employee) {
   const recordEmail = String(record.email || record.employeeEmail || record.assigneeEmail || '').trim().toLowerCase()
   return Boolean(email && recordEmail && email === recordEmail)
 }
+
+export function profileEmailKey(record) {
+  return String(record?.email || '').trim().toLowerCase()
+}
+
+/** Login profile ids that share the employee profile email. Not auth.users.email. */
+export function attachProfileIdentities(employees, profiles) {
+  const idsByEmail = new Map()
+  for (const profile of profiles || []) {
+    const email = profileEmailKey(profile)
+    if (!email) continue
+    if (!idsByEmail.has(email)) idsByEmail.set(email, new Set())
+    const bucket = idsByEmail.get(email)
+    collectEmployeeIdentityIds(profile).forEach((id) => bucket.add(id))
+    addIdentity(bucket, profile.id)
+    addIdentity(bucket, profile.uid)
+  }
+  return (employees || []).map((employee) => {
+    const extra = idsByEmail.get(profileEmailKey(employee))
+    const identityIds = collectEmployeeIdentityIds({
+      ...employee,
+      identityIds: [...(employee.identityIds || []), ...(extra ? [...extra] : [])],
+    })
+    return { ...employee, identityIds }
+  })
+}
+
+export function attendanceLogIdentityIds(log) {
+  const ids = new Set()
+  if (!log) return []
+  addIdentity(ids, log.uid)
+  addIdentity(ids, log.employeeId)
+  addIdentity(ids, log.employeeDocId)
+  addIdentity(ids, log.userId)
+  addIdentity(ids, log.user_id)
+  const docId = String(log.id || log.docId || '')
+  const dated = docId.match(/^(\d{4}-\d{2}-\d{2})_(.+)$/)
+  if (dated) addIdentity(ids, dated[2])
+  return [...ids]
+}
+
+export function attendanceLogMatchesEmployee(log, employee) {
+  if (!log || !employee) return false
+  const ids = new Set(collectEmployeeIdentityIds(employee))
+  return attendanceLogIdentityIds(log).some((id) => ids.has(id))
+}
+
+function attendanceWorkedSeconds(log) {
+  return Math.max(0, Number(log?.regularSeconds) || Number(log?.accumulatedWorkSeconds) || 0)
+}
+
+function attendanceHasClockOut(log) {
+  const value = log?.clockOutTime
+  return Boolean(value && value !== '—' && value !== 'In office')
+}
+
+/** Prefer a live clock-in, then a finished day, then the longer worked time. */
+export function preferAttendanceLog(current, candidate) {
+  if (!current) return candidate || null
+  if (!candidate) return current
+  const currentIn = current.clockedIn === true || current.clockedIn === 'true'
+  const nextIn = candidate.clockedIn === true || candidate.clockedIn === 'true'
+  if (nextIn !== currentIn) return nextIn ? candidate : current
+  const currentOut = attendanceHasClockOut(current)
+  const nextOut = attendanceHasClockOut(candidate)
+  if (nextOut !== currentOut) return nextOut ? candidate : current
+  return attendanceWorkedSeconds(candidate) > attendanceWorkedSeconds(current) ? candidate : current
+}

@@ -49,6 +49,8 @@ export const ClockInOverviewWidget = ({ children }) => {
     handleBreakToggle,
     handleLunchStart,
     handleLunchEnd,
+    showLunchButton,
+    scheduledLunchActive,
   } = useAttendanceClockActions()
 
   const {
@@ -357,14 +359,16 @@ export const ClockInOverviewWidget = ({ children }) => {
               </Button>
             )}
 
-            {clockedIn && (
+            {clockedIn && (showLunchButton || isOnLunch) && (
               <Button
                 variant={isOnLunch ? 'primary' : 'secondary'}
+                disabled={scheduledLunchActive}
                 onClick={() => {
+                  if (scheduledLunchActive) return
                   if (isOnLunch) handleLunchEnd()
                   else setConfirmKind('lunch')
                 }}
-                title={isOnLunch ? 'End lunch' : 'Take lunch'}
+                title={scheduledLunchActive ? 'Company lunch window' : isOnLunch ? 'End lunch' : 'Take lunch'}
                 className="py-2.5 px-3.5 rounded-xl"
               >
                 <Utensils className={`w-4 h-4 sm:w-5 sm:h-5 ${isOnLunch ? 'text-white' : 'text-amber-500'}`} />

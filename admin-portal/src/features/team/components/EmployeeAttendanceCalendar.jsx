@@ -18,6 +18,10 @@ import {
 import { collection, onSnapshot } from 'firebase/firestore'
 import { db } from '../../../shared/services/firebaseService'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import {
+  attendanceLogMatchesEmployee,
+  preferAttendanceLog,
+} from '../../../../../shared/employees/employmentStatus.js'
 
 export function EmployeeAttendanceCalendar({
   employeeUid,
@@ -73,11 +77,16 @@ export function EmployeeAttendanceCalendar({
     getAttendanceLogsForMonth(viewMonth)
       .then((logs) => {
         if (cancelled) return
+        const person = employee || {
+          uid: employeeUid,
+          employeeId: employeeUid,
+          id: employeeUid,
+        }
         const map = {}
         ;(logs || []).forEach((log) => {
           if (!log?.date) return
-          if (log.uid !== employeeUid && log.employeeId !== employeeUid) return
-          map[log.date] = log
+          if (!attendanceLogMatchesEmployee(log, person)) return
+          map[log.date] = preferAttendanceLog(map[log.date], log)
         })
         setLogsByDate(map)
       })
@@ -88,7 +97,7 @@ export function EmployeeAttendanceCalendar({
     return () => {
       cancelled = true
     }
-  }, [employeeUid, viewMonth])
+  }, [employeeUid, employee, viewMonth])
 
   const approvedLeaveByDate = useMemo(() => {
     if (!employeeUid && !employeeEmail && !employeeName) return {}
@@ -172,9 +181,6 @@ export function EmployeeAttendanceCalendar({
     const isWeekend = cellDate.getDay() === 0
     const isFuture = cellDate > today
 
-    // No attendance markers before the employee account exists
-    if (accountStartDate && dateKey < accountStartDate) return null
-
     const approvedLeave = approvedLeaveByDate[dateKey]
     if (approvedLeave?.status === 'combo') return 'combo'
     if (extraWorkByDate[dateKey]) return 'extraWork'
@@ -204,6 +210,9 @@ export function EmployeeAttendanceCalendar({
         year === today.getFullYear() && monthIndex === today.getMonth()
       if (!isCurrentMonthView) return null
     }
+
+    // Before the join date, do not invent Absent. A saved clock-in above still shows Present.
+    if (accountStartDate && dateKey < accountStartDate) return null
 
     return 'absent'
   }

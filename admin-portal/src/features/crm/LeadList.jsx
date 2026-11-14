@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useSearchParams } from 'react-router-dom'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Card } from '../../components/ui/Card'
 import { Badge } from '../../components/ui/Badge'
@@ -21,7 +21,13 @@ import {
 
 export const LeadList = () => {
   const { leads, stages, setLeads, deleteLead, updateLeadStage, searchQuery, setSearchQuery } = useCRMStore()
+  const [searchParams] = useSearchParams()
   const [selectedStage, setSelectedStage] = useState('all')
+  const queryParam = searchParams.get('q')
+
+  useEffect(() => {
+    if (queryParam != null) setSearchQuery(queryParam)
+  }, [queryParam, setSearchQuery])
 
   useEffect(() => {
     const fetchRealLeads = async () => {
@@ -47,10 +53,11 @@ export const LeadList = () => {
   }
 
   const filtered = leads.filter((l) => {
+    const q = searchQuery.trim().toLowerCase()
     const matchesSearch =
-      !searchQuery ||
-      (l.name && l.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (l.companyName && l.companyName.toLowerCase().includes(searchQuery.toLowerCase()))
+      !q ||
+      [l.name, l.companyName, l.contactName, l.email, l.phone, l.phoneNumber]
+        .some((value) => value && String(value).toLowerCase().includes(q))
     const matchesStage = selectedStage === 'all' || l.pipelineStageId === selectedStage
     return matchesSearch && matchesStage
   })

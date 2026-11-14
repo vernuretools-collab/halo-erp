@@ -75,3 +75,33 @@ Ex-employees (`relieved`) and archived employees stay on the Ex-Employees page. 
 - People on notice period stay on those screens.
 - Final Documentation can still load them so a relieving letter can be generated.
 - Exit does not delete the employee row or linked attendance, timeline, leave, scrum, project, task, or document records. The Ex-Employees profile still shows that history.
+
+## 2026-11-11 — Client signatory title stays on the agreement
+
+Register Client Portal User does not ask for Signatory Designation. That job title belongs on the client agreement, where the client enters it when they sign.
+
+- Account creation still stores a title only as the existing fallback, Authorized Representative, until the client sets one on the document.
+- Do not put the designation field back on the registration form.
+
+## 2026-11-11 — Client review does not show Account & Billing
+
+The client onboarding review step shows the signed agreements only. It does not show the Account & Billing card.
+
+- Company, billing email, billing address, GST, and payment method are not collected from the client during onboarding.
+- Do not put that summary card back on the review step.
+
+## 2026-11-12 — Attendance follows every login linked by profile email
+
+A staff member can have a directory row and another login whose profile stores the same email. Attendance, the admin calendar, the monthly report, and the dashboard present count treat those logins as one person.
+
+- Match a log by its uid, employee id, or `YYYY-MM-DD_{id}` document id. Link the extra login from the profile email, not from `auth.users.email`.
+- When two logs exist for the same day, keep the one that is clocked in. Otherwise keep the one with a clock-out, or the longer worked time.
+- A saved Present day still shows on the employee calendar and the admin calendar when it is earlier than the join date. A day before the join date with no log stays blank.
+
+## 2026-11-14 — Company lunch window overrides only those hours
+
+Organization Settings can set one lunch window for every employee.
+
+- During that window, a clocked-in employee is switched to lunch. Work screenshots stay paused the same way they already pause for break and lunch. Tea break ends if it is still open when lunch starts.
+- When the window ends, that scheduled lunch ends. A lunch the employee started themselves still stays on until they end it.
+- Outside the window, break, lunch, and screenshots follow the existing rules. The lunch button can be hidden; the window still runs.

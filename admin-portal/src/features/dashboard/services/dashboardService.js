@@ -6,7 +6,13 @@ import {
   limit,
 } from 'firebase/firestore'
 import { db } from '../../../shared/services/firebaseService'
-import { isDirectoryVisible, recordMatchesEmployee } from '../../../../../shared/employees/employmentStatus.js'
+import {
+  attachProfileIdentities,
+  attendanceLogIdentityIds,
+  collectEmployeeIdentityIds,
+  isDirectoryVisible,
+  recordMatchesEmployee,
+} from '../../../../../shared/employees/employmentStatus.js'
 
 const emptySnap = { docs: [], empty: true, size: 0 }
 
@@ -322,19 +328,25 @@ export const computeOrgStats = (snaps) => {
   const leaveSnap = asSnap(snaps.leaveRequests)
   const ticketSnap = asSnap(snaps.helpDeskTickets)
 
-  const allEmployees = (empSnap.docs || []).map((d) => {
-    const emp = d.data() || {}
-    return { ...emp, id: d.id, uid: emp.uid || d.id }
+  const profiles = (asSnap(snaps.profiles).docs || []).map((d) => {
+    const data = d.data() || {}
+    return { ...data, id: d.id, uid: data.uid || d.id }
   })
+  const allEmployees = attachProfileIdentities(
+    (empSnap.docs || []).map((d) => {
+      const emp = d.data() || {}
+      return { ...emp, id: d.id, uid: emp.uid || d.id, employeeDocId: d.id }
+    }),
+    profiles
+  )
   const directoryEmployees = allEmployees.filter(isDirectoryVisible)
   const formerEmployees = allEmployees.filter((emp) => !isDirectoryVisible(emp))
   const totalEmployees = directoryEmployees.length
-  const employeeUids = new Set()
-  const employeeRecords = directoryEmployees
+  const ownerByIdentity = new Map()
   directoryEmployees.forEach((emp) => {
-    ;[emp.uid, emp.employeeId, emp.id].forEach((id) => {
-      const uid = String(id || '').trim()
-      if (uid) employeeUids.add(uid)
+    const owner = String(emp.employeeDocId || emp.id || emp.uid || '')
+    collectEmployeeIdentityIds(emp).forEach((id) => {
+      if (owner) ownerByIdentity.set(id, owner)
     })
   })
 
@@ -345,9 +357,9 @@ export const computeOrgStats = (snaps) => {
       if (uid) ids.add(uid)
     })
     const email = String(data?.employeeEmail || data?.email || '').trim().toLowerCase()
-    employeeRecords.forEach((emp) => {
+    directoryEmployees.forEach((emp) => {
       const empEmail = String(emp.email || '').trim().toLowerCase()
-      const empIds = [emp.uid, emp.employeeId, emp.id].map((id) => String(id || '').trim()).filter(Boolean)
+      const empIds = collectEmployeeIdentityIds(emp)
       const idHit = empIds.some((id) => ids.has(id))
       const emailHit = Boolean(email && empEmail && email === empEmail)
       if (!idHit && !emailHit) return
@@ -368,18 +380,22 @@ export const computeOrgStats = (snaps) => {
     matchEmployeeIds(data).forEach((id) => onLeaveUids.add(id))
   })
 
-  const presentUids = new Set()
+  const presentEmployees = new Set()
   attSnap.docs?.forEach((d) => {
-    const log = d.data()
+    const log = { id: d.id, ...(d.data() || {}) }
     const logYmd = toLocalYmd(log.date) || toLocalYmd(log.checkIn || log.timestamp || log.createdAt)
     if (logYmd !== todayYmd) return
     if (!isAttendancePresent(log)) return
-    const uid = String(log.uid || log.employeeId || '').trim()
-    if (!uid || !employeeUids.has(uid)) return
-    if (onLeaveUids.has(uid) && !isActivelyInOffice(log)) return
-    presentUids.add(uid)
+    const owner = attendanceLogIdentityIds(log)
+      .map((id) => ownerByIdentity.get(id))
+      .find(Boolean)
+    if (!owner) return
+    const leaveIds = matchEmployeeIds(log)
+    const onLeave = leaveIds.some((id) => onLeaveUids.has(id)) || onLeaveUids.has(owner)
+    if (onLeave && !isActivelyInOffice(log)) return
+    presentEmployees.add(owner)
   })
-  const presentCount = presentUids.size
+  const presentCount = presentEmployees.size
   const attendancePercent = totalEmployees > 0 ? ((presentCount / totalEmployees) * 100).toFixed(1) : '0.0'
 
   let openTickets = 0
@@ -535,6 +551,7 @@ const fetchDashboardSnapshots = async (force = false) => {
     projects,
     tasks,
     employees,
+    profiles,
     helpDeskTickets,
     attendanceLogs,
     leaveRequests,
@@ -545,6 +562,7 @@ const fetchDashboardSnapshots = async (force = false) => {
     getDocs(collection(db, 'projects')).catch(() => emptySnap),
     getDocs(collection(db, 'tasks')).catch(() => emptySnap),
     getDocs(collection(db, 'employees')).catch(() => emptySnap),
+    getDocs(collection(db, 'users')).catch(() => emptySnap),
     getDocs(collection(db, 'helpDeskTickets')).catch(() => emptySnap),
     getDocs(collection(db, 'attendanceLogs')).catch(() => emptySnap),
     getDocs(collection(db, 'leaveRequests')).catch(() => emptySnap),
@@ -557,6 +575,7 @@ const fetchDashboardSnapshots = async (force = false) => {
     projects,
     tasks,
     employees,
+    profiles,
     helpDeskTickets,
     attendanceLogs,
     leaveRequests,

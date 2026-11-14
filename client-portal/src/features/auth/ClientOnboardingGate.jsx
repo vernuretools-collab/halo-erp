@@ -10,13 +10,11 @@ import {
   ArrowLeft,
   RefreshCw,
   LogOut,
-  Building,
   Check,
   FileText,
   Lock,
   Sun,
   Moon,
-  CreditCard,
   Landmark,
   Download,
 } from 'lucide-react'
@@ -57,7 +55,6 @@ export const ClientOnboardingGate = () => {
 
   // Account profile — entered by the admin at account creation, shown read-only here
   const [companyName, setCompanyName] = useState('')
-  const [billingInfo, setBillingInfo] = useState(null)
   const [signerDefaults, setSignerDefaults] = useState(null)
 
   // Contract wording, which the admin may have tailored for this client
@@ -90,7 +87,6 @@ export const ClientOnboardingGate = () => {
         const loadedAgreements = data.agreements || {}
         setAgreements(loadedAgreements)
         setAgreementTexts(data.agreementTexts || null)
-        setBillingInfo(data.billingInfo || null)
         setSignerDefaults({
           signatoryName: data.displayName || userDoc?.displayName || '',
           signatoryTitle: data.signatoryTitle || '',
@@ -716,12 +712,11 @@ export const ClientOnboardingGate = () => {
             <div className="bg-surface/40 p-4 rounded-xl border border-border shadow-sm dark:shadow-none">
               <h2 className="text-base font-bold text-fg">Step 3: Review &amp; Submit</h2>
               <p className="text-xs text-muted mt-1">
-                Please confirm the details below. Your account profile was prepared by our team — if anything is
-                incorrect, contact your account manager before submitting.
+                Please confirm the signed agreements below before submitting.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div>
               {/* Signed Contracts Summary */}
               <Card className="p-5 space-y-3">
                 <div className="flex items-center gap-2 pb-2 border-b border-border">
@@ -756,43 +751,6 @@ export const ClientOnboardingGate = () => {
                     )
                   })}
                 </div>
-              </Card>
-
-              {/* Account Profile Summary (read-only, prepared by admin) */}
-              <Card className="p-5 space-y-3">
-                <div className="flex items-center justify-between pb-2 border-b border-border">
-                  <div className="flex items-center gap-2">
-                    <CreditCard className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                    <h3 className="font-bold text-xs uppercase tracking-wider text-fg">Account &amp; Billing</h3>
-                  </div>
-                  <Badge variant="neutral" className="text-[10px]">Prepared for you</Badge>
-                </div>
-
-                {billingInfo || companyName ? (
-                  <div className="space-y-2">
-                    {[
-                      { label: 'Company', value: companyName, icon: Building },
-                      { label: 'Billing Email', value: billingInfo?.billingEmail },
-                      { label: 'Billing Address', value: billingInfo?.billingAddress },
-                      { label: 'Tax ID / GST', value: billingInfo?.taxId },
-                      { label: 'Payment Method', value: billingInfo?.paymentMethod?.toUpperCase() },
-                    ].map((row) => (
-                      <div
-                        key={row.label}
-                        className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-border flex items-start justify-between gap-3 text-xs"
-                      >
-                        <span className="text-muted shrink-0">{row.label}</span>
-                        <span className="font-semibold text-fg text-right break-words">
-                          {row.value || <span className="text-slate-400 italic font-normal">Not provided</span>}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted italic py-2">
-                    Your account manager has not added billing details yet. You can still submit your signatures.
-                  </p>
-                )}
               </Card>
             </div>
 

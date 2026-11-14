@@ -355,7 +355,7 @@ export function buildEmployeeMonthlyReport({
     // Eligible for absence: on/after account start, not future, no full-day approved leave
     const canBeAbsent = !isFuture && !isBeforeJoin && !fullDayApprovedLeave
 
-    if (isOfficeDay && present && !isBeforeJoin) {
+    if (isOfficeDay && present) {
       presentDays += 1
       if (onDuty) onDutyDays += 1
       if (presentFromLog && clockInTime) {

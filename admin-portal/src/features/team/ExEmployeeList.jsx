@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
@@ -26,11 +26,17 @@ export const ExEmployeeList = () => {
   const [employees, setEmployees] = useState([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
+  const [searchParams] = useSearchParams()
+  const [search, setSearch] = useState(() => searchParams.get('q') || '')
+  const queryParam = searchParams.get('q')
   const [department, setDepartment] = useState('all')
   const [status, setStatus] = useState('all')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
+
+  useEffect(() => {
+    if (queryParam != null) setSearch(queryParam)
+  }, [queryParam])
 
   useEffect(() => {
     let cancelled = false
@@ -56,7 +62,13 @@ export const ExEmployeeList = () => {
 
   const filtered = employees.filter((employee) => {
     const query = search.trim().toLowerCase()
-    const haystack = [employeeDisplayName(employee), employeePublicId(employee), employeeDesignation(employee)]
+    const haystack = [
+      employeeDisplayName(employee),
+      employeePublicId(employee),
+      employeeDesignation(employee),
+      employeeDepartment(employee),
+      employee.email,
+    ]
       .join(' ')
       .toLowerCase()
     if (query && !haystack.includes(query)) return false

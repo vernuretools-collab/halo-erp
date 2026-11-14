@@ -15,7 +15,13 @@ import {
   deleteField,
 } from 'firebase/firestore'
 import { db } from '../../../shared/services/firebaseService'
-import { isDirectoryVisible } from '../../../../../shared/employees/employmentStatus.js'
+import {
+  attendanceLogMatchesEmployee,
+  attachProfileIdentities,
+  collectEmployeeIdentityIds,
+  isDirectoryVisible,
+  preferAttendanceLog,
+} from '../../../../../shared/employees/employmentStatus.js'
 import {
   buildEmployeeMonthlyReport,
   getMonthDateBounds,
@@ -37,42 +43,42 @@ import {
   toHolidayDateSet,
 } from './leaveEntitlementUtils'
 
-function collectEmployeeIdentityIds(rowId, data = {}) {
-  const ids = []
-  const seen = new Set()
-  const add = (value) => {
-    if (value == null || value === '' || typeof value === 'object') return
-    const key = String(value)
-    if (seen.has(key)) return
-    seen.add(key)
-    ids.push(key)
-  }
-  add(rowId)
-  add(data.uid)
-  add(data.id)
-  add(data.employeeId)
-  add(data.employeeDocId)
-  add(data.auth_id)
-  add(data.authId)
-  if (Array.isArray(data.identityIds)) data.identityIds.forEach(add)
-  return ids
-}
-
 /**
- * Fetch all employee profiles from Firestore /employees
+ * Fetch all employee profiles from Firestore /employees.
+ * Profile rows with the same profile email are extra login ids for that person.
  */
 export const getEmployees = async () => {
-  const snap = await getDocs(collection(db, 'employees'))
-  return snap.docs.map((d) => {
+  const [snap, profileSnap] = await Promise.all([
+    getDocs(collection(db, 'employees')),
+    getDocs(collection(db, 'users')).catch(() => ({ docs: [] })),
+  ])
+  const employees = snap.docs.map((d) => {
     const data = d.data() || {}
-    return {
+    const row = {
       uid: d.id,
       employeeId: d.id,
       ...data,
       employeeDocId: d.id,
-      identityIds: collectEmployeeIdentityIds(d.id, data),
     }
+    return { ...row, identityIds: collectEmployeeIdentityIds(row) }
   })
+  const profiles = (profileSnap.docs || []).map((d) => {
+    const data = d.data() || {}
+    return { ...data, id: d.id, uid: data.uid || d.id }
+  })
+  return attachProfileIdentities(employees, profiles)
+}
+
+function attendanceLogsForEmployee(logs, employee) {
+  const byDate = {}
+  ;(logs || []).forEach((log) => {
+    if (!attendanceLogMatchesEmployee(log, employee)) return
+    const datedId = String(log?.id || '').match(/^(\d{4}-\d{2}-\d{2})_/)
+    const date = String(log?.date || '').slice(0, 10) || (datedId ? datedId[1] : '')
+    if (!date) return
+    byDate[date] = preferAttendanceLog(byDate[date], log)
+  })
+  return Object.values(byDate)
 }
 
 /** Current staff only. Ex-employees and archived rows stay out of live team screens. */
@@ -1262,10 +1268,8 @@ export const generateEmployeeMonthlyReport = async (
 
   const [attendanceLogs, leaveRequests, timelineEntries, holidays, idleDays] = await Promise.all([
     preloaded?.attendanceLogs
-      ? Promise.resolve(preloaded.attendanceLogs.filter((l) => !l.uid || String(l.uid) === String(uid)))
-      : getAttendanceLogsForMonth(month).then((logs) =>
-          logs.filter((l) => !l.uid || String(l.uid) === String(uid))
-        ),
+      ? Promise.resolve(attendanceLogsForEmployee(preloaded.attendanceLogs, employee))
+      : getAttendanceLogsForMonth(month).then((logs) => attendanceLogsForEmployee(logs, employee)),
     preloaded?.leaveRequests
       ? Promise.resolve(preloaded.leaveRequests)
       : getLeaveRequestsForMonth(month),

@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTeamStore } from '../stores/teamStore'
 import { useUserStore } from '../../../stores/userStore'
+import {
+  fixedLunchEndMs,
+  getCachedEmployeeControls,
+  isWithinFixedLunch,
+  subscribeEmployeeControls,
+} from '../../../../../shared/employeeControls.js'
 import { getEmployees } from '../services/teamService'
 import { prepareClockInGate, LOCATION_GATE_ENABLED } from '../services/wfhAttendanceUtils'
 import { collectUserIdentityIds } from '../../projects/services/projectService'
@@ -29,10 +35,14 @@ export function useAttendanceClockActions({ listenForDesktopEvents = false } = {
   const toggleBreak = useTeamStore((s) => s.toggleBreak)
   const startLunch = useTeamStore((s) => s.startLunch)
   const finishLunch = useTeamStore((s) => s.finishLunch)
+  const lunchEndsAt = useTeamStore((s) => s.lunchEndsAt)
 
   const [clockBusy, setClockBusy] = useState(false)
   const [clockError, setClockError] = useState('')
   const [clockHint, setClockHint] = useState('')
+  const [employeeControls, setEmployeeControls] = useState(getCachedEmployeeControls)
+
+  useEffect(() => subscribeEmployeeControls(setEmployeeControls), [])
 
   useEffect(() => {
     if (identityIds.length) loadUserAttendance(identityIds)
@@ -134,14 +144,20 @@ export function useAttendanceClockActions({ listenForDesktopEvents = false } = {
   }, [toggleBreak, userMeta])
 
   const handleLunchStart = useCallback(() => {
+    const controls = getCachedEmployeeControls()
+    if (!controls.showLunchButton) return
     const state = useTeamStore.getState()
     if (!state.clockedIn || state.isOnLunch) return
-    startLunch(userMeta)
+    const endsAt =
+      controls.fixedLunchEnabled && isWithinFixedLunch(controls) ? fixedLunchEndMs(controls) : null
+    startLunch(userMeta, endsAt ? { endsAt } : {})
   }, [startLunch, userMeta])
 
   const handleLunchEnd = useCallback(() => {
     const state = useTeamStore.getState()
     if (!state.isOnLunch) return
+    const controls = getCachedEmployeeControls()
+    if (state.lunchEndsAt && controls.fixedLunchEnabled && isWithinFixedLunch(controls)) return
     finishLunch()
   }, [finishLunch])
 
@@ -193,6 +209,13 @@ export function useAttendanceClockActions({ listenForDesktopEvents = false } = {
     clockOut,
     handleClockToggle,
     handleBreakToggle,
+    showLunchButton: employeeControls.showLunchButton !== false,
+    scheduledLunchActive: Boolean(
+      isOnLunch &&
+        lunchEndsAt &&
+        employeeControls.fixedLunchEnabled &&
+        isWithinFixedLunch(employeeControls)
+    ),
     handleLunchStart,
     handleLunchEnd,
     handleDesktopAction,

@@ -27,14 +27,28 @@ function openLunchSeconds(state, nowMs = Date.now()) {
 
 function resolveStoredLunch(fields = {}) {
   const start = toEpochMs(fields.lunchStartTime)
+  const endsAt = toEpochMs(fields.lunchEndsAt)
   const accumulated = Number(fields.accumulatedLunchSeconds) || 0
   if (fields.isOnLunch && start) {
+    // Only a scheduled lunch window has an end time. A lunch the employee
+    // started themselves stays open until they end it.
+    if (endsAt && Date.now() >= endsAt) {
+      return {
+        isOnLunch: false,
+        lunchStartTime: null,
+        lunchEndsAt: null,
+        accumulatedLunchSeconds: accumulated + Math.max(0, Math.floor((endsAt - start) / 1000)),
+        lunchJustEnded: true,
+        lunchEndedAt: endsAt,
+      }
+    }
     return {
       isOnLunch: true,
       lunchStartTime: start,
-      lunchEndsAt: null,
+      lunchEndsAt: endsAt,
       accumulatedLunchSeconds: accumulated,
       lunchJustEnded: false,
+      lunchEndedAt: null,
     }
   }
   return {
@@ -43,6 +57,7 @@ function resolveStoredLunch(fields = {}) {
     lunchEndsAt: null,
     accumulatedLunchSeconds: accumulated,
     lunchJustEnded: false,
+    lunchEndedAt: null,
   }
 }
 
@@ -55,6 +70,7 @@ function applyResolvedLunch(fields = {}) {
     lunchEndsAt: lunch.lunchEndsAt,
     accumulatedLunchSeconds: lunch.accumulatedLunchSeconds,
     lunchJustEnded: lunch.lunchJustEnded,
+    lunchEndedAt: lunch.lunchEndedAt,
   }
 }
 
@@ -578,11 +594,11 @@ export const useTeamStore = create(
 
           const reconciled = reconcilePauseState(todayState)
           const resolved = applyResolvedLunch(reconciled)
-          const { lunchJustEnded, ...resolvedState } = resolved
+          const { lunchJustEnded, lunchEndedAt, ...resolvedState } = resolved
           if (lunchJustEnded && uid) {
             const openStart = openPause(resolvedState.todayShiftLogs, 'lunch_start', 'lunch_end')
             if (openStart) {
-              const endMs = Date.now()
+              const endMs = lunchEndedAt || Date.now()
               resolvedState.todayShiftLogs = withShiftLog(resolvedState.todayShiftLogs, {
                 id: `log_${endMs}`,
                 type: 'lunch_end',
@@ -1144,12 +1160,14 @@ export const useTeamStore = create(
         }
       },
 
-      startLunch: (userMeta = {}) => {
+      startLunch: (userMeta = {}, options = {}) => {
         const meta = resolveUserMeta(userMeta)
         if (get().isOnBreak) get().toggleBreak(meta)
         const state = get()
         if (!state.clockedIn || state.isOnLunch) return
         const lunchStartMs = Date.now()
+        const requestedEnd = Number(options.endsAt)
+        const endsAt = requestedEnd > lunchStartMs ? requestedEnd : null
         const timeStr = canonicalTimeFromDate(new Date(lunchStartMs))
         const newLog = {
           id: `log_${lunchStartMs}`,
@@ -1162,7 +1180,7 @@ export const useTeamStore = create(
         set({
           isOnLunch: true,
           lunchStartTime: lunchStartMs,
-          lunchEndsAt: null,
+          lunchEndsAt: endsAt,
           todayShiftLogs: updatedLogs,
         })
         if (meta.uid) {
@@ -1171,13 +1189,13 @@ export const useTeamStore = create(
             departmentName: meta.departmentName || '',
             isOnLunch: true,
             lunchStartTime: lunchStartMs,
-            lunchEndsAt: null,
+            lunchEndsAt: endsAt,
             accumulatedLunchSeconds: state.accumulatedLunchSeconds || 0,
             todayShiftLogs: updatedLogs,
             shiftLogs: updatedLogs,
           })
         }
-        armLunchTimer()
+        if (endsAt) armLunchTimer()
       },
 
       finishLunch: () => {
@@ -1284,7 +1302,7 @@ export const useTeamStore = create(
         } else {
           Object.assign(state, reconcilePauseState(state))
         }
-        armLunchTimer()
+        queueMicrotask(() => armLunchTimer())
       },
     }
   )
@@ -1297,6 +1315,18 @@ disarmLunchTimer = () => {
 }
 armLunchTimer = () => {
   disarmLunchTimer()
+  const { isOnLunch, lunchEndsAt, finishLunch } = useTeamStore.getState()
+  const endsAt = Number(lunchEndsAt)
+  if (!isOnLunch || !endsAt) return
+  const remaining = endsAt - Date.now()
+  if (remaining <= 0) {
+    finishLunch()
+    return
+  }
+  lunchEndTimer = setTimeout(() => {
+    lunchEndTimer = null
+    useTeamStore.getState().finishLunch()
+  }, remaining)
 }
 
 attachTeamStoreCrossWindowSync(useTeamStore)

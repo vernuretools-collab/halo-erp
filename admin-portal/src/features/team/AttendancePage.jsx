@@ -26,7 +26,11 @@ import {
   setDoc,
 } from 'firebase/firestore'
 import { mergeShiftLogs, openPause, pairedShiftLogs } from '../../../../shared/shiftLogs.js'
-import { isDirectoryVisible } from '../../../../shared/employees/employmentStatus.js'
+import {
+  attendanceLogMatchesEmployee,
+  isDirectoryVisible,
+  preferAttendanceLog,
+} from '../../../../shared/employees/employmentStatus.js'
 import {
   Users,
   CheckCircle2,
@@ -714,17 +718,17 @@ export const AttendancePage = () => {
 
   // Calculate real employee-wise attendance stats for all employees
   const employeeStatsList = useMemo(() => {
-    const mapByUid = {}
-    allLogs.forEach((log) => {
-      if (log.uid) {
-        if (!mapByUid[log.uid]) mapByUid[log.uid] = []
-        mapByUid[log.uid].push(log)
-      }
-    })
-
     return employees.filter(isTeamEmployee).map((emp) => {
       const uId = emp.uid || emp.employeeId || emp.id
-      const uLogs = mapByUid[uId] || []
+      const byDate = {}
+      allLogs.forEach((log) => {
+        if (!attendanceLogMatchesEmployee(log, emp)) return
+        const datedId = String(log.id || '').match(/^(\d{4}-\d{2}-\d{2})_/)
+        const date = String(log.date || '').slice(0, 10) || (datedId ? datedId[1] : '')
+        if (!date) return
+        byDate[date] = preferAttendanceLog(byDate[date], log)
+      })
+      const uLogs = Object.values(byDate)
       const stats = computeRealAttendanceStats(uLogs)
       return {
         uid: uId,
@@ -775,9 +779,13 @@ export const AttendancePage = () => {
     const today = todayStr()
     const isToday = selectedDate === today
 
-    const logByUid = {}
+    const logByEmployee = new Map()
     attendanceLogs.forEach((log) => {
-      if (log.uid) logByUid[log.uid] = log
+      employees.filter(isTeamEmployee).forEach((emp) => {
+        if (!attendanceLogMatchesEmployee(log, emp)) return
+        const key = emp.employeeDocId || emp.uid || emp.id
+        logByEmployee.set(key, preferAttendanceLog(logByEmployee.get(key), log))
+      })
     })
 
     const buildRowFromLog = (log, emp = {}) => {
@@ -872,7 +880,8 @@ export const AttendancePage = () => {
 
     // Only team directory employees — skip admin / non-employee attendance logs
     return employees.filter(isTeamEmployee).map((emp) => {
-      const log = logByUid[emp.uid]
+      const key = emp.employeeDocId || emp.uid || emp.id
+      const log = logByEmployee.get(key)
       return log ? buildRowFromLog(log, emp) : emptyRow(emp)
     })
   }, [attendanceLogs, employees, selectedDate])

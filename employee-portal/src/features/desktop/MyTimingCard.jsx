@@ -124,6 +124,8 @@ export const MyTimingCard = ({
     handleBreakToggle,
     handleLunchStart,
     handleLunchEnd,
+    showLunchButton,
+    scheduledLunchActive,
   } = useAttendanceClockActions({ listenForDesktopEvents })
 
   const clockInTime = useTeamStore((s) => s.clockInTime)
@@ -320,12 +322,13 @@ export const MyTimingCard = ({
           <PrimaryIcon className={`w-3.5 h-3.5 ${primaryAction.spin ? 'animate-spin' : ''}`} />
           {primaryAction.label}
         </Button>
-        {clockedIn ? (
+        {clockedIn && (showLunchButton || isOnLunch) ? (
           <Button
             size="sm"
             variant={isOnLunch ? 'primary' : 'outline'}
-            disabled={clockBusy}
+            disabled={clockBusy || scheduledLunchActive}
             onClick={() => {
+              if (scheduledLunchActive) return
               if (isOnLunch) handleLunchEnd()
               else setConfirmKind('lunch')
             }}
@@ -336,7 +339,7 @@ export const MyTimingCard = ({
             }`}
           >
             <Utensils className="w-3.5 h-3.5" />
-            {isOnLunch ? 'END LUNCH' : 'LUNCH'}
+            {scheduledLunchActive ? 'ON LUNCH' : isOnLunch ? 'END LUNCH' : 'LUNCH'}
           </Button>
         ) : null}
         <Button

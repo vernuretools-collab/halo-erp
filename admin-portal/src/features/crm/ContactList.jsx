@@ -45,7 +45,6 @@ export const ContactList = () => {
     username: '',
     password: '',
     phone: '',
-    signatoryTitle: '',
   }
   const [form, setForm] = useState(EMPTY_FORM)
 
@@ -137,7 +136,6 @@ export const ContactList = () => {
         taxId: '',
         paymentMethod: 'ach',
         signerPhone: draft.phone.trim(),
-        signatoryTitle: draft.signatoryTitle.trim(),
         dealName: '',
       })
 
@@ -465,7 +463,7 @@ export const ContactList = () => {
                   <Input
                     label="Client Name *"
                     type="text"
-                    placeholder="e.g. Vivek Anna"
+                    placeholder="Client name"
                     autoComplete="off"
                     value={form.username}
                     onChange={setField('username')}
@@ -473,18 +471,11 @@ export const ContactList = () => {
                   />
                   <Input
                     label="Phone Number"
-                    placeholder="+1 (555) 019-2834"
+                    placeholder="Enter mobile number"
                     value={form.phone}
                     onChange={setField('phone')}
                   />
                 </div>
-
-                <Input
-                  label="Signatory Designation"
-                  placeholder="e.g. Director of Operations"
-                  value={form.signatoryTitle}
-                  onChange={setField('signatoryTitle')}
-                />
 
                 <Input
                     label="Set Account Password *"

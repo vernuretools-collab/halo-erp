@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Bell, Search, User, Command, LogOut, Sun, Moon, Download, Loader2 } from 'lucide-react'
+import { Bell, User, LogOut, Sun, Moon, Download, Loader2 } from 'lucide-react'
+import { AdminSearch } from './AdminSearch'
 import { exportCurrentPage } from './exportPageData'
 import { useUserStore } from '../../stores/userStore'
 import { useOrgStore } from '../../stores/orgStore'
@@ -33,20 +34,10 @@ export const TopBar = () => {
   }
 
   return (
-    <header className="h-16 bg-surface/90 backdrop-blur-md border-b border-border px-6 flex items-center justify-between sticky top-0 z-30 transition-colors">
+    <header className="h-16 overflow-visible bg-surface/90 backdrop-blur-md border-b border-border px-6 flex items-center justify-between sticky top-0 z-30 transition-colors">
       {/* Global Search Bar */}
-      <div className="flex items-center gap-3 w-80">
-        <div className="relative w-full">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-          <input
-            type="text"
-            placeholder="Search leads, projects, invoices... (Cmd+K)"
-            className="w-full bg-surface border border-border text-xs text-fg placeholder-muted rounded-xl pl-9 pr-8 py-2 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 transition-colors"
-          />
-          <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5 text-[10px] text-muted bg-chrome px-1.5 py-0.5 rounded border border-border">
-            <Command className="w-3 h-3" /> K
-          </div>
-        </div>
+      <div className="flex items-center gap-3 w-full max-w-md">
+        <AdminSearch />
       </div>
 
       {/* Right Controls */}
@@ -55,7 +46,7 @@ export const TopBar = () => {
           type="button"
           onClick={handleExport}
           disabled={exporting}
-          title={exportError || 'Download this page as CSV'}
+          title={exportError || 'Download this page'}
           className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl bg-accent text-white text-xs font-semibold hover:opacity-90 disabled:opacity-60 border border-accent cursor-pointer"
         >
           {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}

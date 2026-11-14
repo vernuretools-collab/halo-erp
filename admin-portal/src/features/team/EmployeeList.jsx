@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
@@ -64,7 +64,9 @@ export const EmployeeList = () => {
   const { user, userDoc } = useUserStore()
   const actorName = userDoc?.displayName || user?.email || 'Admin'
 
-  const [searchQuery, setSearchQuery] = useState('')
+  const [searchParams] = useSearchParams()
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('q') || '')
+  const queryParam = searchParams.get('q')
   const [selectedDept, setSelectedDept] = useState('all')
   const [selectedRole, setSelectedRole] = useState('all')
   const [accountType, setAccountType] = useState('employee') // 'employee' or 'admin'
@@ -156,13 +158,25 @@ export const EmployeeList = () => {
     ])
   )
 
+  useEffect(() => {
+    if (queryParam != null) setSearchQuery(queryParam)
+  }, [queryParam])
+
   const filtered = directoryEmployees.filter((emp) => {
+    const q = searchQuery.trim().toLowerCase()
     const matchesSearch =
-      !searchQuery ||
-      (emp.displayName && emp.displayName.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (emp.roleName && emp.roleName.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (emp.role && emp.role.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (emp.email && emp.email.toLowerCase().includes(searchQuery.toLowerCase()))
+      !q ||
+      [
+        emp.displayName,
+        emp.email,
+        emp.departmentName,
+        emp.department,
+        emp.roleName,
+        emp.role,
+        emp.designation,
+        emp.employeeCode,
+        emp.staffId,
+      ].some((value) => value && String(value).toLowerCase().includes(q))
 
     const empDept = emp.departmentName || emp.department || ''
     const matchesDept = selectedDept === 'all' || empDept.trim().toLowerCase() === selectedDept.trim().toLowerCase()

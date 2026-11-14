@@ -11,7 +11,7 @@ export const DEFAULT_EMPLOYEE_CONTROLS = {
 const controlsRef = () => doc(db, 'companySettings', 'employeeControls')
 
 function clockMinutes(value) {
-  const match = /^(\d{2}):(\d{2})$/.exec(String(value || ''))
+  const match = /^(\d{1,2}):(\d{2})/.exec(String(value || '').trim())
   if (!match) return null
   const hours = Number(match[1])
   const minutes = Number(match[2])
@@ -19,13 +19,17 @@ function clockMinutes(value) {
   return hours * 60 + minutes
 }
 
+function hmString(value, fallback) {
+  const minutes = clockMinutes(value)
+  if (minutes == null) return fallback
+  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
+}
+
 export function normalizeEmployeeControls(raw = {}) {
-  const lunchStart = clockMinutes(raw.lunchStart) == null ? DEFAULT_EMPLOYEE_CONTROLS.lunchStart : raw.lunchStart
-  const lunchEnd = clockMinutes(raw.lunchEnd) == null ? DEFAULT_EMPLOYEE_CONTROLS.lunchEnd : raw.lunchEnd
   return {
     fixedLunchEnabled: Boolean(raw.fixedLunchEnabled),
-    lunchStart,
-    lunchEnd,
+    lunchStart: hmString(raw.lunchStart, DEFAULT_EMPLOYEE_CONTROLS.lunchStart),
+    lunchEnd: hmString(raw.lunchEnd, DEFAULT_EMPLOYEE_CONTROLS.lunchEnd),
     showLunchButton: raw.showLunchButton !== false,
   }
 }
@@ -76,6 +80,13 @@ export async function getEmployeeControls() {
 export async function saveEmployeeControls(payload = {}) {
   if (!db) throw new Error('Supabase is not configured')
   const next = normalizeEmployeeControls(payload)
+  if (next.fixedLunchEnabled) {
+    const start = clockMinutes(next.lunchStart)
+    const end = clockMinutes(next.lunchEnd)
+    if (start == null || end == null || end <= start) {
+      throw new Error('Lunch end must be later than lunch start on the same day.')
+    }
+  }
   await setDoc(controlsRef(), { ...next, updatedAt: new Date().toISOString() }, { merge: true })
   publish(next)
   return next

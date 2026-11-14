@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useSearchParams } from 'react-router-dom'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Card } from '../../components/ui/Card'
 import { Badge } from '../../components/ui/Badge'
@@ -45,7 +45,9 @@ export const InvoiceList = () => {
 
   const { projects } = useProjectStore()
 
-  const [searchQuery, setSearchQuery] = useState('')
+  const [searchParams] = useSearchParams()
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('q') || '')
+  const queryParam = searchParams.get('q')
   const [showAddModal, setShowAddModal] = useState(false)
   const [selectedInvoice, setSelectedInvoice] = useState(null)
   const [deleteConfirmInvoice, setDeleteConfirmInvoice] = useState(null)
@@ -60,6 +62,10 @@ export const InvoiceList = () => {
   const [lineItems, setLineItems] = useState([
     { description: 'Professional Consulting Services', quantity: 1, unitPrice: 5000 },
   ])
+
+  useEffect(() => {
+    if (queryParam != null) setSearchQuery(queryParam)
+  }, [queryParam])
 
   useEffect(() => {
     let isMounted = true
