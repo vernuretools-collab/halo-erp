@@ -2,6 +2,7 @@ import { httpsCallable } from 'firebase/functions'
 import { functions } from '../../../shared/services/firebaseService'
 import { buildAssistantSnapshot, focusSnapshot } from './snapshotBuilder'
 import { answerOperationalQuestion } from './operationalReports'
+import { getWorkingHours } from '../../../../../shared/workingHours.js'
 
 const askFn = httpsCallable(functions, 'askAdminAssistant', { timeout: 45000 })
 const SNAPSHOT_TTL_MS = 60_000
@@ -16,6 +17,7 @@ export async function askAdminAssistant(message, history = []) {
   if (!snapshotCache.snapshot || Date.now() - snapshotCache.at > SNAPSHOT_TTL_MS) {
     snapshotCache = { at: Date.now(), snapshot: await buildAssistantSnapshot() }
   }
+  await getWorkingHours().catch(() => {})
   const local = answerOperationalQuestion(snapshotCache.snapshot, message, compactHistory)
   if (local) return local
   const snapshot = focusSnapshot(snapshotCache.snapshot, message)

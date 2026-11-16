@@ -25,6 +25,7 @@ import {
   Send,
   StickyNote,
   ListChecks,
+  Clapperboard,
 } from 'lucide-react'
 import haloLogo from '../../assets/halologo.png'
 import { useUIStore } from '../../stores/uiStore'
@@ -52,6 +53,7 @@ const NAV_GROUPS = [
       { name: 'Work Timeline', path: '/timeline', icon: CalendarDays },
       { name: 'Client Documents', path: '/client-documents', icon: Send },
       { name: 'Notes', path: '/project-notes', icon: StickyNote },
+      { name: 'QC', path: '/qc', icon: Clapperboard },
       { name: 'Client Support', path: '/helpdesk', icon: LifeBuoy },
     ],
   },

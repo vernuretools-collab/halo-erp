@@ -352,7 +352,16 @@ export const useProjectStore = create(
           projects: [payload, ...state.projects],
         }))
 
-        await createProjectInDb(payload)
+        try {
+          await createProjectInDb(payload)
+        } catch (err) {
+          set((state) => ({
+            projects: state.projects.filter(
+              (p) => p.projectId !== payload.projectId && p.id !== payload.projectId
+            ),
+          }))
+          throw err
+        }
       },
 
       updateProject: async (projectId, updates) => {

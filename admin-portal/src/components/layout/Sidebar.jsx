@@ -33,6 +33,7 @@ import {
   Trash2,
   ListChecks,
   UserX,
+  Clapperboard,
 } from 'lucide-react'
 import haloLogo from '../../assets/halologo.png'
 import { useUIStore } from '../../stores/uiStore'
@@ -70,6 +71,7 @@ const EMPLOYEE_GROUPS = [
     items: [
       { name: 'Sprint Task Board', path: '/projects/tasks', icon: Briefcase },
       { name: 'Time Tracking', path: '/projects/time', icon: Clock },
+      { name: 'QC', path: '/qc', icon: Clapperboard },
     ],
   },
   {
@@ -108,7 +110,7 @@ const ADMIN_GROUPS = [
     items: [
       { name: 'CRM Pipeline', path: '/crm/pipeline', icon: Users },
       { name: 'Leads', path: '/crm/leads', icon: UserCheck },
-      { name: 'Contacts', path: '/crm/contacts', icon: User },
+      { name: 'Client', path: '/crm/contacts', icon: User },
     ],
   },
   {
@@ -119,6 +121,7 @@ const ADMIN_GROUPS = [
       { name: 'Project List', path: '/projects/list', icon: FolderKanban },
       { name: 'Task Board', path: '/projects/tasks', icon: Briefcase },
       { name: 'Time Tracker', path: '/projects/time', icon: Clock },
+      { name: 'QC', path: '/qc', icon: Clapperboard },
       { name: 'Trash', path: '/projects/trash', icon: Trash2 },
     ],
   },

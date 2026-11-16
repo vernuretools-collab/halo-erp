@@ -50,14 +50,33 @@ const formatHoursAsHrsMins = (hours) => {
   return hPart || mPart
 }
 
-// Default fallback client list
-const defaultClients = [
-  { id: 'cli_acme', name: 'Acme Corp' },
-  { id: 'cli_techcorp', name: 'TechCorp Global' },
-  { id: 'cli_nexus', name: 'Nexus Systems' },
-  { id: 'cli_globallog', name: 'Global Logistics' },
-  { id: 'cli_apex', name: 'Apex Enterprises' },
-]
+const clientRecordName = (data) =>
+  String(data.companyName || data.displayName || data.name || data.email || 'Client').trim() || 'Client'
+
+/** One option per client profile. Shared company names get the person or email in the label. */
+const buildClientOptions = (docs) => {
+  const rows = docs.map((d) => {
+    const data = d.data() || {}
+    const name = clientRecordName(data)
+    const person = String(data.displayName || data.name || '').trim()
+    const email = String(data.email || '').trim()
+    return { id: d.id, name, person, email }
+  })
+  const nameCounts = new Map()
+  rows.forEach((row) => {
+    const key = row.name.toLowerCase()
+    nameCounts.set(key, (nameCounts.get(key) || 0) + 1)
+  })
+  return rows
+    .map((row) => {
+      const shared = (nameCounts.get(row.name.toLowerCase()) || 0) > 1
+      const extra =
+        row.person && row.person.toLowerCase() !== row.name.toLowerCase() ? row.person : row.email
+      const label = shared && extra ? `${row.name} (${extra})` : row.name
+      return { ...row, label }
+    })
+    .sort((a, b) => a.label.localeCompare(b.label))
+}
 
 export const ProjectList = () => {
   const navigate = useNavigate()
@@ -97,9 +116,11 @@ export const ProjectList = () => {
   const [description, setDescription] = useState('')
   const [estimatedDate, setEstimatedDate] = useState('')
   const [createError, setCreateError] = useState('')
+  const [createSubmitting, setCreateSubmitting] = useState(false)
 
   // Client dropdown data
   const [clients, setClients] = useState([])
+  const [clientsLoadError, setClientsLoadError] = useState('')
   const [dropdownLoading, setDropdownLoading] = useState(false)
 
   // Manage Project Members Modal state
@@ -134,33 +155,17 @@ export const ProjectList = () => {
       try {
         const q = query(collection(db, 'users'), where('role', '==', 'client'))
         const snap = await getDocs(q)
-        const clientCompaniesMap = new Map()
-
-        snap.docs.forEach((d) => {
-          const data = d.data()
-          const company = data.companyName || data.displayName || data.name
-          if (company) {
-            clientCompaniesMap.set(company.trim().toLowerCase(), {
-              id: d.id,
-              name: company,
-            })
-          }
-        })
-
-        const fetchedList = Array.from(clientCompaniesMap.values())
-        const finalClients = fetchedList.length > 0 ? fetchedList : defaultClients
-        setClients(finalClients)
-        if (finalClients.length > 0 && showAddModal && !selectedClientId) {
-          setSelectedClientId(finalClients[0].id)
-          setClientName(finalClients[0].name)
+        const fetchedList = buildClientOptions(snap.docs)
+        setClients(fetchedList)
+        setClientsLoadError(fetchedList.length > 0 ? '' : 'No clients registered.')
+        if (fetchedList.length > 0 && showAddModal && !selectedClientId) {
+          setSelectedClientId(fetchedList[0].id)
+          setClientName(fetchedList[0].name)
         }
       } catch (err) {
         console.error('Error fetching clients from Firestore:', err)
-        setClients(defaultClients)
-        if (showAddModal && !selectedClientId) {
-          setSelectedClientId(defaultClients[0].id)
-          setClientName(defaultClients[0].name)
-        }
+        setClients([])
+        setClientsLoadError('Could not load clients.')
       } finally {
         setDropdownLoading(false)
       }
@@ -315,9 +320,9 @@ export const ProjectList = () => {
     0
   )
 
-  const handleCreateProject = (e) => {
+  const handleCreateProject = async (e) => {
     e.preventDefault()
-    if (!projName.trim()) return
+    if (!projName.trim() || createSubmitting) return
 
     // Without a resolved id the project has no owner, so nobody (including the
     // creator) would match it once the row is written.
@@ -338,30 +343,36 @@ export const ProjectList = () => {
       role: userRole,
     }
 
-    addProject({
-      name: projName,
-      clientId: selectedClientId,
-      clientName: effectiveClientName,
-      budget: 0,
-      description,
-      estimatedDate: estimatedDate || null,
-      startDate: estimatedDate || null,
-      ownerName: currentDisplayName,
-      employeeId: currentUserId,
-      assignedEmployeeIds: [currentUserId],
-      createdBy: currentUserId,
-      createdByEmail: currentUserEmail || null,
-      createdByName: currentDisplayName,
-      createdByRole: 'employee',
-      members: [creatorMember],
-    })
-
-    setProjName('')
-    setClientName('')
-    setSelectedClientId('')
-    setDescription('')
-    setEstimatedDate('')
-    setShowAddModal(false)
+    setCreateSubmitting(true)
+    try {
+      await addProject({
+        name: projName,
+        clientId: selectedClientId,
+        clientName: effectiveClientName,
+        budget: 0,
+        description,
+        estimatedDate: estimatedDate || null,
+        startDate: estimatedDate || null,
+        ownerName: currentDisplayName,
+        employeeId: currentUserId,
+        assignedEmployeeIds: [currentUserId],
+        createdBy: currentUserId,
+        createdByEmail: currentUserEmail || null,
+        createdByName: currentDisplayName,
+        createdByRole: 'employee',
+        members: [creatorMember],
+      })
+      setProjName('')
+      setClientName('')
+      setSelectedClientId('')
+      setDescription('')
+      setEstimatedDate('')
+      setShowAddModal(false)
+    } catch (err) {
+      setCreateError(err?.message || 'Could not create the project.')
+    } finally {
+      setCreateSubmitting(false)
+    }
   }
 
   const handleProjectClick = (proj) => {
@@ -942,10 +953,13 @@ export const ProjectList = () => {
                   >
                     {clients.map((c) => (
                       <option key={c.id} value={c.id} className="bg-surface">
-                        {c.name}
+                        {c.label}
                       </option>
                     ))}
                   </select>
+                )}
+                {clientsLoadError && (
+                  <p className="text-xs font-semibold text-rose-500">{clientsLoadError}</p>
                 )}
               </div>
 
@@ -972,11 +986,11 @@ export const ProjectList = () => {
               )}
 
               <div className="flex gap-3 pt-2">
-                <Button type="button" variant="secondary" onClick={() => setShowAddModal(false)} className="w-1/3">
+                <Button type="button" variant="secondary" onClick={() => setShowAddModal(false)} className="w-1/3" disabled={createSubmitting}>
                   Cancel
                 </Button>
-                <Button type="submit" variant="primary" className="w-2/3" icon={Plus}>
-                  Create Project
+                <Button type="submit" variant="primary" className="w-2/3" icon={Plus} disabled={createSubmitting}>
+                  {createSubmitting ? 'Creating...' : 'Create Project'}
                 </Button>
               </div>
             </form>
@@ -1031,10 +1045,13 @@ export const ProjectList = () => {
                     <option value="">{editClientName || 'Select client'}</option>
                     {clients.map((c) => (
                       <option key={c.id} value={c.id} className="bg-surface">
-                        {c.name}
+                        {c.label}
                       </option>
                     ))}
                   </select>
+                  {clientsLoadError && (
+                    <p className="text-xs font-semibold text-rose-500">{clientsLoadError}</p>
+                  )}
                 </div>
 
                 {/* Status Dropdown */}

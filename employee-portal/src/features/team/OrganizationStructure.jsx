@@ -5,7 +5,8 @@ import { db } from '../../shared/services/firebaseService'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Card } from '../../components/ui/Card'
 import { Badge } from '../../components/ui/Badge'
-import { getEmployees } from './services/teamService'
+import { getEmployeeRows } from './services/teamService'
+import { isDirectoryVisible, isFormerEmployee } from '../../../../shared/employees/employmentStatus.js'
 import { TeamSubNav } from './components/TeamSubNav'
 import haloLogo from '../../assets/halologo.png'
 
@@ -48,6 +49,11 @@ const TEAMS = [
     count: 'text-orange-700 dark:text-orange-300',
   },
   {
+    name: 'Sales',
+    pill: 'border-emerald-400/60 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300',
+    count: 'text-emerald-700 dark:text-emerald-300',
+  },
+  {
     name: 'Editing',
     pill: 'border-fuchsia-400/60 bg-fuchsia-500/10 text-fuchsia-800 dark:text-fuchsia-300',
     count: 'text-fuchsia-700 dark:text-fuchsia-300',
@@ -57,6 +63,16 @@ const TEAMS = [
     pill: 'border-indigo-400/60 bg-indigo-500/10 text-indigo-800 dark:text-indigo-300',
     count: 'text-indigo-700 dark:text-indigo-300',
   },
+]
+
+const TEAM_RULES = [
+  { name: 'Graphic Design', test: /visual|graphic|design|alchemist/i },
+  { name: 'SEO & Content', test: /content architect|seo|content writer/i },
+  { name: 'Editing', test: /editor|editing|storyteller/i },
+  { name: 'Social Media', test: /social|brand voice/i },
+  { name: 'Performance Marketing', test: /growth|performance|marketing/i },
+  { name: 'Outreach', test: /outreach|relations|business development/i },
+  { name: 'Web Development', test: /developer|engineer|wordpress|software|automation|web/i },
 ]
 
 function normalizeLabel(value) {
@@ -85,21 +101,11 @@ function memberCountLabel(count) {
 }
 
 function personHaystack(emp) {
-  return [emp.displayName, emp.name, emp.roleName, emp.email, emp.departmentName, emp.department]
+  return [emp.displayName, emp.name, emp.roleName, emp.role, emp.email, emp.departmentName, emp.department]
     .filter(Boolean)
     .join(' ')
     .toLowerCase()
 }
-
-const TEAM_RULES = [
-  { name: 'Graphic Design', test: /visual|graphic|design|alchemist/i },
-  { name: 'SEO & Content', test: /content architect|seo|content writer/i },
-  { name: 'Editing', test: /editor|editing|storyteller/i },
-  { name: 'Social Media', test: /social|brand voice/i },
-  { name: 'Performance Marketing', test: /growth|performance|marketing/i },
-  { name: 'Outreach', test: /outreach|relations|business development/i },
-  { name: 'Web Development', test: /developer|engineer|wordpress|software|automation|web/i },
-]
 
 function teamNameForEmployee(emp) {
   const exact = normalizeLabel(emp.departmentName || emp.department)
@@ -115,11 +121,13 @@ function cleanText(value) {
 
 export const OrganizationStructure = () => {
   const [employees, setEmployees] = useState([])
+  const [allEmployees, setAllEmployees] = useState([])
   const [loading, setLoading] = useState(true)
   const [listError, setListError] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTeam, setSelectedTeam] = useState('')
   const [todayAttendanceMap, setTodayAttendanceMap] = useState({})
+  const [attendanceReady, setAttendanceReady] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -127,12 +135,16 @@ export const OrganizationStructure = () => {
       setLoading(true)
       setListError('')
       try {
-        const emps = await getEmployees()
-        if (!cancelled) setEmployees(emps)
+        const rows = await getEmployeeRows()
+        if (!cancelled) {
+          setAllEmployees(rows)
+          setEmployees(rows.filter(isDirectoryVisible))
+        }
       } catch (err) {
         console.error('Error loading organization chart:', err)
         if (!cancelled) {
           setListError(err?.message || 'Could not load team members. Sign in again and retry.')
+          setAllEmployees([])
           setEmployees([])
         }
       } finally {
@@ -164,29 +176,38 @@ export const OrganizationStructure = () => {
           if (data.uid) map[data.uid] = isPresent
         })
         setTodayAttendanceMap(map)
+        setAttendanceReady(true)
       },
       (err) => {
         console.error('Error fetching today attendance map:', err)
+        setAttendanceReady(true)
       }
     )
     return () => unsub()
   }, [])
 
-  const isEmpPresent = (emp) => {
+  const presenceFor = (emp) => {
+    if (!attendanceReady) return null
     const empUid = employeeId(emp)
     if (empUid && todayAttendanceMap[empUid] !== undefined) return todayAttendanceMap[empUid]
     return false
   }
 
   const leaders = useMemo(() => {
-    return LEADERS.map((leader) => {
-      const record = employees.find((emp) => {
+    return LEADERS.flatMap((leader) => {
+      const record = allEmployees.find((emp) => {
         const name = `${emp.displayName || ''} ${emp.name || ''}`.toLowerCase()
         return name.includes(leader.match)
       })
-      return { ...leader, record, name: displayName(record, leader.fallbackName) }
+      if (record && isFormerEmployee(record)) return []
+      const active = record && isDirectoryVisible(record) ? record : null
+      if (record && !active) return []
+      return [{ ...leader, record: active, name: displayName(active, leader.fallbackName) }]
     })
-  }, [employees])
+  }, [allEmployees])
+
+  const topLeaders = leaders.filter((leader) => leader.key !== 'vedhika')
+  const featuredLeader = leaders.find((leader) => leader.key === 'vedhika') || null
 
   const leaderIds = useMemo(() => {
     return new Set(leaders.map((leader) => employeeId(leader.record)).filter(Boolean))
@@ -198,8 +219,7 @@ export const OrganizationStructure = () => {
     employees.forEach((emp) => {
       const id = employeeId(emp)
       if (id && leaderIds.has(id)) return
-      const key = normalizeLabel(teamNameForEmployee(emp))
-      const bucket = byKey.get(key)
+      const bucket = byKey.get(normalizeLabel(teamNameForEmployee(emp)))
       if (bucket) bucket.members.push(emp)
     })
     return buckets
@@ -288,29 +308,41 @@ export const OrganizationStructure = () => {
           </div>
 
           <div className="mt-8 mx-auto w-full max-w-3xl">
-            <div className="grid grid-cols-2 gap-6 sm:gap-10">
-              {leaders.slice(0, 2).map((leader) => (
-                <div key={leader.key} className="flex justify-center">
-                  <LeaderCard leader={leader} />
-                </div>
-              ))}
-            </div>
+            {topLeaders.length > 0 && (
+              <div className={topLeaders.length > 1 ? 'grid grid-cols-2 gap-6 sm:gap-10' : 'flex justify-center'}>
+                {topLeaders.map((leader) => (
+                  <div key={leader.key} className="flex justify-center">
+                    <LeaderCard leader={leader} />
+                  </div>
+                ))}
+              </div>
+            )}
 
-            <svg
-              viewBox="0 0 100 28"
-              className="block h-10 w-full text-slate-400 dark:text-slate-500"
-              preserveAspectRatio="none"
-              aria-hidden="true"
-            >
-              <path d="M25 0 L50 28" stroke="currentColor" strokeWidth="1.25" fill="none" vectorEffect="non-scaling-stroke" />
-              <path d="M75 0 L50 28" stroke="currentColor" strokeWidth="1.25" fill="none" vectorEffect="non-scaling-stroke" />
-            </svg>
+            {topLeaders.length > 1 && featuredLeader && (
+              <svg
+                viewBox="0 0 100 28"
+                className="block h-10 w-full text-slate-400 dark:text-slate-500"
+                preserveAspectRatio="none"
+                aria-hidden="true"
+              >
+                <path d="M25 0 L50 28" stroke="currentColor" strokeWidth="1.25" fill="none" vectorEffect="non-scaling-stroke" />
+                <path d="M75 0 L50 28" stroke="currentColor" strokeWidth="1.25" fill="none" vectorEffect="non-scaling-stroke" />
+              </svg>
+            )}
 
-            <div className="flex justify-center">
-              <LeaderCard leader={leaders[2]} featured />
-            </div>
+            {topLeaders.length === 1 && featuredLeader && (
+              <div className="mx-auto h-6 w-px bg-slate-400 dark:bg-slate-500" />
+            )}
 
-            <div className="mx-auto h-6 w-px bg-slate-400 dark:bg-slate-500" />
+            {featuredLeader && (
+              <div className="flex justify-center">
+                <LeaderCard leader={featuredLeader} featured />
+              </div>
+            )}
+
+            {(featuredLeader || topLeaders.length > 0) && visibleTeams.length > 0 && (
+              <div className="mx-auto h-6 w-px bg-slate-400 dark:bg-slate-500" />
+            )}
 
             <div className="overflow-x-auto pb-2">
               <div className="relative mx-auto flex w-max">
@@ -338,7 +370,7 @@ export const OrganizationStructure = () => {
                       </button>
                       <ul className="mt-2 w-[9.5rem] space-y-1.5">
                         {shown.map((emp) => {
-                          const present = isEmpPresent(emp)
+                          const present = presenceFor(emp)
                           const name = cleanText(displayName(emp, 'Team member'))
                           return (
                             <li
@@ -346,10 +378,14 @@ export const OrganizationStructure = () => {
                               className="rounded-xl border border-border bg-chrome px-2 py-1.5 text-left"
                             >
                               <span className="flex items-start gap-1.5">
-                                <span
-                                  className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${present ? 'bg-emerald-500' : 'bg-rose-500'}`}
-                                  title={present ? 'Present' : 'Absent'}
-                                />
+                                {present === null ? (
+                                  <span className="mt-1 h-1.5 w-1.5 shrink-0" />
+                                ) : (
+                                  <span
+                                    className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${present ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                                    title={present ? 'Present' : 'Absent'}
+                                  />
+                                )}
                                 <span className="min-w-0">
                                   <span className="block text-[11px] font-semibold leading-tight text-fg">{name}</span>
                                   <span className="block text-[10px] leading-tight text-muted">
@@ -384,21 +420,23 @@ export const OrganizationStructure = () => {
               ) : (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {panelMembers.map((emp) => {
-                    const present = isEmpPresent(emp)
+                    const present = presenceFor(emp)
                     const name = displayName(emp, 'Team member')
                     return (
                       <Card key={employeeId(emp) || name} className="border-border p-4 space-y-2">
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <p className="text-sm font-semibold text-fg">{name}</p>
-                            <p className="text-xs text-muted">{emp.roleName || '—'}</p>
+                            <p className="text-xs text-muted">{cleanText(emp.roleName) || '—'}</p>
                           </div>
-                          <Badge variant={present ? 'success' : 'danger'}>
-                            <span className="flex items-center gap-1.5 font-semibold">
-                              <span className={`w-1.5 h-1.5 rounded-full ${present ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                              {present ? 'Present' : 'Absent'}
-                            </span>
-                          </Badge>
+                          {present !== null && (
+                            <Badge variant={present ? 'success' : 'danger'}>
+                              <span className="flex items-center gap-1.5 font-semibold">
+                                <span className={`w-1.5 h-1.5 rounded-full ${present ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                                {present ? 'Present' : 'Absent'}
+                              </span>
+                            </Badge>
+                          )}
                         </div>
                         <p className="text-xs text-fg font-medium">{emp.departmentName || emp.department || activeTeam.name}</p>
                       </Card>

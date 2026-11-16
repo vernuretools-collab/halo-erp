@@ -76,6 +76,7 @@ const GoalsPage = lazy(() => import('./features/goals/GoalsPage').then((m) => ({
 const SocialPostRemindersPage = lazy(() =>
   import('./features/social-posts/SocialPostRemindersPage').then((m) => ({ default: m.SocialPostRemindersPage }))
 )
+const QcPage = lazy(() => import('./features/qc/QcPage').then((m) => ({ default: m.QcPage })))
 const HelpDeskPage = lazy(() =>
   import('./features/helpdesk/HelpDeskPage').then((m) => ({ default: m.HelpDeskPage }))
 )
@@ -145,6 +146,7 @@ export const router = createBrowserRouter([
 
       { path: 'wellness', element: <WellnessSettings /> },
       { path: 'post-reminders', element: <SocialPostRemindersPage /> },
+      { path: 'qc', element: <QcPage /> },
       { path: 'profile', element: <EmployeeProfile /> },
 
       { path: 'notifications', element: <NotificationsPage /> },

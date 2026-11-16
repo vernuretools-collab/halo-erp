@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { Card } from '../../../components/ui/Card'
-import { useTeamStore, OFFICE_START_HOUR, OFFICE_START_MINUTE, LATE_GRACE_MINUTES } from '../stores/teamStore'
+import { useTeamStore } from '../stores/teamStore'
 import { formatTo12HourTime, computeLiveWorkedSeconds } from '../services/attendanceStatsUtils'
+import { subscribeWorkingHours, DEFAULT_WORKING_HOURS, clockMinutes } from '../../../../../shared/workingHours.js'
 import { getMorningPermissionExpectedStartMinutes, classifyApprovedLeaveByDate, resolveLeaveLimits, attendanceStatusChip } from '../services/leaveEntitlementUtils'
 import { useUserStore } from '../../../stores/userStore'
 import { collectUserIdentityIds } from '../../projects/services/projectService'
@@ -21,6 +22,7 @@ export const AttendanceMetricsBar = () => {
     accumulatedLunchSeconds,
     accumulatedWorkSeconds,
     leaveRequests,
+    attendanceLoaded,
   } = useTeamStore()
   const { user, userDoc } = useUserStore()
   const identityIds = useMemo(() => collectUserIdentityIds(user, userDoc), [user, userDoc])
@@ -30,7 +32,12 @@ export const AttendanceMetricsBar = () => {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   }, [])
 
-  const officeStartMinutes = OFFICE_START_HOUR * 60 + OFFICE_START_MINUTE
+  const [workingHours, setWorkingHours] = useState(DEFAULT_WORKING_HOURS)
+  useEffect(() => subscribeWorkingHours(setWorkingHours), [])
+
+  const officeStartMinutes = clockMinutes(workingHours.workStart) ?? (10 * 60 + 30)
+  const parsedGrace = Number(workingHours.graceMinutes)
+  const graceMinutes = Number.isFinite(parsedGrace) ? parsedGrace : 10
   const expectedStartMinutes = useMemo(() => {
     return getMorningPermissionExpectedStartMinutes(
       leaveRequests,
@@ -108,7 +115,7 @@ export const AttendanceMetricsBar = () => {
     return `${hrs}h ${mins}m`
   }
 
-  // Late By vs 10:30 AM with 10 min grace (cutoff 10:40) — day's first clock-in
+  // Late By vs office start plus the company grace window — day's first clock-in
   const getLateByInfo = () => {
     if (!clockInTime && !clockInTimestamp) {
       return { text: 'On time', isLate: false }
@@ -142,7 +149,7 @@ export const AttendanceMetricsBar = () => {
 
     const officeStart = new Date(clockInDate)
     officeStart.setHours(Math.floor(expectedStartMinutes / 60), expectedStartMinutes % 60, 0, 0)
-    const graceCutoff = new Date(officeStart.getTime() + LATE_GRACE_MINUTES * 60 * 1000)
+    const graceCutoff = new Date(officeStart.getTime() + graceMinutes * 60 * 1000)
 
     if (clockInDate.getTime() <= graceCutoff.getTime()) {
       return { text: 'On time', isLate: false }
@@ -163,7 +170,11 @@ export const AttendanceMetricsBar = () => {
   let statusColor = 'text-rose-600 dark:text-rose-400'
   let statusBg = 'bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-200/50 dark:border-rose-500/20'
 
-  if (clockedIn && isOnLunch) {
+  if (!attendanceLoaded) {
+    statusText = '—'
+    statusColor = 'text-muted'
+    statusBg = 'bg-chrome text-muted border border-border'
+  } else if (clockedIn && isOnLunch) {
     statusText = 'On Lunch'
     statusColor = 'text-amber-600 dark:text-amber-400'
     statusBg = 'bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-200/50 dark:border-amber-500/20'

@@ -319,7 +319,8 @@ export const useTeamStore = create(
       // Active user tracking
       currentUserId: null,
 
-      // Clock-in state
+      // Clock-in state. attendanceLoaded stays false until today's log is read.
+      attendanceLoaded: false,
       clockedIn: false,
       clockInTime: null,
       clockInTimestamp: null,
@@ -413,6 +414,7 @@ export const useTeamStore = create(
       resetAttendanceState: () =>
         set({
           currentUserId: null,
+          attendanceLoaded: false,
           ...freshWorkdayFields(null),
           lastWorkDate: null,
         }),
@@ -458,16 +460,14 @@ export const useTeamStore = create(
         }
 
         get().rollOverStaleWorkday()
-        set({ currentUserId: uid })
+        set({ currentUserId: uid, attendanceLoaded: false })
 
-        try {
-          await flushAttendanceQueue()
-          const [todayLog, monthlyLogsMap] = await Promise.all([
-            getTodayAttendanceLog(ids),
-            getUserMonthlyAttendance(ids),
-          ])
+        const flushPromise = flushAttendanceQueue().catch((err) => {
+          console.error('[teamStore] flushAttendanceQueue error:', err)
+        })
 
-          const monthlyLogsList = Object.values(monthlyLogsMap || {})
+        const commitTodayLog = (todayLog) => {
+          if (get().currentUserId !== uid) return
           const today = todayDateStr()
           const live = get()
           const alreadyClockedInToday =
@@ -582,16 +582,6 @@ export const useTeamStore = create(
             }
           }
 
-          // Dynamically compute REAL employee-wise attendanceStats
-          const currentLive = {
-            date: todayDateStr(),
-            clockInTime: todayState.clockInTime,
-            clockOutTime: todayState.clockOutTime,
-            accumulatedWorkSeconds: todayState.accumulatedWorkSeconds,
-            regularSeconds: todayState.accumulatedWorkSeconds,
-          }
-          const realStats = computeRealAttendanceStats(monthlyLogsList, currentLive)
-
           const reconciled = reconcilePauseState(todayState)
           const resolved = applyResolvedLunch(reconciled)
           const { lunchJustEnded, lunchEndedAt, ...resolvedState } = resolved
@@ -629,12 +619,36 @@ export const useTeamStore = create(
 
           set({
             ...resolvedState,
-            attendanceStats: realStats,
+            attendanceLoaded: true,
           })
           armLunchTimer()
+        }
+
+        try {
+          const todayLog = await getTodayAttendanceLog(ids, { docOnly: true })
+          commitTodayLog(todayLog)
+
+          // History is for the metrics, not the first paint. Do not hold today's card on it.
+          void getUserMonthlyAttendance(ids).then((monthlyLogsMap) => {
+            const today = todayDateStr()
+            if (!todayLog && monthlyLogsMap?.[today]) commitTodayLog(monthlyLogsMap[today])
+            if (get().currentUserId !== uid) return
+            const live = get()
+            const realStats = computeRealAttendanceStats(Object.values(monthlyLogsMap || {}), {
+              date: today,
+              clockInTime: live.clockInTime,
+              clockOutTime: live.clockOutTime,
+              accumulatedWorkSeconds: live.accumulatedWorkSeconds,
+              regularSeconds: live.accumulatedWorkSeconds,
+            })
+            set({ attendanceStats: realStats })
+          })
         } catch (err) {
           console.error('[teamStore] Error loading user attendance from Firestore:', err)
+          if (get().currentUserId === uid) set({ attendanceLoaded: true })
         }
+
+        await flushPromise
       },
 
       /**

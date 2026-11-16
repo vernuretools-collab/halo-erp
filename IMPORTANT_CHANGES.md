@@ -105,3 +105,27 @@ Organization Settings can set one lunch window for every employee.
 - During that window, a clocked-in employee is switched to lunch. Work screenshots stay paused the same way they already pause for break and lunch. Tea break ends if it is still open when lunch starts.
 - When the window ends, that scheduled lunch ends. A lunch the employee started themselves still stays on until they end it.
 - Outside the window, break, lunch, and screenshots follow the existing rules. The lunch button can be hidden; the window still runs.
+
+## 2026-11-14 — Organization chart follows departments
+
+The employee Organization Structure page is a live team screen. Its columns come from departments in Organization Settings.
+
+- Active staff and people on notice period appear under their department. Ex-employees (`relieved`) and archived employees stay off the chart, including the founder cards when that person has an employee row.
+- Renaming a department updates the department and the employee records that used the old name. Deleting a department does not delete people.
+- Exit still does not delete the employee row or linked attendance, timeline, leave, scrum, project, task, or document records.
+
+## 2026-11-14 — Working hours and grace stay editable
+
+Organization Settings stores the office start, office end, and grace minutes on `companySettings/workingHours`. An admin can change them at any time. Saving replaces the company values. There is no lock.
+
+- Late marking uses the current start and grace. A clock-in at or before start plus grace is on time. A later clock-in is late by the minutes past the start.
+- The employee Late By line and a newly built monthly report use those current values, including past days in that new report. A report already stored is not rewritten until it is generated again.
+- Office end is saved and shown. It does not change the workday length, overtime, or auto clock-out.
+
+## 2026-11-14 — End-of-day reminder follows office end
+
+The employee end-of-day notification is no longer fixed at 6:00 PM. It is sent when the current time reaches the office end saved in Organization Settings.
+
+- The inbox item and the browser notification say that office-end time and ask the employee to report the EOD update and clock out.
+- One reminder is sent per employee per day. Changing the end time after it has already been sent does not send a second one that day.
+- Office end still does not change the workday length, overtime, or auto clock-out.

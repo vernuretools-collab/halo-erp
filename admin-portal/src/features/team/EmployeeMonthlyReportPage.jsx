@@ -29,6 +29,7 @@ import {
   monthlyReportToCsv,
 } from './services/monthlyReportEngine'
 import { isDirectoryVisible } from '../../../../shared/employees/employmentStatus.js'
+import { getWorkingHours, lateAfterLabel } from '../../../../shared/workingHours.js'
 import {
   buildOverallMonthlyWorkbook,
   overallReportFilename,
@@ -264,7 +265,7 @@ export function EmployeeMonthlyReportPage() {
   }
 
   const loadMonthBundle = async (targetMonth) => {
-    const [attendanceLogs, leaveRequests, timelineEntries, holidays, idleDays, roster] =
+    const [attendanceLogs, leaveRequests, timelineEntries, holidays, idleDays, roster, workingHours] =
       await Promise.all([
         getAttendanceLogsForMonth(targetMonth),
         getLeaveRequestsForMonth(targetMonth),
@@ -272,6 +273,7 @@ export function EmployeeMonthlyReportPage() {
         getCompanyHolidays(),
         getWorkIdleForMonth(targetMonth),
         employees.length ? Promise.resolve(directoryEmployees) : getDirectoryEmployees(),
+        getWorkingHours(),
       ])
     const rosterEmployees = roster?.length ? roster : employees
     const reports = (rosterEmployees || []).map((employee) =>
@@ -284,6 +286,7 @@ export function EmployeeMonthlyReportPage() {
         holidays,
         idleDays,
         generatedBy: adminName,
+        workingHours,
       })
     )
     return { employees: rosterEmployees, reports, attendanceLogs, timelineEntries }
@@ -527,7 +530,7 @@ export function EmployeeMonthlyReportPage() {
             <StatCard
               label="Late"
               value={att.lateDays ?? 0}
-              sub="after 10:40 AM (10 min grace)"
+              sub={lateAfterLabel(report.workingHours)}
               icon={AlertCircle}
               accent="amber"
             />

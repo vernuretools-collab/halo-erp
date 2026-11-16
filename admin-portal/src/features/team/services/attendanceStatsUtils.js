@@ -27,18 +27,24 @@ export function timeStrToMinutes(timeStr) {
 
 /**
  * Late minutes past expected start (default 10:30 AM). Returns 0 if on time
- * (inclusive 10 min grace through 10:40) or missing clock-in.
+ * (inclusive grace, default 10 minutes) or missing clock-in.
  * @param {string|null} clockInTime
  * @param {number} [expectedStartMinutes]
+ * @param {number} [graceMinutes]
  * @returns {number}
  */
-export function getLateMinutes(clockInTime, expectedStartMinutes = OFFICE_START_MINUTES) {
+export function getLateMinutes(
+  clockInTime,
+  expectedStartMinutes = OFFICE_START_MINUTES,
+  graceMinutes = LATE_GRACE_MINUTES,
+) {
   const mins = timeStrToMinutes(clockInTime)
   if (mins === null) return 0
   const start = Number.isFinite(Number(expectedStartMinutes))
     ? Number(expectedStartMinutes)
     : OFFICE_START_MINUTES
-  const graceCutoff = start + LATE_GRACE_MINUTES
+  const grace = Number.isFinite(Number(graceMinutes)) ? Number(graceMinutes) : LATE_GRACE_MINUTES
+  const graceCutoff = start + grace
   if (mins <= graceCutoff) return 0
   return mins - start
 }
@@ -46,10 +52,15 @@ export function getLateMinutes(clockInTime, expectedStartMinutes = OFFICE_START_
 /**
  * @param {string|null} clockInTime
  * @param {number} [expectedStartMinutes]
+ * @param {number} [graceMinutes]
  * @returns {{ isLate: boolean, lateMinutes: number }}
  */
-export function getLateInfo(clockInTime, expectedStartMinutes = OFFICE_START_MINUTES) {
-  const lateMinutes = getLateMinutes(clockInTime, expectedStartMinutes)
+export function getLateInfo(
+  clockInTime,
+  expectedStartMinutes = OFFICE_START_MINUTES,
+  graceMinutes = LATE_GRACE_MINUTES,
+) {
+  const lateMinutes = getLateMinutes(clockInTime, expectedStartMinutes, graceMinutes)
   return { isLate: lateMinutes > 0, lateMinutes }
 }
 

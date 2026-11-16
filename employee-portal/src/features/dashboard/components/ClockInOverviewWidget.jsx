@@ -67,6 +67,7 @@ export const ClockInOverviewWidget = ({ children }) => {
     extraTimeStart,
     accumulatedExtraSeconds,
     toggleExtraTime,
+    attendanceLoaded,
   } = useTeamStore()
 
   const todayKey = useMemo(() => {
@@ -200,7 +201,8 @@ export const ClockInOverviewWidget = ({ children }) => {
                   {currentTimeStr}
                 </span>
 
-                {clockedIn && isOnLunch ? (
+                {attendanceLoaded && (
+                  clockedIn && isOnLunch ? (
                     <Badge variant="warning" className="animate-pulse text-xs px-2.5 py-0.5 font-semibold">
                       On Lunch
                     </Badge>
@@ -219,7 +221,8 @@ export const ClockInOverviewWidget = ({ children }) => {
                     </Badge>
                   ) : (
                     <Badge variant="danger" className="text-xs px-2.5 py-0.5 font-semibold">Absent</Badge>
-                  )}
+                  )
+                )}
               </div>
             </div>
 
@@ -284,7 +287,7 @@ export const ClockInOverviewWidget = ({ children }) => {
                 </div>
 
                 <p className="text-xs sm:text-sm text-muted font-medium pt-0.5">
-                  {!clockedIn ? (
+                  {!attendanceLoaded ? null : !clockedIn ? (
                     <span className="text-muted italic">
                       You haven't clocked in today
                     </span>

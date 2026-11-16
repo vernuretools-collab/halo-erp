@@ -238,16 +238,16 @@ function eventMs(entry, dateStr) {
   return toEpochMs(entry?.timestamp) || timestampFromDateAndTime(dateStr, entry?.time)
 }
 
-/** Finished and still-open break windows, oldest first. */
-function listBreakPairs(logs, dateStr) {
+/** Finished and still-open pause windows, oldest first. */
+function listPausePairs(logs, dateStr, startType, endType) {
   const ordered = [...(Array.isArray(logs) ? logs : [])]
-    .filter((entry) => entry?.type === 'break_start' || entry?.type === 'break_end')
+    .filter((entry) => entry?.type === startType || entry?.type === endType)
     .sort((a, b) => (eventMs(a, dateStr) || 0) - (eventMs(b, dateStr) || 0))
   const pairs = []
   let start = null
   for (const entry of ordered) {
-    if (entry.type === 'break_start') start = entry
-    else if (entry.type === 'break_end' && start) {
+    if (entry.type === startType) start = entry
+    else if (entry.type === endType && start) {
       pairs.push({ start, end: entry })
       start = null
     }
@@ -256,12 +256,21 @@ function listBreakPairs(logs, dateStr) {
   return pairs
 }
 
-function validateBreakWindow(dateStr, startTime, endTime) {
+function pauseKind(item) {
+  return item?.kind === 'lunch' ? 'lunch' : 'break'
+}
+
+function pauseName(kind, index) {
+  return kind === 'lunch' ? `Lunch ${index}` : `Break ${index}`
+}
+
+function validatePauseWindow(dateStr, startTime, endTime, kind = 'break') {
+  const noun = kind === 'lunch' ? 'lunch' : 'break'
   const startMs = timestampFromDateAndTime(dateStr, startTime)
   const endMs = timestampFromDateAndTime(dateStr, endTime)
   if (!startMs) return 'Choose a start time.'
   if (!endMs) return 'Choose an end time.'
-  if (endMs <= startMs) return 'End time must be after the break started.'
+  if (endMs <= startMs) return `End time must be after the ${noun} started.`
   if (dateStr === todayStr()) {
     const now = Date.now()
     if (startMs > now) return 'Start time cannot be in the future.'
@@ -279,18 +288,13 @@ function endTimeForOpenBreak(dateStr, startMs) {
   return timeStrFromMs(endMs) || '01:15 PM'
 }
 
-/** Every break on the selected day, oldest first. An open break gets an end the admin can change. */
-function breaksFromRow(row, dateStr) {
-  let pairs = listBreakPairs(row?.shiftLogs, dateStr)
-  if (!pairs.length && (row?.isOnBreak || toEpochMs(row?.breakStartTime))) {
-    const startMs = toEpochMs(row?.breakStartTime) || timestampFromDateAndTime(dateStr, '01:00 PM')
-    pairs = [{ start: { id: 'open_flag', timestamp: startMs }, end: null }]
-  }
+function pauseItemsFromPairs(pairs, dateStr, kind) {
   return pairs.map((pair, index) => {
     const startMs = eventMs(pair.start, dateStr)
     const endMs = pair.end ? eventMs(pair.end, dateStr) : null
     return {
-      id: `${pair.start?.id || 'break'}_${index}`,
+      id: `${kind}_${pair.start?.id || kind}_${index}`,
+      kind,
       start: timeStrFromMs(startMs) || '01:00 PM',
       end: endMs ? timeStrFromMs(endMs) || '01:15 PM' : endTimeForOpenBreak(dateStr, startMs),
       wasOpen: !pair.end,
@@ -298,12 +302,33 @@ function breaksFromRow(row, dateStr) {
   })
 }
 
-function validateBreakList(dateStr, breaks) {
+/** Every break and lunch on the selected day, oldest first. An open pause gets an end the admin can change. */
+function pausesFromRow(row, dateStr) {
+  const logs = row?.shiftLogs
+  const breakPairs = listPausePairs(logs, dateStr, 'break_start', 'break_end')
+  if (!breakPairs.length && (row?.isOnBreak || toEpochMs(row?.breakStartTime))) {
+    const startMs = toEpochMs(row?.breakStartTime) || timestampFromDateAndTime(dateStr, '01:00 PM')
+    breakPairs.push({ start: { id: 'open_flag', timestamp: startMs }, end: null })
+  }
+  const lunchPairs = listPausePairs(logs, dateStr, 'lunch_start', 'lunch_end')
+  if (!lunchPairs.length && (row?.isOnLunch || toEpochMs(row?.lunchStartTime))) {
+    const startMs = toEpochMs(row?.lunchStartTime) || timestampFromDateAndTime(dateStr, '01:00 PM')
+    lunchPairs.push({ start: { id: 'open_lunch', timestamp: startMs }, end: null })
+  }
+  return [...pauseItemsFromPairs(breakPairs, dateStr, 'break'), ...pauseItemsFromPairs(lunchPairs, dateStr, 'lunch')].sort(
+    (a, b) =>
+      (timestampFromDateAndTime(dateStr, a.start) || 0) - (timestampFromDateAndTime(dateStr, b.start) || 0)
+  )
+}
+
+function validatePauseList(dateStr, pauses) {
   const windows = []
-  for (let index = 0; index < breaks.length; index += 1) {
-    const item = breaks[index]
-    const message = validateBreakWindow(dateStr, item.start, item.end)
-    if (message) return `Break ${index + 1}: ${message}`
+  const seen = { break: 0, lunch: 0 }
+  for (const item of pauses) {
+    const kind = pauseKind(item)
+    seen[kind] += 1
+    const message = validatePauseWindow(dateStr, item.start, item.end, kind)
+    if (message) return `${pauseName(kind, seen[kind])}: ${message}`
     windows.push({
       startMs: timestampFromDateAndTime(dateStr, item.start),
       endMs: timestampFromDateAndTime(dateStr, item.end),
@@ -311,13 +336,18 @@ function validateBreakList(dateStr, breaks) {
   }
   const sorted = [...windows].sort((a, b) => a.startMs - b.startMs)
   for (let index = 1; index < sorted.length; index += 1) {
-    if (sorted[index].startMs < sorted[index - 1].endMs) return 'Breaks cannot overlap.'
+    if (sorted[index].startMs < sorted[index - 1].endMs) {
+      return pauses.some((item) => pauseKind(item) === 'lunch')
+        ? 'Breaks and lunch cannot overlap.'
+        : 'Breaks cannot overlap.'
+    }
   }
   return ''
 }
 
-function breakListSeconds(dateStr, breaks) {
-  return breaks.reduce((sum, item) => {
+function pauseListSeconds(dateStr, pauses, kind) {
+  return pauses.reduce((sum, item) => {
+    if (pauseKind(item) !== kind) return sum
     const startMs = timestampFromDateAndTime(dateStr, item.start)
     const endMs = timestampFromDateAndTime(dateStr, item.end)
     if (!startMs || !endMs || endMs <= startMs) return sum
@@ -325,23 +355,53 @@ function breakListSeconds(dateStr, breaks) {
   }, 0)
 }
 
-/** Replace the day's break events with the admin's list. Lunch and clock events stay. */
-function applyAdminBreakList(existingLogs, dateStr, breaks) {
+/** Replace the day's break and lunch events with the admin's list. Clock events stay. */
+function applyAdminPauseList(existingLogs, dateStr, pauses) {
   const others = (Array.isArray(existingLogs) ? existingLogs : []).filter(
-    (entry) => entry?.type !== 'break_start' && entry?.type !== 'break_end'
+    (entry) =>
+      entry?.type !== 'break_start' &&
+      entry?.type !== 'break_end' &&
+      entry?.type !== 'lunch_start' &&
+      entry?.type !== 'lunch_end'
   )
-  const ordered = [...breaks].sort(
+  const ordered = [...pauses].sort(
     (a, b) =>
       (timestampFromDateAndTime(dateStr, a.start) || 0) - (timestampFromDateAndTime(dateStr, b.start) || 0)
   )
   const events = [...others]
   let accumulatedBreakSeconds = 0
-  ordered.forEach((item, index) => {
+  let accumulatedLunchSeconds = 0
+  const counts = { break: 0, lunch: 0 }
+  ordered.forEach((item) => {
+    const kind = pauseKind(item)
+    counts[kind] += 1
+    const index = counts[kind]
     const startTime = canonicalTimeOrDefault(item.start, '01:00 PM')
     const endTime = canonicalTimeOrDefault(item.end, '01:15 PM')
     const startMs = timestampFromDateAndTime(dateStr, startTime)
     const endMs = timestampFromDateAndTime(dateStr, endTime)
-    accumulatedBreakSeconds += Math.max(0, Math.floor((endMs - startMs) / 1000))
+    const seconds = Math.max(0, Math.floor((endMs - startMs) / 1000))
+    if (kind === 'lunch') {
+      accumulatedLunchSeconds += seconds
+      events.push(
+        {
+          id: `log_admin_lunch_start_${startMs}_${index}`,
+          type: 'lunch_start',
+          label: 'Started Lunch',
+          time: startTime,
+          timestamp: startMs,
+        },
+        {
+          id: `log_admin_lunch_end_${endMs}_${index}`,
+          type: 'lunch_end',
+          label: 'Ended Lunch',
+          time: endTime,
+          timestamp: endMs,
+        }
+      )
+      return
+    }
+    accumulatedBreakSeconds += seconds
     events.push(
       {
         id: `log_admin_break_start_${startMs}_${index}`,
@@ -362,6 +422,7 @@ function applyAdminBreakList(existingLogs, dateStr, breaks) {
   return {
     shiftLogs: pairedShiftLogs(events),
     accumulatedBreakSeconds,
+    accumulatedLunchSeconds,
   }
 }
 
@@ -419,7 +480,7 @@ export const AttendancePage = () => {
   const [editClockOut, setEditClockOut] = useState('')
   const [savingEdit, setSavingEdit] = useState(false)
   const [endingBreakRow, setEndingBreakRow] = useState(null)
-  const [editBreaks, setEditBreaks] = useState([])
+  const [editPauses, setEditPauses] = useState([])
   const [savingBreak, setSavingBreak] = useState(false)
   const [togglingAttendanceUid, setTogglingAttendanceUid] = useState(null)
 
@@ -623,28 +684,34 @@ export const AttendancePage = () => {
     }
   }
 
-  const breakEndError = endingBreakRow ? validateBreakList(selectedDate, editBreaks) : ''
-  const breakEndDurationSec = breakListSeconds(selectedDate, editBreaks)
+  const breakEndError = endingBreakRow ? validatePauseList(selectedDate, editPauses) : ''
+  const breakEndDurationSec = pauseListSeconds(selectedDate, editPauses, 'break')
+  const lunchEndDurationSec = pauseListSeconds(selectedDate, editPauses, 'lunch')
 
   const openBreakEditor = (row) => {
     const liveLog = attendanceLogs.find((log) => log.uid === row.uid) || {}
-    const source = { ...row, shiftLogs: resolveShiftLogs({ ...liveLog, ...row }) }
+    const source = {
+      ...liveLog,
+      ...row,
+      shiftLogs: resolveShiftLogs({ ...liveLog, ...row }),
+    }
     setEndingBreakRow(row)
-    setEditBreaks(breaksFromRow(source, selectedDate))
+    setEditPauses(pausesFromRow(source, selectedDate))
   }
 
-  const updateBreak = (id, patch) => {
-    setEditBreaks((list) => list.map((item) => (item.id === id ? { ...item, ...patch } : item)))
+  const updatePause = (id, patch) => {
+    setEditPauses((list) => list.map((item) => (item.id === id ? { ...item, ...patch } : item)))
   }
 
-  const addBreak = () => {
+  const addPause = (kind) => {
     const isToday = selectedDate === todayStr()
     const endMs = isToday ? Date.now() : timestampFromDateAndTime(selectedDate, '01:15 PM')
     const startMs = isToday ? endMs - 15 * 60 * 1000 : timestampFromDateAndTime(selectedDate, '01:00 PM')
-    setEditBreaks((list) => [
+    setEditPauses((list) => [
       ...list,
       {
-        id: `new_${Date.now()}`,
+        id: `new_${kind}_${Date.now()}`,
+        kind,
         start: timeStrFromMs(startMs) || '01:00 PM',
         end: timeStrFromMs(endMs) || '01:15 PM',
         wasOpen: false,
@@ -655,15 +722,15 @@ export const AttendancePage = () => {
   const handleSaveBreakEnd = async (e) => {
     e.preventDefault()
     if (!endingBreakRow || savingBreak) return
-    if (validateBreakList(selectedDate, editBreaks)) return
+    if (validatePauseList(selectedDate, editPauses)) return
 
     setSavingBreak(true)
     try {
       const liveLog = attendanceLogs.find((log) => log.uid === endingBreakRow.uid) || {}
-      const nextBreak = applyAdminBreakList(
+      const nextPause = applyAdminPauseList(
         resolveShiftLogs({ ...liveLog, ...endingBreakRow }),
         selectedDate,
-        editBreaks
+        editPauses
       )
       const docId = `${selectedDate}_${endingBreakRow.uid}`
 
@@ -676,9 +743,13 @@ export const AttendancePage = () => {
           date: selectedDate,
           isOnBreak: false,
           breakStartTime: null,
-          accumulatedBreakSeconds: nextBreak.accumulatedBreakSeconds,
-          shiftLogs: nextBreak.shiftLogs,
-          todayShiftLogs: nextBreak.shiftLogs,
+          accumulatedBreakSeconds: nextPause.accumulatedBreakSeconds,
+          isOnLunch: false,
+          lunchStartTime: null,
+          lunchEndsAt: null,
+          accumulatedLunchSeconds: nextPause.accumulatedLunchSeconds,
+          shiftLogs: nextPause.shiftLogs,
+          todayShiftLogs: nextPause.shiftLogs,
           source: 'admin_edit',
         },
         { merge: true }
@@ -1290,8 +1361,8 @@ export const AttendancePage = () => {
                       <button
                         type="button"
                         onClick={() => openBreakEditor(row)}
-                        title="Edit breaks"
-                        aria-label="Edit breaks"
+                        title="Edit breaks and lunch"
+                        aria-label="Edit breaks and lunch"
                         className="p-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors inline-flex items-center justify-center cursor-pointer"
                       >
                         <Coffee className="w-3.5 h-3.5" />
@@ -1499,7 +1570,7 @@ export const AttendancePage = () => {
           <Card className="w-full max-w-xl max-h-[80vh] overflow-y-auto p-4 space-y-3 border-border shadow-2xl relative rounded-2xl bg-surface text-fg">
             <div className="flex items-center justify-between pb-2 border-b border-border">
               <div>
-                <h3 className="font-bold text-sm">Edit breaks</h3>
+                <h3 className="font-bold text-sm">Edit breaks and lunch</h3>
                 <p className="text-xs text-muted">
                   {endingBreakRow.displayName} ({formatDate(selectedDate)})
                 </p>
@@ -1522,13 +1593,18 @@ export const AttendancePage = () => {
                 <span>Time</span>
                 <span />
               </div>
-              {editBreaks.length === 0 ? (
+              {editPauses.length === 0 ? (
                 <p className="text-xs text-muted text-left rounded-lg border border-dashed border-border px-3 py-2">
-                  No breaks recorded for this day.
+                  No breaks or lunch recorded for this day.
                 </p>
               ) : (
-                editBreaks.map((item, index) => {
-                  const itemError = validateBreakWindow(selectedDate, item.start, item.end)
+                editPauses.map((item, index) => {
+                  const kind = pauseKind(item)
+                  const kindIndex = editPauses
+                    .slice(0, index + 1)
+                    .filter((entry) => pauseKind(entry) === kind).length
+                  const label = pauseName(kind, kindIndex)
+                  const itemError = validatePauseWindow(selectedDate, item.start, item.end, kind)
                   const itemSeconds = itemError
                     ? 0
                     : Math.max(
@@ -1539,22 +1615,26 @@ export const AttendancePage = () => {
                             1000
                         )
                       )
+                  const isLunch = kind === 'lunch'
                   return (
                     <div
                       key={item.id}
                       className="grid grid-cols-[4.5rem_1fr_1fr_3.25rem_1.75rem] items-center gap-2 rounded-lg border border-border bg-canvas px-2 py-1.5"
                     >
-                      <span className="text-[11px] font-semibold text-fg truncate" title={item.wasOpen ? 'This break was still open' : undefined}>
-                        Break {index + 1}
+                      <span
+                        className={`text-[11px] font-semibold truncate ${isLunch ? 'text-orange-300' : 'text-fg'}`}
+                        title={item.wasOpen ? `This ${isLunch ? 'lunch' : 'break'} was still open` : undefined}
+                      >
+                        {label}
                       </span>
                       <input
                         type="time"
                         value={timeStrToInputValue(item.start)}
                         onChange={(event) => {
                           const start = inputValueToTimeStr(event.target.value)
-                          if (start) updateBreak(item.id, { start })
+                          if (start) updatePause(item.id, { start })
                         }}
-                        aria-label={`Break ${index + 1} start`}
+                        aria-label={`${label} start`}
                         className="h-8 w-full min-w-0 rounded-md border border-border bg-surface px-2 text-xs font-mono text-fg [color-scheme:dark]"
                       />
                       <input
@@ -1562,18 +1642,20 @@ export const AttendancePage = () => {
                         value={timeStrToInputValue(item.end)}
                         onChange={(event) => {
                           const end = inputValueToTimeStr(event.target.value)
-                          if (end) updateBreak(item.id, { end })
+                          if (end) updatePause(item.id, { end })
                         }}
-                        aria-label={`Break ${index + 1} end`}
+                        aria-label={`${label} end`}
                         className="h-8 w-full min-w-0 rounded-md border border-border bg-surface px-2 text-xs font-mono text-fg [color-scheme:dark]"
                       />
-                      <span className="font-mono text-[11px] font-semibold text-amber-400">{secToHrsStr(itemSeconds)}</span>
+                      <span className={`font-mono text-[11px] font-semibold ${isLunch ? 'text-orange-300' : 'text-amber-400'}`}>
+                        {secToHrsStr(itemSeconds)}
+                      </span>
                       <button
                         type="button"
-                        onClick={() => setEditBreaks((list) => list.filter((entry) => entry.id !== item.id))}
+                        onClick={() => setEditPauses((list) => list.filter((entry) => entry.id !== item.id))}
                         className="p-1 rounded-md text-rose-400 hover:bg-rose-500/10 justify-self-end cursor-pointer"
-                        title="Remove this break"
-                        aria-label={`Remove break ${index + 1}`}
+                        title={`Remove this ${isLunch ? 'lunch' : 'break'}`}
+                        aria-label={`Remove ${label}`}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -1583,16 +1665,34 @@ export const AttendancePage = () => {
               )}
 
               <div className="flex items-center justify-between gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={addBreak}
-                  className="py-1.5 px-2 rounded-lg text-amber-400 text-xs font-semibold inline-flex items-center gap-1 hover:bg-amber-500/10"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Add break
-                </button>
-                <span className="text-[11px] text-muted">
-                  Total <span className="font-mono font-semibold text-amber-400">{secToHrsStr(breakEndError ? 0 : breakEndDurationSec)}</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => addPause('break')}
+                    className="py-1.5 px-2 rounded-lg text-amber-400 text-xs font-semibold inline-flex items-center gap-1 hover:bg-amber-500/10"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add break
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => addPause('lunch')}
+                    className="py-1.5 px-2 rounded-lg text-orange-300 text-xs font-semibold inline-flex items-center gap-1 hover:bg-orange-500/10"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add lunch
+                  </button>
+                </div>
+                <span className="text-[11px] text-muted text-right">
+                  Breaks{' '}
+                  <span className="font-mono font-semibold text-amber-400">
+                    {secToHrsStr(breakEndError ? 0 : breakEndDurationSec)}
+                  </span>
+                  {' · '}
+                  Lunch{' '}
+                  <span className="font-mono font-semibold text-orange-300">
+                    {secToHrsStr(breakEndError ? 0 : lunchEndDurationSec)}
+                  </span>
                 </span>
               </div>
 
@@ -1618,7 +1718,7 @@ export const AttendancePage = () => {
                   ) : (
                     <Coffee className="w-3.5 h-3.5" />
                   )}
-                  Save breaks
+                  Save changes
                 </button>
               </div>
             </form>

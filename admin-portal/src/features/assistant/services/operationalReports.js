@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { getLateMinutes } from '../../team/services/attendanceStatsUtils'
+import { formatMinutes12, getCachedWorkingHours, clockMinutes } from '../../../../../shared/workingHours.js'
 import { matchEmployees, samePerson } from './snapshotBuilder'
 
 const ACTIVE_PROJECT = /active|in_progress|in progress|ongoing|open/
@@ -67,16 +68,23 @@ function absentReport(snapshot, logs) {
   return `Absent today (${label.length}): ${names(label)}`
 }
 
-function floorReport(snapshot, logs) {
-  return [presentReport(logs), absentReport(snapshot, logs), lateReport(logs), breakReport(logs)].join('\n\n')
+function floorReport(snapshot, logs, hours) {
+  return [presentReport(logs), absentReport(snapshot, logs), lateReport(logs, hours), breakReport(logs)].join('\n\n')
 }
 
-function lateReport(logs) {
+function lateReport(logs, hours = getCachedWorkingHours()) {
+  const start = clockMinutes(hours.workStart) ?? 10 * 60 + 30
+  const grace = Number.isFinite(Number(hours.graceMinutes)) ? Number(hours.graceMinutes) : 10
+  const cutoffLabel = formatMinutes12(start + grace)
   const late = logs
-    .map((row) => ({ name: personName(row), minutes: getLateMinutes(row.clockInTime), clock: row.clockInTime }))
+    .map((row) => ({
+      name: personName(row),
+      minutes: getLateMinutes(row.clockInTime, start, grace),
+      clock: row.clockInTime,
+    }))
     .filter((row) => row.minutes > 0)
-  if (!late.length) return 'Nobody is late today. Late means a clock-in after 10:40 AM.'
-  const lines = ['Late today (after 10:40 AM):']
+  if (!late.length) return `Nobody is late today. Late means a clock-in after ${cutoffLabel}.`
+  const lines = [`Late today (after ${cutoffLabel}):`]
   late.forEach((row) => lines.push(`- ${row.name} — clocked in ${row.clock || 'unknown'} (${row.minutes} min late)`))
   return lines.join('\n')
 }

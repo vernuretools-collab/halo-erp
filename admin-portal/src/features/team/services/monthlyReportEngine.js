@@ -12,7 +12,9 @@ import {
   getLateInfo,
   isAttendancePresent,
   OFFICE_START_MINUTES,
+  LATE_GRACE_MINUTES,
 } from './attendanceStatsUtils'
+import { clockMinutes, normalizeWorkingHours, DEFAULT_WORKING_HOURS } from '../../../../../shared/workingHours.js'
 import {
   classifyApprovedLeaveByDate,
   approvedExtraWorkByDate,
@@ -200,6 +202,7 @@ export function leaveDatesInMonth(leave, month, holidays = []) {
  * @param {Array} [params.holidays]
  * @param {Array} [params.idleDays]
  * @param {string} [params.generatedBy]
+ * @param {object} [params.workingHours]
  * @returns {object}
  */
 function employeeIdentityKeys(employee) {
@@ -225,7 +228,13 @@ export function buildEmployeeMonthlyReport({
   holidays = [],
   idleDays = [],
   generatedBy = 'Admin',
+  workingHours = null,
 }) {
+  const hours = normalizeWorkingHours(workingHours || DEFAULT_WORKING_HOURS)
+  const officeStartMinutes = clockMinutes(hours.workStart) ?? OFFICE_START_MINUTES
+  const graceMinutes = Number.isFinite(Number(hours.graceMinutes))
+    ? Number(hours.graceMinutes)
+    : LATE_GRACE_MINUTES
   const uid = employee?.uid || employee?.employeeId || employee?.id || ''
   const { start, end } = getMonthDateBounds(month)
   const workingDaysList = getWorkingDaysInMonth(month, holidays)
@@ -324,10 +333,10 @@ export function buildEmployeeMonthlyReport({
       empLeaves,
       empFilter,
       date,
-      OFFICE_START_MINUTES
+      officeStartMinutes
     )
     const { isLate, lateMinutes } = presentFromLog && clockInTime
-      ? getLateInfo(clockInTime, expectedStart)
+      ? getLateInfo(clockInTime, expectedStart, graceMinutes)
       : { isLate: false, lateMinutes: 0 }
     const regularSeconds = getCappedRegularSeconds(log)
     const extraSeconds = Number(log?.extraSeconds) || Number(log?.accumulatedExtraSeconds) || 0
@@ -452,6 +461,7 @@ export function buildEmployeeMonthlyReport({
     generatedAt: new Date().toISOString(),
     generatedBy,
     status: isCurrentMonth ? 'draft' : 'final',
+    workingHours: hours,
     attendance: {
       workingDays,
       eligibleWorkingDays,

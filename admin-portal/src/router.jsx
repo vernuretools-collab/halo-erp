@@ -27,6 +27,7 @@ const TaskBoard = lazy(() =>
 const TimeTracker = lazy(() =>
   import('./features/projects/TimeTracker').then((m) => ({ default: m.TimeTracker }))
 )
+const QcPage = lazy(() => import('./features/qc/QcPage').then((m) => ({ default: m.QcPage })))
 const InvoiceList = lazy(() =>
   import('./features/finance/InvoiceList').then((m) => ({ default: m.InvoiceList }))
 )
@@ -165,6 +166,7 @@ export const router = createBrowserRouter([
       { path: 'projects/manage/:projectId', element: <ProjectDetailPage /> },
       { path: 'projects/tasks', element: <TaskBoard /> },
       { path: 'projects/time', element: <TimeTracker /> },
+      { path: 'qc', element: <QcPage /> },
 
       { path: 'finance', element: <Navigate to="/finance/invoices" replace /> },
       { path: 'finance/invoices', element: <InvoiceList /> },

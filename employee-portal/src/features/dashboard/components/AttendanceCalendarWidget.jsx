@@ -2,25 +2,28 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { Card } from '../../../components/ui/Card'
 import { useTeamStore } from '../../team/stores/teamStore'
 import { useUserStore } from '../../../stores/userStore'
-import { getUserMonthlyAttendance, attendanceRecordLooksPresent } from '../../team/services/attendanceService'
+import { getMonthAttendanceDocs, getTodayAttendanceLog, attendanceRecordLooksPresent } from '../../team/services/attendanceService'
 import { subscribeToCompanyHolidays } from '../../team/services/teamService'
 import {
-  classifyApprovedLeaveByDate,
+  approvedLeaveOnDate,
   approvedExtraWorkByDate,
   extraWorkTooltip,
-  resolveLeaveLimits,
   attendanceStatusDotClass,
   attendanceStatusDotSizeClass,
+  attendanceStatusDayClass,
   attendanceStatusTooltip,
+  expandLeaveWorkingDates,
+  leaveStatusKey,
+  leaveMatchesEmployeeFilter,
 } from '../../team/services/leaveEntitlementUtils'
 import { collectUserIdentityIds } from '../../projects/services/projectService'
-import { subscribeLeaveRequestsForUids } from '../../team/services/leaveRequestsLive'
-import { collection, doc, getDoc, getDocs } from 'firebase/firestore'
+import { subscribeLeaveMonth, preloadEmployeeLeaves } from '../../team/services/leaveRequestsLive'
+import { doc, getDoc } from 'firebase/firestore'
 import { db } from '../../../shared/services/firebaseService'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 
-export const AttendanceCalendarWidget = () => {
-  const { clockedIn, todayShiftLogs } = useTeamStore()
+export const AttendanceCalendarWidget = ({ onReady }) => {
+  const { clockedIn, todayShiftLogs, attendanceLoaded } = useTeamStore()
   const { user, userDoc } = useUserStore()
   const identityIds = useMemo(() => collectUserIdentityIds(user, userDoc), [user, userDoc])
   const activeUid = identityIds[0] || userDoc?.uid || user?.uid
@@ -38,29 +41,76 @@ export const AttendanceCalendarWidget = () => {
 
   const [monthlyRecords, setMonthlyRecords] = useState({})
   const [isLoadingRecords, setIsLoadingRecords] = useState(true)
+  const [todayResolved, setTodayResolved] = useState(false)
+  const [failedDates, setFailedDates] = useState(() => new Set())
   const [companyHolidays, setCompanyHolidays] = useState({})
   const [leaveRequests, setLeaveRequests] = useState([])
+  const [leaveReady, setLeaveReady] = useState(false)
   const [employeeProfile, setEmployeeProfile] = useState(null)
 
   const year = currentViewDate.getFullYear()
   const month = currentViewDate.getMonth()
 
-  // Fetch real attendance records from Firestore for current user
+  // Today's document first, then this month's documents. No full-history scan.
   useEffect(() => {
     if (!identityIds.length) {
       setMonthlyRecords({})
+      setFailedDates(new Set())
+      setTodayResolved(false)
       setIsLoadingRecords(false)
-      return
+      return undefined
     }
+
+    let cancelled = false
+    const today = new Date()
+    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+    const viewingThisMonth = year === today.getFullYear() && month === today.getMonth()
+
     setIsLoadingRecords(true)
-    getUserMonthlyAttendance(identityIds)
-      .then((records) => {
+    setTodayResolved(false)
+    setFailedDates(new Set())
+    setMonthlyRecords({})
+
+    const load = async () => {
+      const monthPromise = getMonthAttendanceDocs(identityIds, year, month)
+      const leavePromise = preloadEmployeeLeaves(identityIds, activeEmail, activeName)
+
+      if (viewingThisMonth) {
+        try {
+          const todayLog = await getTodayAttendanceLog(identityIds, { docOnly: true })
+          if (!cancelled && todayLog) {
+            setMonthlyRecords({ [todayKey]: { ...todayLog, date: todayKey } })
+          }
+        } catch (err) {
+          console.error('[AttendanceCalendar] today attendance error:', err)
+        } finally {
+          if (!cancelled) setTodayResolved(true)
+        }
+      } else if (!cancelled) {
+        setTodayResolved(true)
+      }
+
+      try {
+        const [{ records, failedDates: failed }] = await Promise.all([monthPromise, leavePromise])
+        if (cancelled) return
         setMonthlyRecords(records || {})
-      })
-      .finally(() => {
-        setIsLoadingRecords(false)
-      })
-  }, [identityIds, year, month])
+        setFailedDates(new Set(failed || []))
+      } catch (err) {
+        console.error('[AttendanceCalendar] month attendance error:', err)
+        if (!cancelled) setFailedDates(new Set(['*']))
+      } finally {
+        if (!cancelled) {
+          setIsLoadingRecords(false)
+          onReady?.()
+        }
+      }
+    }
+
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [identityIds, year, month, activeEmail, activeName, onReady])
 
   useEffect(() => {
     if (!identityIds.length) {
@@ -78,16 +128,10 @@ export const AttendanceCalendarWidget = () => {
         }
       }
       if (activeEmail) {
-        const snap = await getDocs(collection(db, 'employees'))
-        const match = snap.docs.find(
-          (d) =>
-            String(d.data()?.email || '').trim().toLowerCase() ===
-            String(activeEmail).trim().toLowerCase()
-        )
-        if (!cancelled && match) {
-          setEmployeeProfile({ id: match.id, ...match.data() })
-          return
-        }
+        // Do not scan the whole employees collection here. That download was
+        // competing with the leave read and keeping casual days blank.
+        if (!cancelled) setEmployeeProfile(null)
+        return
       }
       if (!cancelled) setEmployeeProfile(null)
     }
@@ -112,25 +156,47 @@ export const AttendanceCalendarWidget = () => {
     return () => unsub()
   }, [])
 
-  // Live leaveRequests — calendar overlays must clear when Admin deletes/rejects approval
+  // This month's leave only. Absent stays blank until that small read answers.
   useEffect(() => {
-    return subscribeLeaveRequestsForUids(
+    if (!identityIds.length) {
+      setLeaveRequests([])
+      setLeaveReady(true)
+      return undefined
+    }
+    setLeaveRequests([])
+    setLeaveReady(false)
+    return subscribeLeaveMonth(
       identityIds,
-      setLeaveRequests,
-      (err) => console.error('Error listening to leave requests:', err)
+      year,
+      month,
+      (list, ready) => {
+        setLeaveRequests(list)
+        if (ready) setLeaveReady(true)
+      },
+      (err) => {
+        console.error('Error listening to leave requests:', err)
+        setLeaveReady(true)
+      },
+      activeEmail,
+      activeName
     )
-  }, [identityIds, setLeaveRequests])
+  }, [identityIds, year, month, activeEmail, activeName])
 
   const approvedLeaveByDate = useMemo(() => {
-    const emp = {
-      employeeId: employeeProfile?.id || activeUid,
-      uid: activeUid,
-      employeeEmail: activeEmail,
-      employeeName: activeName,
-      identityIds,
-    }
-    return classifyApprovedLeaveByDate(leaveRequests, emp, resolveLeaveLimits(employeeProfile), companyHolidays)
-  }, [leaveRequests, activeUid, activeEmail, activeName, employeeProfile, companyHolidays, identityIds])
+    const map = {}
+    const dates = new Set()
+    ;(Array.isArray(leaveRequests) ? leaveRequests : []).forEach((leave) => {
+      if (leaveStatusKey(leave) !== 'approved') return
+      expandLeaveWorkingDates(leave.startDate, leave.endDate || leave.startDate, companyHolidays).forEach((date) => {
+        dates.add(date)
+      })
+    })
+    dates.forEach((date) => {
+      const info = approvedLeaveOnDate(leaveRequests, date, companyHolidays)
+      if (info) map[date] = info
+    })
+    return map
+  }, [leaveRequests, companyHolidays])
 
   const extraWorkByDate = useMemo(() => {
     const emp = {
@@ -142,6 +208,25 @@ export const AttendanceCalendarWidget = () => {
     }
     return approvedExtraWorkByDate(leaveRequests, emp)
   }, [leaveRequests, activeUid, activeEmail, activeName, employeeProfile, identityIds])
+
+  const pendingLeaveDates = useMemo(() => {
+    const dates = new Set()
+    const emp = {
+      employeeId: employeeProfile?.id || activeUid,
+      uid: activeUid,
+      employeeEmail: activeEmail,
+      employeeName: activeName,
+      identityIds,
+    }
+    ;(Array.isArray(leaveRequests) ? leaveRequests : []).forEach((leave) => {
+      if (leaveStatusKey(leave) !== 'pending') return
+      if (!leaveMatchesEmployeeFilter(leave, emp)) return
+      expandLeaveWorkingDates(leave.startDate, leave.endDate || leave.startDate, companyHolidays).forEach((date) => {
+        dates.add(date)
+      })
+    })
+    return dates
+  }, [leaveRequests, activeUid, activeEmail, activeName, employeeProfile, identityIds, companyHolidays])
 
   // Month name formatting e.g. "July 2026"
   const monthName = currentViewDate.toLocaleDateString('en-US', {
@@ -278,13 +363,8 @@ export const AttendanceCalendarWidget = () => {
     // ── Company holiday takes priority over ordinary leave ──
     if (companyHolidays[dateKey]) return 'holiday'
 
-    // ── Live approved leave overlays ──
-    if (approvedLeave?.status === 'lop') return 'lop'
-    if (approvedLeave?.status === 'wfh') return 'wfh'
-    if (approvedLeave?.status === 'casual') return 'casual'
-    if (approvedLeave?.status === 'sick') return 'sick'
-    if (approvedLeave?.status === 'emergency') return 'emergency'
-    if (approvedLeave?.status === 'leave') return 'leave'
+    // Any approved leave keeps its own color. Absent is only for a day with no approved leave.
+    if (approvedLeave?.status) return approvedLeave.status
 
     const dayOfWeek = cellDate.getDay() // 0 = Sun (Sunday is the only weekend rest day; Saturday is a regular working day)
     const isWeekend = dayOfWeek === 0
@@ -297,20 +377,18 @@ export const AttendanceCalendarWidget = () => {
 
     const isFuture = cellDate > todayMidnight
 
-    // Today's dynamic sync with clockedIn state, shift log activity, or Firestore record
+    // Today's color uses today's document as soon as it arrives.
+    // Absent only after that read and the live clock-in state are both known.
     if (isToday) {
       const recordForToday = monthlyRecords[dateKey]
       const isPresentToday =
-        clockedIn ||
-        (todayShiftLogs && todayShiftLogs.length > 0) ||
-        attendanceRecordLooksPresent(recordForToday)
-      
-      if (isPresentToday) {
-        return 'present'
-      }
-      if (isWeekend || beforeAccount) {
-        return null
-      }
+        attendanceRecordLooksPresent(recordForToday) ||
+        (attendanceLoaded && (clockedIn || (todayShiftLogs && todayShiftLogs.length > 0)))
+
+      if (isPresentToday) return 'present'
+      if (!todayResolved || !attendanceLoaded || !leaveReady || failedDates.has(dateKey) || failedDates.has('*')) return null
+      if (pendingLeaveDates.has(dateKey)) return null
+      if (isWeekend || beforeAccount) return null
       return 'absent'
     }
 
@@ -328,8 +406,8 @@ export const AttendanceCalendarWidget = () => {
       return null
     }
 
-    // While fetching monthly records from Firestore, do NOT flash false 'absent' red dots for past dates
-    if (isLoadingRecords) {
+    // While this month or the leave list is still loading, or a day's read failed, do not invent Absent.
+    if (isLoadingRecords || !leaveReady || failedDates.has(dateKey) || failedDates.has('*') || pendingLeaveDates.has(dateKey)) {
       return null
     }
 
@@ -403,6 +481,12 @@ export const AttendanceCalendarWidget = () => {
               const leaveOverlay = approvedLeaveByDate[dateKey]
               const extraWork = extraWorkByDate[dateKey]
               const tooltipLabel = status === 'extraWork' ? extraWorkTooltip(extraWork) : leaveOverlay?.leaveType
+              const leaveDay =
+                cell.isCurrentMonth &&
+                status &&
+                status !== 'present' &&
+                status !== 'absent' &&
+                status !== 'holiday'
               const isSelected =
                 cell.isCurrentMonth &&
                 cell.day === selectedDay &&
@@ -424,6 +508,8 @@ export const AttendanceCalendarWidget = () => {
                     } ${
                       isSelected
                         ? 'bg-accent text-white font-bold'
+                        : leaveDay
+                        ? `${attendanceStatusDayClass(status)} !text-white`
                         : cell.isCurrentMonth
                         ? 'text-fg'
                         : 'text-slate-300 dark:text-slate-600 font-normal'

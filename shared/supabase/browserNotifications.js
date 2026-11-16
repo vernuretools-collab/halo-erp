@@ -17,12 +17,12 @@ const ensurePrimedAudio = () => {
   return primedAudio
 }
 
-const ensureAudioContext = () => {
-  const Ctx = window.AudioContext || window.webkitAudioContext
-  if (!Ctx) return null
-  if (!audioCtx) audioCtx = new Ctx()
-  if (audioCtx.state === 'suspended') void audioCtx.resume()
-  return audioCtx
+const runningAudioContext = () =>
+  audioCtx && audioCtx.state === 'running' ? audioCtx : null
+
+const markAudioUnlocked = () => {
+  audioUnlocked = true
+  detachUnlockListeners()
 }
 
 const isElectronDesktop = () =>
@@ -58,11 +58,31 @@ const detachUnlockListeners = () => {
   document.removeEventListener('keydown', unlockAnnouncementAudio, true)
 }
 
-export const unlockAnnouncementAudio = () => {
+export const unlockAnnouncementAudio = (event) => {
   if (typeof window === 'undefined') return
+  if (audioUnlocked) {
+    detachUnlockListeners()
+    return
+  }
+  const type = event?.type
+  if (type !== 'pointerdown' && type !== 'keydown') return
+
   try {
-    ensureAudioContext()
-    if (audioUnlocked) return
+    const Ctx = window.AudioContext || window.webkitAudioContext
+    if (Ctx) {
+      if (!audioCtx) audioCtx = new Ctx()
+      if (audioCtx.state === 'running') {
+        markAudioUnlocked()
+      } else if (audioCtx.state === 'suspended') {
+        void audioCtx
+          .resume()
+          .then(() => {
+            if (audioCtx?.state === 'running') markAudioUnlocked()
+          })
+          .catch(() => {})
+      }
+    }
+
     const audio = ensurePrimedAudio()
     if (!audio) return
     audio.volume = 0
@@ -71,8 +91,7 @@ export const unlockAnnouncementAudio = () => {
       .then(() => {
         audio.pause()
         audio.currentTime = 0
-        audioUnlocked = true
-        detachUnlockListeners()
+        markAudioUnlocked()
       })
       .catch(() => {})
   } catch {
@@ -87,12 +106,12 @@ const bindAnnouncementAudioUnlock = () => {
   document.addEventListener('keydown', unlockAnnouncementAudio, true)
 }
 
-bindAnnouncementAudioUnlock()
-
 export const playAnnouncementChime = () => {
+  if (!audioUnlocked) return
+
   const playOscillator = () => {
     try {
-      const ctx = ensureAudioContext()
+      const ctx = runningAudioContext()
       if (!ctx) return
       const now = ctx.currentTime
       const osc = ctx.createOscillator()
@@ -124,7 +143,9 @@ export const playAnnouncementChime = () => {
     } catch {
       // ignore if the file is not seekable yet
     }
-    void audio.play().catch(playOscillator)
+    void audio.play().catch(() => {
+      playOscillator()
+    })
   } catch {
     playOscillator()
   }
@@ -241,7 +262,7 @@ export const showForegroundAnnouncementNotification = (payload) =>
   showForegroundBrowserNotification(payload)
 
 export const armBrowserNotifications = async () => {
-  unlockAnnouncementAudio()
+  bindAnnouncementAudioUnlock()
   if (isElectronDesktop()) return 'granted'
   const permission = await ensureNotificationPermission()
   await ensureNotificationServiceWorker()

@@ -31,6 +31,27 @@ import {
   Calendar,
 } from 'lucide-react'
 
+const employeeAliases = (emp) =>
+  [emp?.id, emp?.uid, emp?.employeeId, emp?.email, emp?.name]
+    .filter(Boolean)
+    .map((value) => String(value).trim().toLowerCase())
+
+const projectMatchesEmployee = (project, emp) => {
+  const keys = new Set(employeeAliases(emp))
+  if (!keys.size) return false
+  const hit = (value) => value != null && value !== '' && keys.has(String(value).trim().toLowerCase())
+  if (hit(project.employeeId) || hit(project.createdBy) || hit(project.ownerName) || hit(project.createdByName)) {
+    return true
+  }
+  if (Array.isArray(project.assignedEmployeeIds) && project.assignedEmployeeIds.some(hit)) return true
+  const members = Array.isArray(project.members) ? project.members : []
+  return members.some((member) => {
+    if (member == null) return false
+    if (typeof member !== 'object') return hit(member)
+    return hit(member.uid) || hit(member.id) || hit(member.employeeId) || hit(member.email) || hit(member.name) || hit(member.displayName)
+  })
+}
+
 const formatHoursAsHrsMins = (hours) => {
   const totalMinutes = Math.round(Number(hours) * 60)
   if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) return '0 mins'
@@ -56,6 +77,7 @@ export const ProjectList = () => {
 
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [employeeFilter, setEmployeeFilter] = useState('all')
   const [showAddModal, setShowAddModal] = useState(false)
   const [loading, setLoading] = useState(true)
 
@@ -100,6 +122,34 @@ export const ProjectList = () => {
     }
   }, [fetchProjectsAndTasks])
 
+  useEffect(() => {
+    let cancelled = false
+    getDocs(collection(db, 'employees'))
+      .then((snap) => {
+        if (cancelled) return
+        const empList = snap.docs
+          .map((d) => {
+            const data = d.data() || {}
+            return {
+              id: d.id,
+              uid: data.uid || d.id,
+              employeeId: data.employeeId || '',
+              email: data.email || '',
+              name: data.name || data.fullName || data.displayName || 'Unknown',
+              role: data.role || data.roleName || data.jobTitle || data.department || '',
+              status: data.status || 'active',
+            }
+          })
+          .filter(isDirectoryVisible)
+          .sort((a, b) => a.name.localeCompare(b.name))
+        setEmployees(empList)
+      })
+      .catch((err) => console.error('Error fetching employees:', err))
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   // Fetch clients & employees when modal opens
   useEffect(() => {
     if (!showAddModal && !editModalProj) return
@@ -126,13 +176,20 @@ export const ProjectList = () => {
         const clientList = Array.from(clientCompaniesMap.values())
 
         const empList = empSnap.docs
-          .map((d) => ({
-            id: d.id,
-            name: d.data().name || d.data().fullName || d.data().displayName || 'Unknown',
-            role: d.data().role || d.data().roleName || d.data().jobTitle || d.data().department || '',
-            status: d.data().status || 'active',
-          }))
+          .map((d) => {
+            const data = d.data() || {}
+            return {
+              id: d.id,
+              uid: data.uid || d.id,
+              employeeId: data.employeeId || '',
+              email: data.email || '',
+              name: data.name || data.fullName || data.displayName || 'Unknown',
+              role: data.role || data.roleName || data.jobTitle || data.department || '',
+              status: data.status || 'active',
+            }
+          })
           .filter(isDirectoryVisible)
+          .sort((a, b) => a.name.localeCompare(b.name))
 
         setClients(clientList)
         setEmployees(empList)
@@ -200,7 +257,9 @@ export const ProjectList = () => {
       (p.name && p.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (p.clientName && p.clientName.toLowerCase().includes(searchQuery.toLowerCase()))
     const matchesStatus = statusFilter === 'all' || getProjectDisplayStatus(p) === statusFilter
-    return matchesSearch && matchesStatus
+    const selectedEmployee = employeeFilter === 'all' ? null : employees.find((emp) => emp.id === employeeFilter)
+    const matchesEmployee = !selectedEmployee || projectMatchesEmployee(p, selectedEmployee)
+    return matchesSearch && matchesStatus && matchesEmployee
   })
 
   // Summary Metrics
@@ -391,6 +450,18 @@ export const ProjectList = () => {
           </div>
 
           <div className="flex items-center gap-3">
+            <select
+              value={employeeFilter}
+              onChange={(e) => setEmployeeFilter(e.target.value)}
+              className="bg-canvas border border-border text-xs text-fg rounded-xl px-3 py-1.5 focus:outline-none cursor-pointer max-w-[180px]"
+            >
+              <option value="all">All Employees</option>
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.name}
+                </option>
+              ))}
+            </select>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}

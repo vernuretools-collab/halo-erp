@@ -44,6 +44,7 @@ export const EmployeeList = () => {
   const [showAddModal, setShowAddModal] = useState(false)
   const [deleteConfirmEmp, setDeleteConfirmEmp] = useState(null)
   const [todayAttendanceMap, setTodayAttendanceMap] = useState({})
+  const [attendanceReady, setAttendanceReady] = useState(false)
 
   // New member form
   const [name, setName] = useState('')
@@ -100,16 +101,19 @@ export const EmployeeList = () => {
           }
         })
         setTodayAttendanceMap(map)
+        setAttendanceReady(true)
       },
       (err) => {
         console.error('Error fetching today attendance map:', err)
+        setAttendanceReady(true)
       }
     )
 
     return () => unsub()
   }, [])
 
-  const isEmpPresent = (emp) => {
+  const presenceFor = (emp) => {
+    if (!attendanceReady) return null
     const empUid = emp.uid || emp.id
     if (empUid && todayAttendanceMap[empUid] !== undefined) {
       return todayAttendanceMap[empUid]
@@ -129,7 +133,7 @@ export const EmployeeList = () => {
 
   // Team Metrics
   const totalHeadcount = employees.length
-  const presentCount = employees.filter((e) => isEmpPresent(e)).length
+  const presentCount = employees.filter((e) => presenceFor(e) === true).length
 
   const handleInviteMember = async (e) => {
     e.preventDefault()
@@ -248,7 +252,7 @@ export const EmployeeList = () => {
               Today's Attendance
             </span>
             <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
-              {presentCount} / {totalHeadcount} Present
+              {attendanceReady ? `${presentCount} / ${totalHeadcount} Present` : '—'}
             </p>
           </div>
           <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
@@ -267,7 +271,7 @@ export const EmployeeList = () => {
       {/* Employee Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {filtered.map((emp) => {
-          const present = isEmpPresent(emp)
+          const present = presenceFor(emp)
 
           return (
             <Card key={emp.uid || emp.id} hover className="space-y-3.5 border-border relative group">
@@ -285,12 +289,14 @@ export const EmployeeList = () => {
                     <p className="text-xs text-muted">{emp.roleName}</p>
                   </div>
                 </div>
-                <Badge variant={present ? 'success' : 'danger'}>
-                  <span className="flex items-center gap-1.5 font-semibold">
-                    <span className={`w-1.5 h-1.5 rounded-full ${present ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                    {present ? 'Present' : 'Absent'}
-                  </span>
-                </Badge>
+                {present !== null && (
+                  <Badge variant={present ? 'success' : 'danger'}>
+                    <span className="flex items-center gap-1.5 font-semibold">
+                      <span className={`w-1.5 h-1.5 rounded-full ${present ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                      {present ? 'Present' : 'Absent'}
+                    </span>
+                  </Badge>
+                )}
               </div>
 
               <div className="space-y-1 text-xs text-muted pt-1">

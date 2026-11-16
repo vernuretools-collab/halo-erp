@@ -378,13 +378,35 @@ export const deleteTaskStatusFromDb = async (statusId) => {
   }
 }
 
+function docsFromRows(rows, idKey) {
+  return (rows || [])
+    .map((row) => ({ [idKey]: row.id, id: row.id, ...(row.data || {}) }))
+    .filter((doc) => !doc.deletedAt)
+}
+
+// RLS on projects/tasks is an initplan over the caller's projects, so this
+// select stays within the signed-in employee's existing visibility.
+async function selectVisibleRows(table) {
+  const pageSize = 1000
+  const rows = []
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from(table)
+      .select('id, data')
+      .order('id', { ascending: true })
+      .range(from, from + pageSize - 1)
+    if (error) throw error
+    rows.push(...(data || []))
+    if (!data || data.length < pageSize) break
+  }
+  return rows
+}
+
 // ─── Fetch All Projects ────────────────────────────────────────────────────────
 export const getProjectsFromDb = async () => {
   try {
-    const snap = await getDocs(collection(db, 'projects'))
-    return snap.docs
-      .map((d) => ({ projectId: d.id, id: d.id, ...d.data() }))
-      .filter((p) => !p.deletedAt)
+    if (!supabase) return []
+    return docsFromRows(await selectVisibleRows('projects'), 'projectId')
   } catch (err) {
     console.error('Error fetching projects from Firestore:', err)
     return []
@@ -394,10 +416,8 @@ export const getProjectsFromDb = async () => {
 // ─── Fetch All Tasks ───────────────────────────────────────────────────────────
 export const getTasksFromDb = async () => {
   try {
-    const snap = await getDocs(collection(db, 'tasks'))
-    return snap.docs
-      .map((d) => ({ taskId: d.id, id: d.id, ...d.data() }))
-      .filter((t) => !t.deletedAt)
+    if (!supabase) return []
+    return docsFromRows(await selectVisibleRows('tasks'), 'taskId')
   } catch (err) {
     console.error('Error fetching tasks from Firestore:', err)
     return []
@@ -425,8 +445,7 @@ export const createProjectInDb = async (projData) => {
     return { ...payload, createdAt: new Date().toISOString() }
   } catch (err) {
     console.error('Error creating project in Firestore:', err)
-    const projectId = `proj_${Date.now()}`
-    return { projectId, id: projectId, ...projData }
+    throw err
   }
 }
 

@@ -61,11 +61,39 @@ const PAID_TYPE_FOR_BUCKET = {
   wfh: 'Work From Home',
 }
 
+export const calendarDateKey = (value) => {
+  if (value == null || value === '') return ''
+  if (typeof value?.toDate === 'function') {
+    try {
+      return calendarDateKey(value.toDate())
+    } catch {
+      return ''
+    }
+  }
+  if (typeof value === 'object' && typeof value.seconds === 'number') {
+    return calendarDateKey(new Date(value.seconds * 1000))
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const y = value.getFullYear()
+    const m = String(value.getMonth() + 1).padStart(2, '0')
+    const d = String(value.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
+  const text = String(value)
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})/)
+  if (match) return match[1]
+  const parsed = new Date(text)
+  if (Number.isNaN(parsed.getTime())) return ''
+  return calendarDateKey(parsed)
+}
+
 export const expandLeaveDateRange = (startDate, endDate) => {
   const dates = []
-  if (!startDate) return dates
-  const start = new Date(`${startDate}T00:00:00`)
-  const end = new Date(`${(endDate || startDate)}T00:00:00`)
+  const startKey = calendarDateKey(startDate)
+  const endKey = calendarDateKey(endDate || startDate)
+  if (!startKey) return dates
+  const start = new Date(`${startKey}T00:00:00`)
+  const end = new Date(`${endKey || startKey}T00:00:00`)
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return dates
   const cursor = new Date(start)
   while (cursor <= end) {
@@ -399,6 +427,55 @@ export const applyLopConversion = ({
   return { leaveType: requestedLeaveType, requestedLeaveType, convertedToLop: false }
 }
 
+const statusFromStoredLeave = (leave) => {
+  const requested = getRequestedLeaveType(leave)
+  if (isPermissionLeave(leave) || requested === PERMISSION_LEAVE_TYPE) return null
+  if (isHolidayWorkRequest(leave)) return null
+  if (requested === 'On Duty' || leave?.leaveType === 'On Duty') {
+    return {
+      status: 'leave',
+      leaveType: 'On Duty',
+      requestedLeaveType: requested,
+      convertedToLop: false,
+    }
+  }
+  const stored =
+    leave?.convertedToLop || leave?.leaveType === LOP_LEAVE_TYPE || requested === LOP_LEAVE_TYPE
+      ? LOP_LEAVE_TYPE
+      : leave?.leaveType || requested
+  const bucket = getLeaveBucket(stored)
+  const status =
+    stored === LOP_LEAVE_TYPE
+      ? 'lop'
+      : stored === EMERGENCY_LEAVE_TYPE
+        ? 'emergency'
+        : stored === COMBO_OFFER_LEAVE_TYPE
+          ? 'combo'
+          : bucket || 'leave'
+  const leaveType = status === 'lop' ? LOP_LEAVE_TYPE : bucket ? PAID_TYPE_FOR_BUCKET[bucket] : stored
+  return {
+    status,
+    leaveType,
+    requestedLeaveType: requested,
+    convertedToLop: status === 'lop',
+  }
+}
+
+/** Approved casual, LOP, and the other saved types on one calendar day. */
+export const approvedLeaveOnDate = (leaveRequests, dateKey, holidays) => {
+  let found = null
+  for (const leave of Array.isArray(leaveRequests) ? leaveRequests : []) {
+    if (leaveStatusKey(leave) !== 'approved') continue
+    const info = statusFromStoredLeave(leave)
+    if (!info) continue
+    const dates = expandLeaveWorkingDates(leave.startDate, leave.endDate || leave.startDate, holidays)
+    if (!dates.includes(dateKey)) continue
+    if (info.status === 'lop') return info
+    found = info
+  }
+  return found
+}
+
 /**
  * date → { status, leaveType, requestedLeaveType, convertedToLop }
  * status: wfh | casual | sick | lop | leave
@@ -425,63 +502,35 @@ export const classifyApprovedLeaveByDate = (leaveRequests, employeeFilter, limit
     })
   })
 
+  // Color from the saved leave type. Casual stays Casual and LOP stays LOP.
+  // The monthly quota is applied when the request is saved, not again here.
   dayEntries.forEach((entry) => {
-    if (getLeaveBucket(entry.requested)) return
     if (entry.requested === 'On Duty' || entry.leave.leaveType === 'On Duty') return
     if (isPermissionLeave(entry.leave) || entry.requested === PERMISSION_LEAVE_TYPE) return
-    const type = entry.leave.leaveType === LOP_LEAVE_TYPE || entry.requested === LOP_LEAVE_TYPE
-      ? LOP_LEAVE_TYPE
-      : entry.requested === EMERGENCY_LEAVE_TYPE || entry.leave.leaveType === EMERGENCY_LEAVE_TYPE
-        ? EMERGENCY_LEAVE_TYPE
-        : entry.requested
+    const stored =
+      entry.leave.convertedToLop || entry.leave.leaveType === LOP_LEAVE_TYPE || entry.requested === LOP_LEAVE_TYPE
+        ? LOP_LEAVE_TYPE
+        : entry.leave.leaveType || entry.requested
+    const bucket = getLeaveBucket(stored)
     const status =
-      type === LOP_LEAVE_TYPE
+      stored === LOP_LEAVE_TYPE
         ? 'lop'
-        : type === EMERGENCY_LEAVE_TYPE
+        : stored === EMERGENCY_LEAVE_TYPE
           ? 'emergency'
-          : type === COMBO_OFFER_LEAVE_TYPE
+          : stored === COMBO_OFFER_LEAVE_TYPE
             ? 'combo'
-            : 'leave'
-    if (map[entry.date]?.status === 'lop') return
+            : bucket || 'leave'
+    const leaveType =
+      status === 'lop' ? LOP_LEAVE_TYPE : bucket ? PAID_TYPE_FOR_BUCKET[bucket] : stored
+    if (map[entry.date]?.status === 'lop' && status !== 'lop') return
     map[entry.date] = {
       status,
-      leaveType: type,
+      leaveType,
       requestedLeaveType: entry.requested,
-      convertedToLop: type === LOP_LEAVE_TYPE,
+      convertedToLop: status === 'lop',
     }
   })
-
-  const byMonthBucket = {}
-  dayEntries.forEach((entry) => {
-    const bucket = getLeaveBucket(entry.requested)
-    if (!bucket) return
-    const key = `${entry.date.slice(0, 7)}:${bucket}`
-    if (!byMonthBucket[key]) byMonthBucket[key] = []
-    byMonthBucket[key].push(entry)
-  })
-
-  Object.entries(byMonthBucket).forEach(([key, entries]) => {
-    const bucket = key.split(':')[1]
-    const limit = Number(limits?.[bucket]) || 0
-    entries.sort((a, b) => {
-      if (a.date !== b.date) return a.date.localeCompare(b.date)
-      if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt
-      return String(a.leaveId).localeCompare(String(b.leaveId))
-    })
-    entries.forEach((entry, index) => {
-      const over = index >= limit
-      const paidType = PAID_TYPE_FOR_BUCKET[bucket]
-      const status = over ? 'lop' : bucket
-      const leaveType = over ? LOP_LEAVE_TYPE : paidType
-      if (map[entry.date]?.status === 'lop') return
-      map[entry.date] = {
-        status,
-        leaveType,
-        requestedLeaveType: entry.requested,
-        convertedToLop: over,
-      }
-    })
-  })
+  void limits
 
   return map
 }
@@ -550,15 +599,15 @@ export const attendanceStatusDotClass = (status) => {
 export const attendanceStatusDotSizeClass = () => 'w-1.5 h-1.5'
 
 export const attendanceStatusDayClass = (status) => {
-  if (status === 'holiday') return 'bg-[#EAB308]/20 text-[#EAB308] font-bold'
-  if (status === 'lop') return 'bg-[#EC4899]/15 text-[#EC4899] font-bold'
-  if (status === 'wfh') return 'bg-[#06B6D4]/20 text-[#06B6D4] font-bold'
-  if (status === 'casual') return 'bg-[#A855F7]/15 text-[#A855F7] font-bold'
-  if (status === 'sick') return 'bg-[#F97316]/20 text-[#F97316] font-bold'
-  if (status === 'emergency') return 'bg-[#7F1D1D]/20 text-[#7F1D1D] font-bold'
-  if (status === 'extraWork') return 'bg-[#3B82F6]/20 text-[#3B82F6] font-bold'
-  if (status === 'combo') return 'bg-[#14B8A6]/20 text-[#14B8A6] font-bold'
-  if (status === 'leave') return 'bg-[#A855F7]/15 text-[#A855F7] font-bold'
+  if (status === 'holiday') return 'bg-[#EAB308]/20 text-white font-bold'
+  if (status === 'lop') return 'bg-[#EC4899]/15 text-white font-bold'
+  if (status === 'wfh') return 'bg-[#06B6D4]/20 text-white font-bold'
+  if (status === 'casual') return 'bg-[#A855F7]/15 text-white font-bold'
+  if (status === 'sick') return 'bg-[#F97316]/20 text-white font-bold'
+  if (status === 'emergency') return 'bg-[#7F1D1D]/20 text-white font-bold'
+  if (status === 'extraWork') return 'bg-[#3B82F6]/20 text-white font-bold'
+  if (status === 'combo') return 'bg-[#14B8A6]/20 text-white font-bold'
+  if (status === 'leave') return 'bg-[#A855F7]/15 text-white font-bold'
   if (status === 'present') return 'text-[#22C55E] font-bold'
   if (status === 'absent') return 'text-[#EF4444] font-bold'
   return ''

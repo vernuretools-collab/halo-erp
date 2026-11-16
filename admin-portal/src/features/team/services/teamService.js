@@ -28,6 +28,7 @@ import {
   leaveDatesInMonth,
   monthlyReportDocId,
 } from './monthlyReportEngine'
+import { getWorkingHours } from '../../../../../shared/workingHours.js'
 import {
   applyLopConversion,
   countUsedPermissionHours,
@@ -87,12 +88,29 @@ export const getDirectoryEmployees = async () => {
   return employees.filter(isDirectoryVisible)
 }
 
+export function departmentLabelKey(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+export function sortDepartments(departments) {
+  return [...(departments || [])].sort((a, b) => {
+    const ao = Number.isFinite(Number(a?.order)) ? Number(a.order) : 0
+    const bo = Number.isFinite(Number(b?.order)) ? Number(b.order) : 0
+    if (ao !== bo) return ao - bo
+    return String(a?.name || '').localeCompare(String(b?.name || ''), undefined, { sensitivity: 'base' })
+  })
+}
+
 /**
  * Fetch all departments from Firestore /departments
  */
 export const getDepartments = async () => {
   const snap = await getDocs(collection(db, 'departments'))
-  return snap.docs.map((d) => ({ deptId: d.id, ...d.data() }))
+  return sortDepartments(snap.docs.map((d) => ({ deptId: d.id, ...d.data() })))
 }
 
 /**
@@ -768,13 +786,74 @@ export const recordAttendanceInDb = async (attendanceData) => {
  * Add a new department to Firestore
  */
 export const createDepartment = async (name) => {
+  const trimmed = String(name || '').replace(/\s+/g, ' ').trim()
+  const order = Date.now()
   try {
-    const docRef = await addDoc(collection(db, 'departments'), { name })
-    return { deptId: docRef.id, name }
+    const docRef = await addDoc(collection(db, 'departments'), { name: trimmed || name, order })
+    return { deptId: docRef.id, name: trimmed || name, order }
   } catch (err) {
     console.error('Error creating department in Firestore:', err)
-    return { deptId: `dept_${Date.now()}`, name }
+    return { deptId: `dept_${Date.now()}`, name: trimmed || name }
   }
+}
+
+/**
+ * Rename a department and move active and former staff who still use the old name.
+ */
+export const renameDepartment = async (deptId, oldName, newName) => {
+  const next = String(newName || '').replace(/\s+/g, ' ').trim()
+  if (!deptId || !next) throw new Error('Department name is required.')
+  await updateDoc(doc(db, 'departments', deptId), { name: next })
+  const oldKey = departmentLabelKey(oldName)
+  const sameLabel = oldKey === departmentLabelKey(next) && String(oldName || '').trim() === next
+  if (!oldKey || sameLabel) {
+    return { deptId, name: next }
+  }
+  const snap = await getDocs(collection(db, 'employees'))
+  const ids = snap.docs
+    .filter((row) => {
+      const data = row.data() || {}
+      const keys = [departmentLabelKey(data.department), departmentLabelKey(data.departmentName)].filter(Boolean)
+      if (!keys.includes(oldKey)) return false
+      return data.department !== next || data.departmentName !== next
+    })
+    .map((row) => row.id)
+  const failures = []
+  for (const uid of ids) {
+    try {
+      await updateDoc(doc(db, 'employees', uid), { department: next, departmentName: next })
+      try {
+        await updateDoc(doc(db, 'users', uid), { department: next, departmentName: next })
+      } catch {
+        // users doc may not exist for every employee
+      }
+    } catch (err) {
+      failures.push(err)
+    }
+  }
+  if (failures.length) {
+    throw new Error('Department renamed, but some employee records could not be updated.')
+  }
+  return { deptId, name: next }
+}
+
+/**
+ * Remove a department column. Employee rows stay.
+ */
+export const deleteDepartment = async (deptId) => {
+  if (!deptId) return
+  await deleteDoc(doc(db, 'departments', deptId))
+}
+
+/**
+ * Persist the current department order. Index 0 is the first chart column.
+ */
+export const reorderDepartments = async (ordered) => {
+  await Promise.all(
+    (ordered || []).map((dept, index) =>
+      updateDoc(doc(db, 'departments', dept.deptId), { order: index })
+    )
+  )
 }
 
 /**
@@ -1266,7 +1345,7 @@ export const generateEmployeeMonthlyReport = async (
   const uid = employee?.uid || employee?.employeeId || employee?.id
   if (!uid || !month) throw new Error('generateEmployeeMonthlyReport requires employee uid and month')
 
-  const [attendanceLogs, leaveRequests, timelineEntries, holidays, idleDays] = await Promise.all([
+  const [attendanceLogs, leaveRequests, timelineEntries, holidays, idleDays, workingHours] = await Promise.all([
     preloaded?.attendanceLogs
       ? Promise.resolve(attendanceLogsForEmployee(preloaded.attendanceLogs, employee))
       : getAttendanceLogsForMonth(month).then((logs) => attendanceLogsForEmployee(logs, employee)),
@@ -1280,6 +1359,7 @@ export const generateEmployeeMonthlyReport = async (
       : getTimelineEntriesForMonth(month, uid),
     preloaded?.holidays ? Promise.resolve(preloaded.holidays) : getCompanyHolidays(),
     preloaded?.idleDays ? Promise.resolve(preloaded.idleDays) : getWorkIdleForMonth(month),
+    preloaded?.workingHours ? Promise.resolve(preloaded.workingHours) : getWorkingHours(),
   ])
 
   const report = buildEmployeeMonthlyReport({
@@ -1291,6 +1371,7 @@ export const generateEmployeeMonthlyReport = async (
     holidays,
     idleDays,
     generatedBy,
+    workingHours,
   })
 
   return saveMonthlyReport(report)
@@ -1311,15 +1392,16 @@ export const generateAllEmployeesMonthlyReports = async (month, generatedBy = 'A
     return []
   }
 
-  const [attendanceLogs, leaveRequests, timelineEntries, holidays, idleDays] = await Promise.all([
+  const [attendanceLogs, leaveRequests, timelineEntries, holidays, idleDays, workingHours] = await Promise.all([
     getAttendanceLogsForMonth(month),
     getLeaveRequestsForMonth(month),
     getTimelineEntriesForMonth(month),
     getCompanyHolidays(),
     getWorkIdleForMonth(month),
+    getWorkingHours(),
   ])
 
-  const preloaded = { attendanceLogs, leaveRequests, timelineEntries, holidays, idleDays }
+  const preloaded = { attendanceLogs, leaveRequests, timelineEntries, holidays, idleDays, workingHours }
   const results = []
   for (const emp of employees || []) {
     try {
