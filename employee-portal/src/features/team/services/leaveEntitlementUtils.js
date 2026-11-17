@@ -433,7 +433,7 @@ const statusFromStoredLeave = (leave) => {
   if (isHolidayWorkRequest(leave)) return null
   if (requested === 'On Duty' || leave?.leaveType === 'On Duty') {
     return {
-      status: 'leave',
+      status: 'present',
       leaveType: 'On Duty',
       requestedLeaveType: requested,
       convertedToLop: false,
@@ -615,6 +615,7 @@ export const attendanceStatusDayClass = (status) => {
 
 export const attendanceStatusTooltip = (status, leaveType, holidayName) => {
   if (status === 'holiday') return holidayName || 'Holiday'
+  if (leaveType === 'On Duty') return 'On Duty'
   if (status === 'lop') return 'LOP (Loss of Pay)'
   if (status === 'wfh') return 'Work From Home'
   if (status === 'casual') return 'Casual Leave'
