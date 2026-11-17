@@ -44,62 +44,6 @@ function flattenRow(row) {
   return out
 }
 
-function xmlText(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
-
-function columnWidth(values) {
-  const longest = values.reduce((max, value) => {
-    const line = String(value ?? '')
-      .split('\n')
-      .reduce((width, part) => Math.max(width, part.length), 0)
-    return Math.max(max, line)
-  }, 12)
-  return Math.min(80, longest + 2) * 7
-}
-
-/** Excel opens this XML workbook with wrapped cells, so notes are not clipped the way a CSV is. */
-function downloadSpreadsheet(filename, columns, rows) {
-  const body = rows.map((row) => columns.map((column) => row[column.key] ?? ''))
-  const widths = columns.map((column, index) => columnWidth([column.header, ...body.map((row) => row[index])]))
-  const header = columns
-    .map((column) => `<Cell ss:StyleID="header"><Data ss:Type="String">${xmlText(column.header)}</Data></Cell>`)
-    .join('')
-  const lines = body
-    .map((row) => {
-      const cells = row
-        .map((value) => `<Cell ss:StyleID="wrap"><Data ss:Type="String">${xmlText(value)}</Data></Cell>`)
-        .join('')
-      return `<Row ss:AutoFitHeight="1">${cells}</Row>`
-    })
-    .join('')
-  const cols = widths.map((width) => `<Column ss:AutoFitWidth="0" ss:Width="${width}"/>`).join('')
-  const xml = `<?xml version="1.0"?>
-<?mso-application progid="Excel.Sheet"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
-<Styles>
-<Style ss:ID="header"><Font ss:Bold="1"/><Alignment ss:Vertical="Top" ss:WrapText="1"/></Style>
-<Style ss:ID="wrap"><Alignment ss:Vertical="Top" ss:WrapText="1"/></Style>
-</Styles>
-<Worksheet ss:Name="Scrum">
-<Table>${cols}<Row ss:AutoFitHeight="1">${header}</Row>${lines}</Table>
-</Worksheet>
-</Workbook>`
-  const blob = new Blob([xml], { type: 'application/vnd.ms-excel;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename.endsWith('.xls') ? filename : `${filename}.xls`
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
-}
-
 export function downloadCsv(filename, rows) {
   const list = (Array.isArray(rows) ? rows : rows ? [rows] : []).map(flattenRow)
   const safe = list.length ? list : [{ message: 'No rows to export' }]
@@ -184,24 +128,18 @@ export async function exportCurrentPage(pathname, session = {}) {
   }
   if (path.startsWith('/team/scrum')) {
     const { listActiveEmployees, listScrumForDate } = await import('../../../../shared/scrum/scrumService.js')
+    const { scrumExportRows } = await import('../../../../shared/scrum/scrumModel.js')
+    const { downloadScrumSheet } = await import('../../../../shared/scrum/downloadScrumSheet.js')
     const [employees, records] = await Promise.all([listActiveEmployees(), listScrumForDate(today)])
-    const rows = employees.map((employee) => {
+    const drafts = {}
+    employees.forEach((employee) => {
       const record = records.get(employee.id)
-      return {
-        employee: employee.name || '',
-        email: employee.email || '',
-        date: today,
+      drafts[employee.id] = {
         morningScrum: record?.morningScrum || '',
         eodUpdate: record?.eodUpdate || '',
       }
     })
-    downloadSpreadsheet(`scrum-${today}`, [
-      { key: 'employee', header: 'Employee' },
-      { key: 'email', header: 'Email' },
-      { key: 'date', header: 'Date' },
-      { key: 'morningScrum', header: 'Morning Scrum' },
-      { key: 'eodUpdate', header: 'EOD Update' },
-    ], rows)
+    downloadScrumSheet(`scrum-${today}`, scrumExportRows(employees, drafts, today))
     return
   }
   if (path.startsWith('/team/announcements')) {

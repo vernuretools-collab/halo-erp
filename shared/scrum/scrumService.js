@@ -45,6 +45,28 @@ export async function listActiveEmployees() {
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
 }
 
+export async function listAttendanceForDate(dateISO) {
+  const snap = await getDocs(query(collection(db, 'attendanceLogs'), where('date', '==', dateISO)))
+  return snap.docs.map((row) => {
+    const data = row.data() || {}
+    const prefix = `${dateISO}_`
+    const uidFromId = String(row.id || '').startsWith(prefix) ? String(row.id).slice(prefix.length) : ''
+    return {
+      uid: data.uid || uidFromId,
+      employeeId: data.employeeId || '',
+      authId: data.authId || data.auth_id || '',
+      identityIds: Array.isArray(data.identityIds) ? data.identityIds : [],
+      present: data.present,
+      onDuty: data.onDuty,
+      clockedIn: data.clockedIn,
+      clockInTime: data.clockInTime,
+      source: data.source,
+      regularSeconds: data.regularSeconds,
+      accumulatedWorkSeconds: data.accumulatedWorkSeconds,
+    }
+  })
+}
+
 export async function listScrumForDate(dateISO) {
   const snap = await getDocs(query(collection(db, 'dailyScrums'), where('date', '==', dateISO)))
   const byEmployee = new Map()

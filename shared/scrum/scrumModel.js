@@ -102,6 +102,67 @@ export function hasScrumNotes(record) {
   return Boolean(morning || eod)
 }
 
+/** One spreadsheet row per employee for the day open on the board. */
+export function scrumExportRows(employees, drafts, dateISO) {
+  return (employees || []).map((employee) => {
+    const draft = drafts?.[employee?.id] || {}
+    return {
+      employee: employee?.name || '',
+      email: employee?.email || '',
+      date: dateISO || '',
+      morningScrum: draft.morningScrum || '',
+      eodUpdate: draft.eodUpdate || '',
+    }
+  })
+}
+
+/** Same present check the attendance screens use. */
+export function attendanceLogIsPresent(log) {
+  if (!log) return false
+  if (log.present === false) return false
+  const worked = Number(log.regularSeconds) || Number(log.accumulatedWorkSeconds) || 0
+  return (
+    log.present === true ||
+    log.onDuty === true ||
+    log.source === 'on_duty' ||
+    Boolean(log.clockedIn) ||
+    (Boolean(log.clockInTime) && log.clockInTime !== '—') ||
+    worked > 0
+  )
+}
+
+function logMatchesEmployee(log, employee) {
+  const employeeIds = new Set(collectIdentityIds(employee))
+  if (!employeeIds.size) return false
+  return collectIdentityIds(log).some((id) => employeeIds.has(id))
+}
+
+/**
+ * Fill empty scrum rows with "absent" for a past day when that employee has no present log.
+ * Today and a missing attendance read are left unchanged. Existing notes stay as saved.
+ */
+export function applyAbsentScrum(employees, drafts, { dateISO, today, logs } = {}) {
+  if (!drafts) return drafts
+  if (!dateISO || !today || String(dateISO) >= String(today)) return drafts
+  if (!Array.isArray(logs)) return drafts
+  const next = { ...drafts }
+  for (const employee of employees || []) {
+    if (!employee?.id) continue
+    const current = next[employee.id]
+    if (!current || hasScrumNotes(current)) continue
+    const present = logs.some((log) => logMatchesEmployee(log, employee) && attendanceLogIsPresent(log))
+    if (present) continue
+    next[employee.id] = {
+      ...current,
+      morningScrum: 'absent',
+      eodUpdate: 'absent',
+      dirty: true,
+      error: '',
+    }
+  }
+  return next
+}
+
 export function matchesEmployeeSearch(employee, query) {
   const q = String(query || '').trim().toLowerCase()
   if (!q) return true

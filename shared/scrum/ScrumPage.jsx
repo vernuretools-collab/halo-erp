@@ -1,23 +1,27 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, Loader2, Save, Search } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Download, Loader2, Save, Search } from 'lucide-react'
 import {
   getScrumConductor,
   listActiveEmployees,
+  listAttendanceForDate,
   listMarkedScrumDays,
   listScrumForDate,
   saveEmployeeScrumDay,
   saveScrumConductors,
 } from './scrumService.js'
 import {
+  applyAbsentScrum,
   calendarCells,
   formatLongDate,
   formatMonthLabel,
   hasScrumNotes,
   isFutureDay,
   matchesEmployeeSearch,
+  scrumExportRows,
   scrumHasStarted,
   todayISO,
 } from './scrumModel.js'
+import { downloadScrumSheet } from './downloadScrumSheet.js'
 
 const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 
@@ -143,10 +147,17 @@ export function ScrumPage({ canAssignConductor = true }) {
     let cancelled = false
     setDayLoading(true)
     setLoadError('')
-    listScrumForDate(selectedDate)
-      .then((records) => {
+    Promise.all([
+      listScrumForDate(selectedDate),
+      listAttendanceForDate(selectedDate).then((logs) => logs, () => null),
+    ])
+      .then(([records, logs]) => {
         if (cancelled || dayRequestRef.current !== requestId) return
-        setDrafts(draftsFromRecords(employees, records))
+        setDrafts(applyAbsentScrum(employees, draftsFromRecords(employees, records), {
+          dateISO: selectedDate,
+          today: todayISO(),
+          logs,
+        }))
       })
       .catch((err) => {
         if (cancelled || dayRequestRef.current !== requestId) return
@@ -280,7 +291,6 @@ export function ScrumPage({ canAssignConductor = true }) {
     [employees, search],
   )
 
-  const dirtyCount = visibleEmployees.filter((employee) => drafts[employee.id]?.dirty).length
   const today = todayISO(now)
   const cells = calendarCells(viewYear, viewMonth)
   const started = scrumHasStarted(now)
@@ -354,15 +364,28 @@ export function ScrumPage({ canAssignConductor = true }) {
           </p>
         </div>
         <div className="flex flex-col items-end gap-3 shrink-0 w-full max-w-sm">
-          <button
-            type="button"
-            onClick={saveVisible}
-            disabled={savingAll || dirtyCount === 0 || dayLoading}
-            className="self-end shrink-0 inline-flex items-center justify-center gap-2 h-9 px-3 text-sm font-medium rounded-lg bg-accent text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-          >
-            {savingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            Save day
-          </button>
+          <div className="flex items-center gap-2 self-end">
+            {!canAssignConductor && (
+              <button
+                type="button"
+                onClick={() => downloadScrumSheet(`scrum-${selectedDate}`, scrumExportRows(employees, drafts, selectedDate))}
+                disabled={dayLoading || !employeesReady}
+                className="shrink-0 inline-flex items-center justify-center gap-2 h-9 px-3 text-sm font-medium rounded-lg border border-border bg-surface text-fg disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                Export
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={saveVisible}
+              disabled={savingAll || dayLoading}
+              className="shrink-0 inline-flex items-center justify-center gap-2 h-9 px-3 text-sm font-medium rounded-lg bg-accent text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              {savingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              Save day
+            </button>
+          </div>
           {canAssignConductor && (
             <div className="relative w-full" ref={conductorPickerRef}>
               <span className="block text-xs font-semibold text-fg mb-1.5">Conduct scrum</span>
