@@ -28,3 +28,5 @@ verify_jwt = false
 
 [functions.send-workflow-email]
 verify_jwt = false
+[functions.qc-r2]
+verify_jwt = false

@@ -1,7 +1,6 @@
 import { supabase } from '../supabase/client.js'
 
 export const QC_BUCKET = 'qc-media'
-export const QC_MAX_BYTES = 50 * 1024 * 1024
 export const QC_ACCEPT =
   '.mp4,.webm,.jpg,.jpeg,.png,.webp,.gif,video/mp4,video/webm,image/jpeg,image/png,image/webp,image/gif'
 
@@ -35,9 +34,6 @@ export function validateQcFile(file) {
   const ext = extensionOf(file.name)
   if (!EXTENSIONS.has(ext)) {
     return 'QC accepts MP4, WebM, and images (JPG, PNG, WebP, GIF).'
-  }
-  if (file.size > QC_MAX_BYTES) {
-    return 'This file is over 50 MB. QC accepts files up to 50 MB.'
   }
   return ''
 }
@@ -89,29 +85,60 @@ export async function listQcItems() {
   return (data || []).map(normalizeItem)
 }
 
-async function uploadVersionFile(itemId, versionNumber, file) {
+async function r2SignedUrl(action, key) {
   const client = requireClient()
-  const storagePath = `${itemId}/v${versionNumber}-${safeFileName(file.name)}`
-  const { error } = await client.storage.from(QC_BUCKET).upload(storagePath, file, {
-    contentType: file.type || undefined,
-    upsert: false,
+  const { data, error } = await client.functions.invoke('qc-r2', {
+    body: { action, key },
   })
-  if (error) throw error
+  if (error) {
+    let message = error.message || 'Could not open file storage.'
+    try {
+      const payload = await error.context?.json?.()
+      if (payload?.error) message = payload.error
+    } catch {
+      /* the function did not return JSON */
+    }
+    throw new Error(message)
+  }
+  if (!data?.url) throw new Error(data?.error || 'Could not open file storage.')
+  return data.url
+}
+
+async function discardR2Object(key) {
+  if (!key) return
+  try {
+    const url = await r2SignedUrl('delete', key)
+    await fetch(url, { method: 'DELETE' })
+  } catch {
+    /* keep the upload error */
+  }
+}
+
+async function uploadVersionFile(itemId, versionNumber, file) {
+  const storagePath = `${itemId}/v${versionNumber}-${safeFileName(file.name)}`
+  const url = await r2SignedUrl('upload', storagePath)
+  const response = await fetch(url, {
+    method: 'PUT',
+    body: file,
+    headers: file.type ? { 'Content-Type': file.type } : undefined,
+  })
+  if (!response.ok) {
+    throw new Error('Could not upload this file. Check that the Cloudflare bucket allows uploads from the portal.')
+  }
   return storagePath
 }
 
-export async function createQcItem({ projectId, title, file, actor }) {
+export async function createQcItem({ title, file, actor }) {
   const fileError = validateQcFile(file)
   if (fileError) throw new Error(fileError)
   const trimmed = String(title || '').trim()
   if (!trimmed) throw new Error('Add a title for this review.')
-  if (!projectId) throw new Error('Pick a project.')
 
   const client = requireClient()
   const itemId = newId()
   const { error: insertError } = await client.from('qc_items').insert({
     id: itemId,
-    project_id: projectId,
+    project_id: null,
     title: trimmed,
     status: 'in_review',
     uploader_id: actor?.id || null,
@@ -136,7 +163,7 @@ export async function createQcItem({ projectId, title, file, actor }) {
     if (versionError) throw versionError
   } catch (err) {
     try {
-      if (storagePath) await client.storage.from(QC_BUCKET).remove([storagePath])
+      if (storagePath) await discardR2Object(storagePath)
       await client.from('qc_items').delete().eq('id', itemId)
     } catch (_) {
       /* keep the upload error */
@@ -164,7 +191,7 @@ export async function addQcVersion({ item, file, actor }) {
     uploaded_by_name: actor?.name || null,
   })
   if (versionError) {
-    await client.storage.from(QC_BUCKET).remove([storagePath])
+    await discardR2Object(storagePath)
     throw versionError
   }
   const { error: statusError } = await client
@@ -246,8 +273,5 @@ export async function setQcStatus({ itemId, status, actor }) {
 }
 
 export async function signedMediaUrl(storagePath) {
-  const client = requireClient()
-  const { data, error } = await client.storage.from(QC_BUCKET).createSignedUrl(storagePath, 60 * 60)
-  if (error) throw error
-  return data?.signedUrl || ''
+  return r2SignedUrl('read', storagePath)
 }

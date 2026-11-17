@@ -36,8 +36,9 @@ function formatWhen(value) {
 }
 
 function projectName(projects, projectId) {
+  if (!projectId) return ''
   const match = projects.find((project) => (project.projectId || project.id) === projectId)
-  return match?.name || 'Project'
+  return match?.name || ''
 }
 
 export function QcReviewPage({ mode, projects, actor }) {
@@ -51,7 +52,6 @@ export function QcReviewPage({ mode, projects, actor }) {
   const [mediaUrl, setMediaUrl] = useState('')
   const [busy, setBusy] = useState(false)
   const [title, setTitle] = useState('')
-  const [projectId, setProjectId] = useState('')
   const [file, setFile] = useState(null)
   const [nextFile, setNextFile] = useState(null)
   const [comment, setComment] = useState('')
@@ -60,6 +60,7 @@ export function QcReviewPage({ mode, projects, actor }) {
   const [mark, setMark] = useState({ timeSeconds: 0, timecode: '0:00.00 · F0', frameNumber: 0 })
   const [focusCommentId, setFocusCommentId] = useState('')
   const [seek, setSeek] = useState({ token: 0, time: null })
+  const [compareOptions, setCompareOptions] = useState([])
 
   const projectOptions = useMemo(
     () =>
@@ -137,6 +138,38 @@ export function QcReviewPage({ mode, projects, actor }) {
     setSeek({ token: 0, time: null })
   }, [selectedVersion?.id])
 
+  const compareKey = (selected?.versions || [])
+    .map((version) => `${version.id}:${version.storage_path || ''}`)
+    .join('|')
+
+  useEffect(() => {
+    let cancelled = false
+    const others = (selected?.versions || []).filter(
+      (version) => version.id !== selectedVersion?.id && version.storage_path
+    )
+    if (!others.length) {
+      setCompareOptions([])
+      return undefined
+    }
+    Promise.all(
+      others.map(async (version) => ({
+        id: version.id,
+        label: `v${version.version_number}`,
+        url: await signedMediaUrl(version.storage_path),
+        kind: mediaKind(version.file_name, version.content_type),
+      }))
+    )
+      .then((list) => {
+        if (!cancelled) setCompareOptions(list.filter((option) => option.url))
+      })
+      .catch(() => {
+        if (!cancelled) setCompareOptions([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [compareKey, selectedVersion?.id])
+
   function commentFields() {
     if (!selectedVersion) return {}
     const image = mediaKind(selectedVersion.file_name, selectedVersion.content_type) === 'image'
@@ -183,7 +216,7 @@ export function QcReviewPage({ mode, projects, actor }) {
           onSubmit={(event) => {
             event.preventDefault()
             run(async () => {
-              const itemId = await createQcItem({ projectId, title, file, actor })
+              const itemId = await createQcItem({ title, file, actor })
               setTitle('')
               setFile(null)
               event.target.reset()
@@ -193,23 +226,12 @@ export function QcReviewPage({ mode, projects, actor }) {
             })
           }}
         >
-          <label className="block text-sm">
+          <label className="block text-sm md:col-span-2">
             <span className="mb-1 block text-muted">Title</span>
             <input className={FIELD} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Reel v1" />
           </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-muted">Project</span>
-            <select className={FIELD} value={projectId} onChange={(event) => setProjectId(event.target.value)}>
-              <option value="">Select a project</option>
-              {projectOptions.map((project) => (
-                <option key={project.projectId || project.id} value={project.projectId || project.id}>
-                  {project.name || 'Untitled project'}
-                </option>
-              ))}
-            </select>
-          </label>
           <label className="block text-sm md:col-span-2">
-            <span className="mb-1 block text-muted">File (MP4, WebM, or image, up to 50 MB)</span>
+            <span className="mb-1 block text-muted">File (MP4, WebM, or image)</span>
             <input
               className="block w-full text-sm text-fg"
               type="file"
@@ -268,7 +290,9 @@ export function QcReviewPage({ mode, projects, actor }) {
                   }`}
                 >
                   <p className="text-sm font-medium text-fg">{item.title}</p>
-                  <p className="mt-1 text-xs text-muted">{projectName(projectOptions, item.project_id)}</p>
+                  {projectName(projectOptions, item.project_id) && (
+                    <p className="mt-1 text-xs text-muted">{projectName(projectOptions, item.project_id)}</p>
+                  )}
                   <span className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_CLASS[item.status] || ''}`}>
                     {qcStatusLabel(item.status)}
                   </span>
@@ -283,8 +307,7 @@ export function QcReviewPage({ mode, projects, actor }) {
                 <div>
                   <h2 className="text-lg font-semibold text-fg">{selected.title}</h2>
                   <p className="text-sm text-muted">
-                    {projectName(projectOptions, selected.project_id)}
-                    {selected.uploader_name ? ` · ${selected.uploader_name}` : ''}
+                    {[projectName(projectOptions, selected.project_id), selected.uploader_name].filter(Boolean).join(' · ')}
                   </p>
                 </div>
                 <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_CLASS[selected.status] || ''}`}>
@@ -325,6 +348,7 @@ export function QcReviewPage({ mode, projects, actor }) {
                     shapes={shapes}
                     onShapes={setShapes}
                     onTime={setMark}
+                    compareOptions={compareOptions}
                   />
 
                   <div>
