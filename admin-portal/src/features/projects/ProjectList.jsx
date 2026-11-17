@@ -9,7 +9,7 @@ import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { useProjectStore } from './stores/projectStore'
-import { createProject, deleteProjectFromDb, updateProjectMembersInDb, updateProjectInDb, getProjectDisplayStatus, getProjectStartDate } from './services/projectService'
+import { createProject, deleteProjectFromDb, updateProjectMembersInDb, updateProjectInDb, getProjectDisplayStatus, getProjectStartDate, getProjectEndDate } from './services/projectService'
 import {
   Plus,
   Search,
@@ -87,6 +87,8 @@ export const ProjectList = () => {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('')
   const [description, setDescription] = useState('')
   const [estimatedDate, setEstimatedDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [dateError, setDateError] = useState('')
 
   // Dropdown data from Firestore
   const [clients, setClients] = useState([])
@@ -102,6 +104,7 @@ export const ProjectList = () => {
   const [editBudget, setEditBudget] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [editEstimatedDate, setEditEstimatedDate] = useState('')
+  const [editEndDate, setEditEndDate] = useState('')
   const [editStatus, setEditStatus] = useState('active')
   const [editSubmitting, setEditSubmitting] = useState(false)
 
@@ -278,6 +281,11 @@ export const ProjectList = () => {
   const handleCreateProject = async (e) => {
     e.preventDefault()
     if (!projName.trim()) return
+    if (estimatedDate && endDate && endDate < estimatedDate) {
+      setDateError('End date must be on or after the start date.')
+      return
+    }
+    setDateError('')
 
     const selectedClient = clients.find((c) => c.id === selectedClientId)
     const selectedEmployee = employees.find((emp) => emp.id === selectedEmployeeId)
@@ -297,6 +305,7 @@ export const ProjectList = () => {
       description,
       estimatedDate: estimatedDate || null,
       startDate: estimatedDate || null,
+      endDate: endDate || null,
       status: 'active',
       completionPercent: 0,
       totalTaskCount: 0,
@@ -313,6 +322,8 @@ export const ProjectList = () => {
     setSelectedEmployeeId('')
     setDescription('')
     setEstimatedDate('')
+    setEndDate('')
+    setDateError('')
     setShowAddModal(false)
   }
 
@@ -330,6 +341,7 @@ export const ProjectList = () => {
     setEditBudget(proj.budget !== undefined && proj.budget !== null ? String(proj.budget) : '')
     setEditDescription(proj.description || '')
     setEditEstimatedDate(proj.startDate || proj.estimatedDate || '')
+    setEditEndDate(getProjectEndDate(proj) || '')
     setEditStatus(proj.status || 'active')
   }
 
@@ -351,6 +363,7 @@ export const ProjectList = () => {
         description: editDescription,
         estimatedDate: editEstimatedDate || null,
         startDate: editEstimatedDate || null,
+        endDate: editEndDate || null,
         status: editStatus || 'active',
       }
 
@@ -550,6 +563,7 @@ export const ProjectList = () => {
             const membersList = proj.members || []
             const displayStatus = getProjectDisplayStatus(proj)
             const startDate = getProjectStartDate(proj)
+            const endDateLabel = getProjectEndDate(proj)
 
             return (
               <Card
@@ -676,6 +690,9 @@ export const ProjectList = () => {
                     <div className="flex items-center gap-3">
                       <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold">
                         <Calendar className="w-3 h-3" /> Start: {startDate || '—'}
+                      </span>
+                      <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold">
+                        End: {endDateLabel || '—'}
                       </span>
                       <div className="flex items-center gap-1">
                         <span className="font-medium text-fg">Lead: </span>
@@ -876,13 +893,24 @@ export const ProjectList = () => {
                 )}
               </div>
 
-              <Input
-                label="Start Date"
-                type="date"
-                value={estimatedDate}
-                onChange={(e) => setEstimatedDate(e.target.value)}
-                required
-              />
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  label="Start Date"
+                  type="date"
+                  value={estimatedDate}
+                  onChange={(e) => setEstimatedDate(e.target.value)}
+                  required
+                />
+                <Input
+                  label="End Date"
+                  type="date"
+                  value={endDate}
+                  min={estimatedDate || undefined}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  required
+                />
+              </div>
+              {dateError && <p className="text-xs font-semibold text-rose-500">{dateError}</p>}
 
               <div className="flex gap-3 pt-2">
                 <Button type="button" variant="secondary" onClick={() => setShowAddModal(false)} className="w-1/3">
@@ -979,6 +1007,13 @@ export const ProjectList = () => {
                   type="date"
                   value={editEstimatedDate}
                   onChange={(e) => setEditEstimatedDate(e.target.value)}
+                />
+                <Input
+                  label="End Date"
+                  type="date"
+                  value={editEndDate}
+                  min={editEstimatedDate || undefined}
+                  onChange={(e) => setEditEndDate(e.target.value)}
                 />
               </div>
 

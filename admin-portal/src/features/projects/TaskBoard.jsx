@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { useProjectStore } from './stores/projectStore'
 import { createTask, updateTaskStatusInDb, deleteTaskFromDb } from './services/projectService'
+import { TaskActivity } from './components/TaskActivity'
 import { getDirectoryEmployees } from '../team/services/teamService'
 import { isDirectoryVisible } from '../../../../shared/employees/employmentStatus.js'
 import { TaskListView } from './components/TaskListView'
@@ -74,19 +75,6 @@ const resolveTaskLeadName = (task, employees = []) => {
   }
 
   return stored || 'Employee'
-}
-
-const formatCommentTime = (iso) => {
-  const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return ''
-  const minutes = Math.round((Date.now() - then) / 60000)
-  if (minutes < 1) return 'Just now'
-  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`
-  const hours = Math.round(minutes / 60)
-  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`
-  const days = Math.round(hours / 24)
-  if (days < 30) return `${days} day${days === 1 ? '' : 's'} ago`
-  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 const collectTaskComments = (task) => {
@@ -177,6 +165,8 @@ export const TaskBoard = () => {
     addTask,
     updateTaskStatus,
     deleteTask,
+    addTaskComment,
+    mergeTaskActivity,
     selectedProjectId,
     setSelectedProjectId,
     fetchProjectsAndTasks,
@@ -268,6 +258,9 @@ export const TaskBoard = () => {
   const [priority, setPriority] = useState('medium')
   const [assigneeId, setAssigneeId] = useState('')
   const [estimatedHours, setEstimatedHours] = useState('10')
+  const [taskStartDate, setTaskStartDate] = useState('')
+  const [taskEndDate, setTaskEndDate] = useState('')
+  const [taskDateError, setTaskDateError] = useState('')
 
   const handleOpenAddModal = () => {
     setProjectId(currentProjId)
@@ -322,6 +315,15 @@ export const TaskBoard = () => {
   const handleCreateTask = async (e) => {
     e.preventDefault()
     if (!taskTitle.trim()) return
+    if (!taskStartDate || !taskEndDate) {
+      setTaskDateError('Start date and end date are required.')
+      return
+    }
+    if (taskEndDate < taskStartDate) {
+      setTaskDateError('End date must be on or after the start date.')
+      return
+    }
+    setTaskDateError('')
 
     const proj = projects.find((p) => p.projectId === projectId || p.id === projectId)
     const selectedAssignee = employees.find(
@@ -343,7 +345,8 @@ export const TaskBoard = () => {
       estimatedHours: Number(estimatedHours) || 0,
       loggedHours: 0,
       status: 'todo',
-      dueDate: new Date(Date.now() + 86400000 * 7).toISOString().split('T')[0],
+      startDate: taskStartDate,
+      dueDate: taskEndDate,
       createdByRole: 'admin',
       isEmployeeCreated: false,
     }
@@ -353,12 +356,16 @@ export const TaskBoard = () => {
 
     setTaskTitle('')
     setTaskDesc('')
+    setTaskStartDate('')
+    setTaskEndDate('')
+    setTaskDateError('')
     setShowAddModal(false)
   }
 
   const handleStatusChange = async (taskId, newStatus) => {
     updateTaskStatus(taskId, newStatus)
-    await updateTaskStatusInDb(taskId, newStatus)
+    const historyEntry = await updateTaskStatusInDb(taskId, newStatus)
+    if (historyEntry) mergeTaskActivity(taskId, [historyEntry])
   }
 
   const handleDeleteTask = async (taskId) => {
@@ -602,6 +609,12 @@ export const TaskBoard = () => {
                           </div>
 
                           <p className="text-[11px] text-accent font-medium truncate">{t.projectName}</p>
+                          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                            <span className="inline-flex items-center gap-1">
+                              <Calendar className="w-3 h-3" /> Start: {t.startDate ? String(t.startDate).slice(0, 10) : '—'}
+                            </span>
+                            <span>End: {t.dueDate ? String(t.dueDate).slice(0, 10) : '—'}</span>
+                          </p>
 
                           <div className="flex items-center justify-between text-xs pt-2 border-t border-border/60">
                             <span className="flex items-center gap-2 text-[11px] text-muted">
@@ -737,6 +750,25 @@ export const TaskBoard = () => {
                 onChange={(e) => setEstimatedHours(e.target.value)}
               />
 
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  label="Start Date"
+                  type="date"
+                  value={taskStartDate}
+                  onChange={(e) => setTaskStartDate(e.target.value)}
+                  required
+                />
+                <Input
+                  label="End Date"
+                  type="date"
+                  value={taskEndDate}
+                  min={taskStartDate || undefined}
+                  onChange={(e) => setTaskEndDate(e.target.value)}
+                  required
+                />
+              </div>
+              {taskDateError && <p className="text-xs font-semibold text-rose-500">{taskDateError}</p>}
+
               <div className="flex gap-3 pt-2">
                 <Button type="button" variant="secondary" onClick={() => setShowAddModal(false)} className="w-1/3">
                   Cancel
@@ -754,10 +786,10 @@ export const TaskBoard = () => {
       {selectedTask && (() => {
         const liveSelectedTask =
           tasks.find((task) => task.taskId === selectedTask.taskId) || selectedTask
-        const comments = collectTaskComments(liveSelectedTask)
+        const statusMeta = statuses.find((status) => status.id === liveSelectedTask.status)
         return (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <Card className="w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 space-y-4 border-border shadow-2xl relative bg-surface">
+          <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 space-y-4 border-border shadow-2xl relative bg-surface">
             <div className="flex items-center justify-between pb-3 border-b border-border">
               <div>
                 <h3 className="font-bold text-fg text-sm">{liveSelectedTask.title}</h3>
@@ -777,34 +809,34 @@ export const TaskBoard = () => {
                 <span className="text-slate-900 dark:text-slate-200 font-medium">{resolveTaskLeadName(liveSelectedTask, employees)}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-border">
+                <span>Status:</span>
+                <span className="inline-flex items-center gap-1.5 font-medium text-slate-900 dark:text-slate-200">
+                  <span className={`h-2 w-2 rounded-full ${getStatusDotBg(statusMeta || liveSelectedTask.status)}`} />
+                  {statusMeta?.name || 'To Do'}
+                </span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-border">
+                <span>Start Date:</span>
+                <span className="text-slate-900 dark:text-slate-200 font-medium">
+                  {liveSelectedTask.startDate ? String(liveSelectedTask.startDate).slice(0, 10) : '—'}
+                </span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-border">
+                <span>End Date:</span>
+                <span className="text-slate-900 dark:text-slate-200 font-medium">
+                  {liveSelectedTask.dueDate ? String(liveSelectedTask.dueDate).slice(0, 10) : '—'}
+                </span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-border">
                 <span>Logged Work:</span>
                 <span className="text-emerald-600 dark:text-emerald-400 font-bold">{formatLoggedVsEstimate(liveSelectedTask.loggedHours, liveSelectedTask.estimatedHours)}</span>
               </div>
             </div>
 
-            <section className="space-y-3 border-t border-border pt-4">
-              <h4 className="flex items-center gap-1.5 text-sm font-bold text-fg">
-                <MessageSquare className="w-4 h-4 text-accent" />
-                Comments
-                <span className="text-xs font-medium text-muted">({comments.length})</span>
-              </h4>
-              {comments.length === 0 ? (
-                <p className="py-4 text-center text-xs text-muted">No comments yet.</p>
-              ) : (
-                <div className="max-h-72 space-y-4 overflow-y-auto pr-1">
-                  {comments.map((entry) => (
-                    <article key={entry.id} className="space-y-1">
-                      <p className="text-sm text-fg">
-                        <span className="font-semibold">{entry.actorName}</span>
-                        <span className="text-muted"> on {entry.context}</span>
-                      </p>
-                      <p className="text-xs text-muted">{formatCommentTime(entry.createdAt)}</p>
-                      <p className="whitespace-pre-wrap text-sm text-fg">{entry.body}</p>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </section>
+            <TaskActivity
+              task={liveSelectedTask}
+              onReply={(text) => addTaskComment(liveSelectedTask.taskId, text)}
+            />
 
             <div className="pt-2">
               <Button

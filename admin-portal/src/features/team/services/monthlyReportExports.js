@@ -3,6 +3,7 @@ import { jsPDF } from 'jspdf'
 import { listDatesInMonth } from './monthlyReportEngine'
 import { formatSecondsToHrsMins, formatTo12HourTime } from './attendanceStatsUtils'
 import { LOP_LEAVE_TYPE } from './leaveEntitlementUtils'
+import { entryTypeLabel } from '../../../../../shared/timelineEntryTypes.js'
 
 const SUMMARY_HEADERS = [
   'Employee',
@@ -275,7 +276,7 @@ function timelineSheetRows({ report, entries, logsByDate }) {
         index === 0 ? dayName(date) : '',
         entry.description || '',
         durationLabel(entry.hours),
-        entry.entryType === 'upskilling' ? 'Upskilling' : 'Work',
+        entryTypeLabel(entry.entryType),
         dayTotalLabel(total),
         clocks.clockIn,
         clocks.clockOut,

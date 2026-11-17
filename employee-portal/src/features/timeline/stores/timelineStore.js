@@ -19,6 +19,7 @@ import {
   rememberTimelineDelete,
   rememberTimelineUpdate,
 } from '../../../../../shared/offlineQueue.js'
+import { normalizeEntryType } from '../../../../../shared/timelineEntryTypes.js'
 
 function readTimelineOutbox() {
   try {
@@ -53,10 +54,8 @@ function applyEntryPatch(entry, updates, pendingSync) {
     hours: updates.hours !== undefined ? Number(updates.hours) || 0 : entry.hours,
     entryType:
       updates.entryType !== undefined
-        ? updates.entryType === 'upskilling'
-          ? 'upskilling'
-          : 'work'
-        : entry.entryType || 'work',
+        ? normalizeEntryType(updates.entryType)
+        : normalizeEntryType(entry.entryType),
     pendingSync,
   }
 }

@@ -44,53 +44,18 @@ import {
 
 const applySubtaskWorkflowStatus = (st, status) => {
   const nextStatus = status || 'todo'
-  const now = new Date().toISOString()
-  const base = { ...st, status: nextStatus, isCompleted: nextStatus === 'done' }
-
-  if (nextStatus === 'done') {
-    return { ...base, ...stopTimerFields(st, now) }
+  const priorStatus = st.status || (st.isCompleted ? 'done' : 'todo')
+  const timerPatch = timerPatchForStatusMove(
+    { ...st, status: priorStatus },
+    nextStatus,
+    attendanceSnapshot()
+  )
+  return {
+    ...st,
+    status: nextStatus,
+    isCompleted: nextStatus === 'done',
+    ...(timerPatch || {}),
   }
-
-  if (nextStatus === 'todo') {
-    const priorStatus = st.status || 'todo'
-    if (priorStatus !== 'todo' && st.timerStatus === 'running') {
-      return { ...base, ...pauseTimerFields(st, now, { byAttendance: false }) }
-    }
-    return {
-      ...base,
-      timerStatus: 'paused',
-      timerAccumulatedMs: Number(st.timerAccumulatedMs) || 0,
-      timerStartedAt: null,
-      timerStoppedAt: null,
-      timerPausedByAttendance: false,
-    }
-  }
-
-  const counted =
-    (st.status || 'todo') === 'todo' && st.timerStatus === 'running'
-      ? { ...st, timerStatus: 'paused', timerStartedAt: null, timerAccumulatedMs: Number(st.timerAccumulatedMs) || 0 }
-      : st
-
-  const working = counted.timerStatus === 'stopped'
-    ? { ...counted, timerStatus: 'paused', timerAccumulatedMs: Number(counted.timerAccumulatedMs) || 0, timerStoppedAt: null }
-    : counted
-
-  if (!isEmployeeActivelyWorking(attendanceSnapshot())) {
-    if (working.timerStatus === 'running') {
-      return { ...base, ...pauseTimerFields(working, now, { byAttendance: true }) }
-    }
-    return {
-      ...base,
-      timerStatus: 'paused',
-      timerAccumulatedMs: Number(working.timerAccumulatedMs) || 0,
-      timerStartedAt: null,
-      timerStoppedAt: null,
-      timerPausedByAttendance: true,
-    }
-  }
-
-  if (working.timerStatus === 'running') return { ...base, ...working, status: nextStatus, isCompleted: false }
-  return { ...base, ...resumeTimerFields(working, now) }
 }
 
 const attendanceSnapshot = () => {
@@ -538,7 +503,7 @@ export const useProjectStore = create(
       resumeTaskTimer: async (taskId) => {
         const targetTask = get().tasks.find((t) => t.taskId === taskId)
         if (!targetTask || targetTask.timerStatus !== 'paused') return
-        if (targetTask.status === 'done' || targetTask.status === 'todo') return
+        if (targetTask.status !== 'in_progress') return
         if (!isEmployeeActivelyWorking(attendanceSnapshot())) return
 
         const patch = resumeTimerFields(targetTask)
@@ -579,12 +544,14 @@ export const useProjectStore = create(
               let parentChanged = false
               let subtasksChanged = false
 
-              if (t.status === 'todo' && t.timerStatus === 'running') {
-                next = {
-                  ...t,
-                  ...pauseTimerFields(t, now, { byAttendance: false }),
+              if (t.status !== 'in_progress') {
+                if (t.timerStatus === 'running') {
+                  next = {
+                    ...t,
+                    ...pauseTimerFields(t, now, { byAttendance: false }),
+                  }
+                  parentChanged = true
                 }
-                parentChanged = true
               } else if (!active) {
                 if (t.timerStatus === 'running') {
                   next = {
@@ -593,8 +560,20 @@ export const useProjectStore = create(
                   }
                   parentChanged = true
                 }
-              } else if (t.status !== 'todo' && t.timerStatus === 'paused' && t.timerPausedByAttendance) {
-                next = { ...t, ...resumeTimerFields(t, now) }
+              } else if (
+                t.timerStatus === 'stopped' ||
+                (t.timerStatus === 'paused' && t.timerPausedByAttendance)
+              ) {
+                const resumable =
+                  t.timerStatus === 'stopped'
+                    ? {
+                        ...t,
+                        timerStatus: 'paused',
+                        timerAccumulatedMs: Number(t.timerAccumulatedMs) || 0,
+                        timerStoppedAt: null,
+                      }
+                    : t
+                next = { ...t, ...resumeTimerFields(resumable, now) }
                 parentChanged = true
               }
 
@@ -605,7 +584,7 @@ export const useProjectStore = create(
                   subtasksChanged = true
                   return { ...st, status: 'done', isCompleted: true, ...stopTimerFields(st, now) }
                 }
-                if (subtaskStatus === 'todo') {
+                if (subtaskStatus !== 'in_progress') {
                   if (st.timerStatus !== 'running') return st
                   subtasksChanged = true
                   return { ...st, ...pauseTimerFields(st, now, { byAttendance: false }) }
@@ -618,9 +597,23 @@ export const useProjectStore = create(
                     ...pauseTimerFields(st, now, { byAttendance: true, freezeElapsed }),
                   }
                 }
-                if (st.timerStatus !== 'paused' || !st.timerPausedByAttendance) return st
+                if (
+                  st.timerStatus !== 'stopped' &&
+                  (st.timerStatus !== 'paused' || !st.timerPausedByAttendance)
+                ) {
+                  return st
+                }
                 subtasksChanged = true
-                return { ...st, ...resumeTimerFields(st, now) }
+                const resumable =
+                  st.timerStatus === 'stopped'
+                    ? {
+                        ...st,
+                        timerStatus: 'paused',
+                        timerAccumulatedMs: Number(st.timerAccumulatedMs) || 0,
+                        timerStoppedAt: null,
+                      }
+                    : st
+                return { ...st, ...resumeTimerFields(resumable, now) }
               })
               if (subtasksChanged) next = { ...next, subtasks }
 
@@ -828,8 +821,7 @@ export const useProjectStore = create(
                 st.id !== subtaskId ||
                 st.timerStatus !== 'paused' ||
                 st.isCompleted ||
-                subtaskStatus === 'todo' ||
-                subtaskStatus === 'done'
+                subtaskStatus !== 'in_progress'
               ) {
                 return st
               }
@@ -877,9 +869,9 @@ export const useProjectStore = create(
               activity: mergeActivity(t.activity, activityEntries),
             }
 
-            if (nextStatus === 'done' && t.timerStatus !== 'stopped') {
-              taskTimerPatch = stopTimerFields(t)
-              nextTask = { ...nextTask, ...taskTimerPatch }
+            if (nextStatus !== t.status) {
+              taskTimerPatch = timerPatchForStatusMove(t, nextStatus, attendanceSnapshot())
+              if (taskTimerPatch) nextTask = { ...nextTask, ...taskTimerPatch }
             }
 
             return nextTask
@@ -981,9 +973,9 @@ export const useProjectStore = create(
               status: nextStatus,
               activity: mergeActivity(t.activity, activityEntries),
             }
-            if (statusChanging && nextStatus === 'done' && t.timerStatus !== 'stopped') {
-              taskTimerPatch = stopTimerFields(t)
-              nextTask = { ...nextTask, ...taskTimerPatch }
+            if (statusChanging && nextStatus !== t.status) {
+              taskTimerPatch = timerPatchForStatusMove(t, nextStatus, attendanceSnapshot())
+              if (taskTimerPatch) nextTask = { ...nextTask, ...taskTimerPatch }
             }
             return nextTask
           })

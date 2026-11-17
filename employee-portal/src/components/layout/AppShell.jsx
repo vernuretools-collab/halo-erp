@@ -13,6 +13,7 @@ import { useWellnessNotifications } from '../../features/wellness/hooks/useWelln
 import { useSocialPostReminders } from '../../features/social-posts/hooks/useSocialPostReminders'
 import { useAutoClockOutAfterWorkday } from '../../features/team/hooks/useAutoClockOutAfterWorkday'
 import { useEodClockOutReminder } from '../../features/team/hooks/useEodClockOutReminder'
+import { TimesheetHourlyReminder } from '../../features/timeline/hooks/useTimesheetHourlyReminder.jsx'
 import { useFixedLunchSchedule } from '../../features/team/hooks/useFixedLunchSchedule'
 import { useAnnouncementBrowserAlerts } from '../../features/announcements/hooks/useAnnouncementBrowserAlerts'
 import { usePayslipBrowserAlerts } from '../../features/payslips/hooks/usePayslipBrowserAlerts'
@@ -104,6 +105,7 @@ export const AppShell = () => {
   return (
     <div className="min-h-screen bg-canvas text-fg flex flex-col transition-colors">
       <DesktopAttendanceBridge />
+      <TimesheetHourlyReminder />
       <EmployeeSidebar />
       <div
         className={`min-w-0 flex-1 flex flex-col transition-all duration-300 ${

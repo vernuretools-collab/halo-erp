@@ -40,6 +40,9 @@ export const getProjectDisplayStatus = (project) => deriveProjectStatusFromMetri
 export const getProjectStartDate = (project) =>
   project?.startDate || project?.estimatedDate || project?.dueDate || ''
 
+export const getProjectEndDate = (project) =>
+  project?.endDate || project?.end_date || ''
+
 /**
  * Fetch task statuses from Firestore
  */
@@ -542,27 +545,120 @@ export const updateTaskStatusInDb = async (taskId, newStatus) => {
       status: newStatus,
       updatedAt: new Date().toISOString(),
     }
+    let historyEntry = null
     if (current.status && current.status !== newStatus) {
       const { user, userDoc } = useUserStore.getState()
+      historyEntry = {
+        id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        createdAt: new Date().toISOString(),
+        kind: 'history',
+        field: 'status',
+        action: 'changed the Status',
+        actorId: user?.uid || userDoc?.uid || userDoc?.id || null,
+        actorName: userDoc?.displayName || user?.displayName || userDoc?.name || 'Admin',
+        actorRole: 'admin',
+        fromLabel: statusLabel(current.status),
+        toLabel: statusLabel(newStatus),
+      }
       const activity = Array.isArray(current.activity) ? current.activity : []
-      payload.activity = [
-        ...activity,
-        {
-          id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-          createdAt: new Date().toISOString(),
-          kind: 'history',
-          field: 'status',
-          action: 'changed the Status',
-          actorId: user?.uid || userDoc?.uid || userDoc?.id || null,
-          actorName: userDoc?.displayName || user?.displayName || userDoc?.name || 'Admin',
-          fromLabel: statusLabel(current.status),
-          toLabel: statusLabel(newStatus),
-        },
-      ].slice(-300)
+      payload.activity = [...activity, historyEntry].slice(-300)
     }
     await updateDoc(ref, payload)
+    return historyEntry
   } catch (err) {
     console.error('Error updating task status in Firestore:', err)
+    return null
+  }
+}
+
+const activityActor = () => {
+  const { user, userDoc } = useUserStore.getState()
+  return {
+    actorId: user?.uid || userDoc?.uid || userDoc?.id || null,
+    actorName: userDoc?.displayName || user?.displayName || userDoc?.name || 'Admin',
+    actorRole: 'admin',
+  }
+}
+
+export const appendTaskCommentInDb = async (taskId, body) => {
+  const text = String(body || '').trim()
+  if (!taskId || !text) return null
+  const entry = {
+    id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    createdAt: new Date().toISOString(),
+    kind: 'comment',
+    field: 'comment',
+    action: 'commented',
+    body: text,
+    ...activityActor(),
+  }
+  try {
+    const ref = doc(db, 'tasks', taskId)
+    const snap = await getDoc(ref)
+    const current = snap.exists() ? snap.data() : {}
+    const activity = Array.isArray(current.activity) ? current.activity : []
+    if (activity.some((item) => item?.id === entry.id)) return entry
+    await updateDoc(ref, {
+      activity: [...activity, entry].slice(-300),
+      updatedAt: new Date().toISOString(),
+    })
+    await notifyEmployeesOfAdminReply(
+      { ...current, taskId },
+      text,
+      entry.actorName
+    )
+    return entry
+  } catch (err) {
+    console.error('Error saving admin task comment:', err)
+    return null
+  }
+}
+
+const notifyEmployeesOfAdminReply = async (task, body, actorName) => {
+  try {
+    const { user, userDoc } = useUserStore.getState()
+    const adminIds = new Set(
+      [user?.uid, userDoc?.uid, userDoc?.id, userDoc?.employeeId]
+        .filter(Boolean)
+        .map(String)
+    )
+    const recipients = []
+    for (const value of [task?.assigneeId, task?.employeeId, task?.createdBy]) {
+      const id = value == null || value === '' ? '' : String(value)
+      if (!id || adminIds.has(id) || recipients.includes(id)) continue
+      recipients.push(id)
+    }
+    if (!recipients.length) return
+
+    const taskName = task.title || 'a task'
+    const projectName = task.projectName || 'a project'
+    const preview = String(body || '').trim().replace(/\s+/g, ' ').slice(0, 160)
+    const taskId = task.taskId || task.id || ''
+    const nowIso = new Date().toISOString()
+    const link = `/projects/tasks?projectId=${encodeURIComponent(task.projectId || '')}&taskId=${encodeURIComponent(taskId)}`
+
+    await Promise.all(
+      recipients.map(async (empId) => {
+        const notifDocRef = doc(collection(db, 'notifications', empId, 'items'))
+        await setDoc(notifDocRef, {
+          notificationId: notifDocRef.id,
+          title: 'Admin replied on your task',
+          message: `${actorName || 'Admin'} replied on "${taskName}" in ${projectName}: ${preview}`,
+          type: 'task',
+          priority: 'info',
+          isRead: false,
+          link,
+          taskId: taskId || null,
+          projectId: task.projectId || null,
+          tag: `task-reply-${taskId}-${Date.now()}`,
+          author: actorName || 'Admin',
+          createdAt: nowIso,
+          serverCreatedAt: serverTimestamp(),
+        })
+      })
+    )
+  } catch (err) {
+    console.error('Error notifying employee of admin reply:', err)
   }
 }
 

@@ -145,7 +145,12 @@ export const TaskActivity = ({ taskId, activity = [], subtask = null, focusReque
             <div className="min-w-0 space-y-2">
               <div className="flex flex-wrap items-baseline gap-x-2">
                 <p className="text-sm text-fg">
-                  <span className="font-semibold">{entry.actorName || 'Employee'}</span>{' '}
+                  <span className="font-semibold">{entry.actorName || 'Employee'}</span>
+                  {entry.actorRole === 'admin' ? (
+                    <span className="ml-1.5 rounded-md bg-accent-soft px-1.5 py-0.5 text-[10px] font-semibold text-accent">
+                      Admin
+                    </span>
+                  ) : null}{' '}
                   {entry.kind === 'comment' ? 'commented' : entry.action}
                 </p>
               </div>

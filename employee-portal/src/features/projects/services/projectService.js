@@ -324,6 +324,9 @@ export const getProjectDisplayStatus = (project) => deriveProjectStatusFromMetri
 export const getProjectStartDate = (project) =>
   project?.startDate || project?.estimatedDate || project?.dueDate || ''
 
+export const getProjectEndDate = (project) =>
+  project?.endDate || project?.end_date || ''
+
 // ─── Fetch Task Statuses ───────────────────────────────────────────────────────
 export const getTaskStatusesFromDb = async () => {
   try {
@@ -421,6 +424,27 @@ export const getTasksFromDb = async () => {
   } catch (err) {
     console.error('Error fetching tasks from Firestore:', err)
     return []
+  }
+}
+
+export const subscribeTaskActivity = (taskId, onActivity) => {
+  if (!taskId) return () => {}
+  try {
+    return onSnapshot(
+      doc(db, 'tasks', taskId),
+      (snap) => {
+        if (!snap.exists()) return
+        const data = snap.data() || {}
+        if (!Array.isArray(data.activity)) return
+        onActivity(data.activity)
+      },
+      (err) => {
+        console.warn('Error subscribing to task activity:', err)
+      }
+    )
+  } catch (err) {
+    console.error('Error setting up task activity subscription:', err)
+    return () => {}
   }
 }
 
@@ -889,6 +913,16 @@ export const idleTimerFields = () => ({
   loggedHours: 0,
 })
 
+const asResumableTimer = (task) =>
+  task?.timerStatus === 'stopped'
+    ? {
+        ...task,
+        timerStatus: 'paused',
+        timerAccumulatedMs: Number(task.timerAccumulatedMs) || 0,
+        timerStoppedAt: null,
+      }
+    : task
+
 export const timerPatchForStatusMove = (
   task,
   newStatus,
@@ -897,37 +931,33 @@ export const timerPatchForStatusMove = (
 ) => {
   if (!task || !newStatus || task.status === newStatus) return null
 
+  // In Progress is the only column where the timer runs.
+  // Coming back from In Review, Done, or any other column starts it again.
+  if (newStatus === 'in_progress') {
+    if (!isEmployeeActivelyWorking(attendance)) {
+      if (task.timerStatus === 'paused' && task.timerPausedByAttendance) return null
+      return pauseTimerFields(asResumableTimer(task), now, {
+        byAttendance: true,
+        freezeElapsed: task.timerStatus !== 'running',
+      })
+    }
+    if (task.timerStatus === 'running') return null
+    return resumeTimerFields(asResumableTimer(task), now)
+  }
+
   if (newStatus === 'done') {
     if (task.timerStatus === 'stopped') return null
     return stopTimerFields(task, now)
   }
 
-  if (newStatus === 'todo') {
-    if (task.timerStatus === 'running') {
-      return pauseTimerFields(task, now, { byAttendance: false })
-    }
-    if (task.timerStatus === 'paused' && task.timerPausedByAttendance) {
-      return pauseTimerFields(task, now, { byAttendance: false, freezeElapsed: true })
-    }
-    return null
+  // To Do, In Review, and any other column: timer off. Elapsed time is kept.
+  if (task.timerStatus === 'running') {
+    return pauseTimerFields(task, now, { byAttendance: false })
   }
-
-  if (task.status !== 'todo') return null
-
-  if (isEmployeeActivelyWorking(attendance)) {
-    if (task.timerStatus === 'running') return null
-    const resumable =
-      task.timerStatus === 'stopped'
-        ? { ...task, timerStatus: 'paused', timerAccumulatedMs: Number(task.timerAccumulatedMs) || 0 }
-        : task
-    return resumeTimerFields(resumable, now)
+  if (task.timerStatus === 'paused' && task.timerPausedByAttendance) {
+    return pauseTimerFields(task, now, { byAttendance: false, freezeElapsed: true })
   }
-
-  if (task.timerStatus === 'paused' && task.timerPausedByAttendance) return null
-  return pauseTimerFields(task, now, {
-    byAttendance: true,
-    freezeElapsed: task.timerStatus !== 'running',
-  })
+  return null
 }
 
 export const startTimerFields = (now = new Date().toISOString(), options = {}) => {

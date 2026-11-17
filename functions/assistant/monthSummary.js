@@ -189,6 +189,17 @@ function buildEmployeeMonthSummary({
     if (entry.uid && uid && String(entry.uid) !== String(uid)) return
     const hrs = Number(entry.hours) || 0
     timelineEntryCount += 1
+    if (entry.entryType === 'extra_break') {
+      if (timelineSamples.length < 20) {
+        timelineSamples.push({
+          date: entry.date,
+          hours: hrs,
+          type: 'extra_break',
+          description: String(entry.description || '').slice(0, 200),
+        })
+      }
+      return
+    }
     if (entry.entryType === 'upskilling') timelineUpskillHours += hrs
     else timelineWorkHours += hrs
     if (timelineSamples.length < 20) {

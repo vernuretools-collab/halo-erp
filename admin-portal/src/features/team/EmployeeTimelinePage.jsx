@@ -18,9 +18,25 @@ import {
   Clock,
   CalendarDays,
 } from 'lucide-react'
+import {
+  LUNCH_BREAK_HOURS,
+  PRODUCTIVE_DAY_HOURS,
+  entryTypeLabel,
+  isProductiveEntryType,
+  normalizeEntryType,
+  sumEntryHours,
+} from '../../../../shared/timelineEntryTypes.js'
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const TARGET_DAY_HOURS = 8
+const TARGET_DAY_HOURS = PRODUCTIVE_DAY_HOURS
+
+const TYPE_TEXT_CLASS = {
+  work: 'text-muted',
+  meeting: 'text-sky-600 dark:text-sky-400',
+  shoot: 'text-amber-600 dark:text-amber-400',
+  upskilling: 'text-violet-500 dark:text-violet-400',
+  extra_break: 'text-orange-600 dark:text-orange-400',
+}
 
 function formatHours(hours) {
   const n = Number(hours) || 0
@@ -30,21 +46,15 @@ function formatHours(hours) {
 }
 
 function TimelineEntryCard({ entry }) {
-  const type = entry.entryType === 'upskilling' ? 'upskilling' : 'work'
+  const type = normalizeEntryType(entry.entryType)
   return (
     <div className="rounded-xl bg-canvas border border-border p-2.5">
       <p className="w-full text-xs text-slate-800 dark:text-fg leading-snug break-words whitespace-pre-wrap">
         {entry.description}
       </p>
       <div className="mt-2 flex items-center justify-between gap-2">
-        <p
-          className={`text-[10px] ${
-            type === 'upskilling'
-              ? 'text-violet-500 dark:text-violet-400'
-              : 'text-muted'
-          }`}
-        >
-          {type === 'upskilling' ? 'Upskilling' : 'Work'}
+        <p className={`text-[10px] ${TYPE_TEXT_CLASS[type] || TYPE_TEXT_CLASS.work}`}>
+          {entryTypeLabel(type)}
         </p>
         <span className="shrink-0 text-[10px] font-semibold text-muted bg-slate-200/80 dark:bg-slate-700/80 rounded-md px-1.5 py-0.5">
           {formatHours(entry.hours)}
@@ -151,8 +161,12 @@ export function EmployeeTimelinePage() {
     return map
   }, [entries, weekDays])
 
-  const weekTotal = useMemo(
-    () => entries.reduce((sum, e) => sum + (Number(e.hours) || 0), 0),
+  const weekProductive = useMemo(
+    () => sumEntryHours(entries, (entry) => isProductiveEntryType(entry.entryType)),
+    [entries]
+  )
+  const weekExtraBreak = useMemo(
+    () => sumEntryHours(entries, (entry) => !isProductiveEntryType(entry.entryType)),
     [entries]
   )
 
@@ -228,10 +242,16 @@ export function EmployeeTimelinePage() {
             {selectedEmployee
               ? `${selectedEmployee.displayName || selectedEmployee.name}: `
               : ''}
-            Week total:{' '}
+            Week productivity:{' '}
             <strong className="text-fg">
-              {formatHours(weekTotal)}
+              {formatHours(weekProductive)}
             </strong>
+            {weekExtraBreak > 0 ? (
+              <>
+                {' '}
+                · Extra break <strong className="text-fg">{formatHours(weekExtraBreak)}</strong>
+              </>
+            ) : null}
           </span>
         </div>
       </div>
@@ -241,12 +261,14 @@ export function EmployeeTimelinePage() {
         {weekDays.map((day, idx) => {
           const dateStr = toDateStr(day)
           const dayEntries = entriesByDate[dateStr] || []
-          const dayTotal = dayEntries.reduce(
-            (sum, e) => sum + (Number(e.hours) || 0),
-            0
+          const productiveTotal = sumEntryHours(dayEntries, (entry) =>
+            isProductiveEntryType(entry.entryType)
+          )
+          const extraBreakTotal = sumEntryHours(dayEntries, (entry) =>
+            !isProductiveEntryType(entry.entryType)
           )
           const isToday = dateStr === todayStr
-          const isFullDay = dayTotal >= TARGET_DAY_HOURS
+          const isFullDay = productiveTotal >= TARGET_DAY_HOURS
 
           return (
             <Card
@@ -271,15 +293,21 @@ export function EmployeeTimelinePage() {
                     </div>
                     <p className="text-[10px] text-slate-400 mt-0.5">View only</p>
                   </div>
-                  <span
-                    className={`shrink-0 text-[10px] font-semibold rounded-full px-2 py-0.5 border ${
-                      isFullDay
-                        ? 'text-emerald-600 dark:text-emerald-400 border-emerald-400/60 bg-emerald-50 dark:bg-emerald-500/10'
-                        : 'text-muted border-slate-300 dark:border-slate-600'
-                    }`}
-                  >
-                    {formatHours(dayTotal)} of {TARGET_DAY_HOURS}h
-                  </span>
+                  <div className="text-right">
+                    <span
+                      className={`shrink-0 text-[10px] font-semibold rounded-full px-2 py-0.5 border ${
+                        isFullDay
+                          ? 'text-emerald-600 dark:text-emerald-400 border-emerald-400/60 bg-emerald-50 dark:bg-emerald-500/10'
+                          : 'text-muted border-slate-300 dark:border-slate-600'
+                      }`}
+                    >
+                      {formatHours(productiveTotal)} of {TARGET_DAY_HOURS}h
+                    </span>
+                    <p className="mt-1 text-[10px] text-muted">
+                      Includes {LUNCH_BREAK_HOURS}h lunch
+                      {extraBreakTotal > 0 ? ` · extra ${formatHours(extraBreakTotal)}` : ''}
+                    </p>
+                  </div>
                 </div>
               </div>
 

@@ -17,6 +17,7 @@ import {
   getClientVisibility,
   getProjectDisplayStatus,
   getProjectStartDate,
+  getProjectEndDate,
 } from './services/projectService'
 import {
   ArrowLeft,
@@ -310,7 +311,7 @@ export const ProjectManagePage = () => {
               <User className="w-3 h-3" /> Lead: {project.ownerName || 'Unassigned'}
             </p>
             <p className="text-xs text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-1">
-              <Calendar className="w-3 h-3" /> Start: {getProjectStartDate(project) || '—'}
+              <Calendar className="w-3 h-3" /> Start: {getProjectStartDate(project) || '—'} · End: {getProjectEndDate(project) || '—'}
             </p>
           </div>
         </div>

@@ -888,7 +888,7 @@ export const SubtaskStepper = ({
                                   <Pause className="w-2.5 h-2.5" /> Pause
                                 </button>
                               )}
-                              {!isCompleted && (st.status || 'todo') !== 'todo' && st.timerStatus === 'paused' && (
+                              {!isCompleted && (st.status || 'todo') === 'in_progress' && st.timerStatus === 'paused' && (
                                 <button
                                   type="button"
                                   onClick={() => resumeSubtaskTimer(taskId, st.id)}

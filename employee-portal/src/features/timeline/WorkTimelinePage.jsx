@@ -16,14 +16,55 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
+import {
+  LUNCH_BREAK_HOURS,
+  PRODUCTIVE_DAY_HOURS,
+  TIMELINE_ENTRY_TYPES,
+  entryTypeLabel,
+  isProductiveEntryType,
+  normalizeEntryType,
+  sumEntryHours,
+} from '../../../../shared/timelineEntryTypes.js'
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const TARGET_DAY_HOURS = 8
 const MINUTE_OPTIONS = ['00', '15', '30', '45']
-const ENTRY_TYPES = [
-  { id: 'work', label: 'Work' },
-  { id: 'upskilling', label: 'Upskilling' },
-]
+const ENTRY_TYPES = TIMELINE_ENTRY_TYPES
+
+const ENTRY_PROMPTS = {
+  work: {
+    label: 'What are you working on?',
+    placeholder: 'e.g. API integration for client portal',
+    required: 'Please describe what you worked on.',
+  },
+  meeting: {
+    label: 'What was the meeting?',
+    placeholder: 'e.g. Client standup',
+    required: 'Please describe the meeting.',
+  },
+  shoot: {
+    label: 'What was the shoot?',
+    placeholder: 'e.g. Product shoot for the campaign',
+    required: 'Please describe the shoot.',
+  },
+  upskilling: {
+    label: 'What are you upskilling on?',
+    placeholder: 'e.g. React advanced patterns course',
+    required: 'Please describe what you are upskilling on.',
+  },
+  extra_break: {
+    label: 'What was the extra break?',
+    placeholder: 'e.g. Travel between locations',
+    required: 'Please describe the extra break.',
+  },
+}
+
+const TYPE_TEXT_CLASS = {
+  work: 'text-slate-400 dark:text-slate-500',
+  meeting: 'text-sky-600 dark:text-sky-400',
+  shoot: 'text-amber-600 dark:text-amber-400',
+  upskilling: 'text-violet-500 dark:text-violet-400',
+  extra_break: 'text-orange-600 dark:text-orange-400',
+}
 
 /** Format decimal hours cleanly (e.g. 0 -> 0h, 8 -> 8h, 1.5 -> 1h 30m). */
 function formatHours(hours) {
@@ -61,12 +102,8 @@ function decimalToParts(decimalHours) {
   }
 }
 
-function entryTypeLabel(entryType) {
-  return entryType === 'upskilling' ? 'Upskilling' : 'Work'
-}
-
 function TimelineEntryCard({ entry, interactive = false, onEdit }) {
-  const type = entry.entryType === 'upskilling' ? 'upskilling' : 'work'
+  const type = normalizeEntryType(entry.entryType)
   return (
     <div
       role={interactive ? 'button' : undefined}
@@ -93,11 +130,7 @@ function TimelineEntryCard({ entry, interactive = false, onEdit }) {
       </p>
       <div className="mt-2 flex items-center justify-between gap-2">
         <p
-          className={`text-[10px] ${
-            type === 'upskilling'
-              ? 'text-violet-500 dark:text-violet-400'
-              : 'text-slate-400 dark:text-slate-500'
-          }`}
+          className={`text-[10px] ${TYPE_TEXT_CLASS[type] || TYPE_TEXT_CLASS.work}`}
         >
           {entryTypeLabel(type)}
         </p>
@@ -174,11 +207,6 @@ export const WorkTimelinePage = ({ embedded = false }) => {
     return map
   }, [entries, weekDays])
 
-  const weekTotal = useMemo(
-    () => entries.reduce((sum, e) => sum + (Number(e.hours) || 0), 0),
-    [entries]
-  )
-
   const durationPreview = useMemo(() => {
     const h = Number(hoursPart)
     const m = Number(minutesPart)
@@ -186,13 +214,13 @@ export const WorkTimelinePage = ({ embedded = false }) => {
     return formatHours(h + m / 60)
   }, [hoursPart, minutesPart])
 
-  const openAddModal = (dateStr, e) => {
+  const openAddModal = (dateStr, e, preset) => {
     e?.stopPropagation?.()
     setSelectedDate(dateStr)
     setEditingEntry(null)
     setEntryType('work')
     setDescription('')
-    setHoursPart('')
+    setHoursPart(preset?.hours === PRODUCTIVE_DAY_HOURS ? String(PRODUCTIVE_DAY_HOURS) : '')
     setMinutesPart('00')
     setFormError('')
     setModalOpen(true)
@@ -203,7 +231,7 @@ export const WorkTimelinePage = ({ embedded = false }) => {
     const parts = decimalToParts(entry.hours)
     setSelectedDate(entry.date)
     setEditingEntry(entry)
-    setEntryType(entry.entryType === 'upskilling' ? 'upskilling' : 'work')
+    setEntryType(normalizeEntryType(entry.entryType))
     setDescription(entry.description || '')
     setHoursPart(parts.hoursPart)
     setMinutesPart(parts.minutesPart)
@@ -235,11 +263,7 @@ export const WorkTimelinePage = ({ embedded = false }) => {
     const m = Number(minutesPart)
 
     if (!trimmed) {
-      setFormError(
-        entryType === 'upskilling'
-          ? 'Please describe what you are upskilling on.'
-          : 'Please describe what you worked on.'
-      )
+      setFormError(ENTRY_PROMPTS[entryType]?.required || ENTRY_PROMPTS.work.required)
       return
     }
     if (
@@ -310,26 +334,49 @@ export const WorkTimelinePage = ({ embedded = false }) => {
   }
 
   const todayStr = toDateStr(new Date())
-  const targetLabel = formatHours(TARGET_DAY_HOURS)
+  const targetLabel = formatHours(PRODUCTIVE_DAY_HOURS)
+  const prompt = ENTRY_PROMPTS[entryType] || ENTRY_PROMPTS.work
+
+  const applyEightHours = () => {
+    setHoursPart(String(PRODUCTIVE_DAY_HOURS))
+    setMinutesPart('00')
+  }
 
   return (
     <div className="space-y-6">
       {!embedded ? (
         <PageHeader
           title="Work Timeline"
-          description="Log what you worked on each day "
+          description="Log 8h of work, meetings, shoots, and upskilling. Lunch is the 1h break."
           actions={
-            <Button
-              icon={Plus}
-              variant="primary"
-              onClick={(e) => openAddModal(todayStr, e)}
-            >
-              Add Entry
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                icon={Clock}
+                variant="secondary"
+                onClick={(e) => openAddModal(todayStr, e, { hours: PRODUCTIVE_DAY_HOURS })}
+              >
+                Log 8h
+              </Button>
+              <Button
+                icon={Plus}
+                variant="primary"
+                onClick={(e) => openAddModal(todayStr, e)}
+              >
+                Add Entry
+              </Button>
+            </div>
           }
         />
       ) : (
-        <div className="flex items-center justify-end">
+        <div className="flex items-center justify-end gap-2">
+          <Button
+            icon={Clock}
+            variant="secondary"
+            size="sm"
+            onClick={(e) => openAddModal(todayStr, e, { hours: PRODUCTIVE_DAY_HOURS })}
+          >
+            Log 8h
+          </Button>
           <Button
             icon={Plus}
             variant="primary"
@@ -376,10 +423,19 @@ export const WorkTimelinePage = ({ embedded = false }) => {
         <div className="flex items-center gap-2 text-sm text-muted">
           <Clock className="w-4 h-4 text-accent" />
           <span>
-            Week total:{' '}
+            Week productivity:{' '}
             <strong className="text-fg font-mono">
-              {formatHours(weekTotal)}
+              {formatHours(sumEntryHours(entries, (entry) => isProductiveEntryType(entry.entryType)))}
             </strong>
+            {sumEntryHours(entries, (entry) => !isProductiveEntryType(entry.entryType)) > 0 ? (
+              <>
+                {' '}
+                · Extra break{' '}
+                <strong className="text-fg font-mono">
+                  {formatHours(sumEntryHours(entries, (entry) => !isProductiveEntryType(entry.entryType)))}
+                </strong>
+              </>
+            ) : null}
           </span>
         </div>
       </div>
@@ -389,12 +445,14 @@ export const WorkTimelinePage = ({ embedded = false }) => {
         {weekDays.map((day, idx) => {
           const dateStr = toDateStr(day)
           const dayEntries = entriesByDate[dateStr] || []
-          const dayTotal = dayEntries.reduce(
-            (sum, e) => sum + (Number(e.hours) || 0),
-            0
+          const productiveTotal = sumEntryHours(dayEntries, (entry) =>
+            isProductiveEntryType(entry.entryType)
+          )
+          const extraBreakTotal = sumEntryHours(dayEntries, (entry) =>
+            !isProductiveEntryType(entry.entryType)
           )
           const isToday = dateStr === todayStr
-          const isFullDay = dayTotal >= TARGET_DAY_HOURS
+          const isFullDay = productiveTotal >= PRODUCTIVE_DAY_HOURS
 
           return (
             <Card
@@ -421,15 +479,21 @@ export const WorkTimelinePage = ({ embedded = false }) => {
                       <p className="text-[10px] text-accent/80 mt-0.5">Today</p>
                     ) : null}
                   </div>
-                  <span
-                    className={`shrink-0 text-[10px] font-semibold font-mono rounded-full px-2 py-0.5 border ${
-                      isFullDay
-                        ? 'text-emerald-600 dark:text-emerald-400 border-emerald-400/60 bg-emerald-50 dark:bg-emerald-500/10'
-                        : 'text-muted border-slate-300 dark:border-slate-600'
-                    }`}
-                  >
-                    {formatHours(dayTotal)} of {targetLabel}
-                  </span>
+                  <div className="text-right">
+                    <span
+                      className={`shrink-0 text-[10px] font-semibold font-mono rounded-full px-2 py-0.5 border ${
+                        isFullDay
+                          ? 'text-emerald-600 dark:text-emerald-400 border-emerald-400/60 bg-emerald-50 dark:bg-emerald-500/10'
+                          : 'text-muted border-slate-300 dark:border-slate-600'
+                      }`}
+                    >
+                      {formatHours(productiveTotal)} of {targetLabel}
+                    </span>
+                    <p className="mt-1 text-[10px] text-muted">
+                      Includes {formatHours(LUNCH_BREAK_HOURS)} lunch
+                      {extraBreakTotal > 0 ? ` · extra ${formatHours(extraBreakTotal)}` : ''}
+                    </p>
+                  </div>
                 </div>
               </div>
 
@@ -454,16 +518,26 @@ export const WorkTimelinePage = ({ embedded = false }) => {
                 )}
               </div>
 
-              <div className="mt-3 pt-2 border-t border-border">
+              <div className="mt-3 pt-2 border-t border-border flex gap-1">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  icon={Clock}
+                  className="flex-1 justify-center text-xs"
+                  onClick={(e) => openAddModal(dateStr, e, { hours: PRODUCTIVE_DAY_HOURS })}
+                >
+                  Log 8h
+                </Button>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   icon={Plus}
-                  className="w-full justify-center text-xs"
+                  className="flex-1 justify-center text-xs"
                   onClick={(e) => openAddModal(dateStr, e)}
                 >
-                  Add Entry
+                  Add
                 </Button>
               </div>
             </Card>
@@ -505,7 +579,7 @@ export const WorkTimelinePage = ({ embedded = false }) => {
             <div
               role="tablist"
               aria-label="Entry type"
-              className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-chrome border border-border"
+              className="flex flex-wrap gap-1 p-1 rounded-xl bg-chrome border border-border"
             >
               {ENTRY_TYPES.map((tab) => {
                 const selected = entryType === tab.id
@@ -516,7 +590,7 @@ export const WorkTimelinePage = ({ embedded = false }) => {
                     role="tab"
                     aria-selected={selected}
                     onClick={() => setEntryType(tab.id)}
-                    className={`px-3 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    className={`px-2.5 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
                       selected
                         ? 'bg-surface text-accent shadow-sm'
                         : 'text-muted hover:text-slate-800 dark:hover:text-slate-200'
@@ -527,31 +601,39 @@ export const WorkTimelinePage = ({ embedded = false }) => {
                 )
               })}
             </div>
+            <p className="text-[11px] text-muted leading-relaxed">
+              Work, meeting, shoot, and upskilling count together toward 8h. Lunch is the 1h break. Extra break is time beyond lunch.
+            </p>
 
             <form onSubmit={handleSave} className="space-y-4">
               <div className="space-y-1.5">
                 <label className="block text-xs font-medium text-fg">
-                  {entryType === 'upskilling'
-                    ? 'What are you upskilling on?'
-                    : 'What are you working on?'}
+                  {prompt.label}
                 </label>
                 <textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   rows={3}
-                  placeholder={
-                    entryType === 'upskilling'
-                      ? 'e.g. React advanced patterns course'
-                      : 'e.g. API integration for client portal'
-                  }
+                  placeholder={prompt.placeholder}
                   className="w-full bg-chrome border border-border text-fg placeholder-slate-400 text-sm rounded-xl py-2.5 px-3.5 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent resize-none"
                 />
               </div>
 
               <div className="space-y-1.5">
-                <p className="block text-xs font-medium text-fg">
-                  Duration
-                </p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="block text-xs font-medium text-fg">
+                    Duration
+                  </p>
+                  {entryType !== 'extra_break' ? (
+                    <button
+                      type="button"
+                      onClick={applyEightHours}
+                      className="rounded-lg bg-accent/10 text-accent text-[11px] font-semibold px-2.5 py-1 cursor-pointer hover:bg-accent/20"
+                    >
+                      Log 8h
+                    </button>
+                  ) : null}
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <label

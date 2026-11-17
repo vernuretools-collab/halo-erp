@@ -1,4 +1,5 @@
 import { mergeShiftLogs, pairedShiftLogs } from './shiftLogs.js'
+import { normalizeEntryType } from './timelineEntryTypes.js'
 
 export const ATTENDANCE_OUTBOX_KEY = 'crm_attendance_outbox'
 export const TIMELINE_OUTBOX_KEY = 'crm_timeline_outbox'
@@ -84,7 +85,7 @@ export function createLocalTimelineEntry(payload, now = Date.now()) {
     date: payload.date,
     description: payload.description || '',
     hours: Number(payload.hours) || 0,
-    entryType: payload.entryType === 'upskilling' ? 'upskilling' : 'work',
+    entryType: normalizeEntryType(payload.entryType),
     pendingSync: true,
     createdAt: new Date(now).toISOString(),
   }

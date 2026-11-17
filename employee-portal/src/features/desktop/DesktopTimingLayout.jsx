@@ -6,6 +6,7 @@ import { fetchCustomClaims } from '../../shared/services/authService'
 import { useLiveAuthSession } from '../../../../shared/supabase/useLiveAuthSession.js'
 import { useAutoClockOutAfterWorkday } from '../team/hooks/useAutoClockOutAfterWorkday'
 import { useEodClockOutReminder } from '../team/hooks/useEodClockOutReminder'
+import { TimesheetHourlyReminder } from '../timeline/hooks/useTimesheetHourlyReminder.jsx'
 import { useFixedLunchSchedule } from '../team/hooks/useFixedLunchSchedule'
 import { useAttendanceLinkedTaskTimers } from '../projects/hooks/useAttendanceLinkedTaskTimers'
 import { notifyDesktopSession } from '../team/services/desktopAttendanceSync'
@@ -97,5 +98,10 @@ export const DesktopTimingLayout = () => {
     )
   }
 
-  return <DesktopTimingPage />
+  return (
+    <>
+      <TimesheetHourlyReminder />
+      <DesktopTimingPage />
+    </>
+  )
 }

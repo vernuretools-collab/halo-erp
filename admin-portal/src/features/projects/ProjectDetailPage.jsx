@@ -21,6 +21,7 @@ import {
   getClientVisibility,
   getProjectDisplayStatus,
   getProjectStartDate,
+  getProjectEndDate,
 } from './services/projectService'
 import {
   ArrowLeft,
@@ -163,6 +164,7 @@ export const ProjectDetailPage = () => {
   const [editDescription, setEditDescription] = useState('')
   const [editStatus, setEditStatus] = useState('active')
   const [editEstimatedDate, setEditEstimatedDate] = useState('')
+  const [editEndDate, setEditEndDate] = useState('')
 
   // Add / Edit Process Step Modal State
   const [showStepModal, setShowStepModal] = useState(false)
@@ -225,6 +227,7 @@ export const ProjectDetailPage = () => {
         setEditDescription(data.description || '')
         setEditStatus(data.status || 'active')
         setEditEstimatedDate(data.startDate || data.estimatedDate || data.dueDate || '')
+        setEditEndDate(getProjectEndDate(data) || '')
       }
       setLoading(false)
     }
@@ -494,6 +497,7 @@ export const ProjectDetailPage = () => {
         status: editStatus,
         estimatedDate: editEstimatedDate || null,
         startDate: editEstimatedDate || null,
+        endDate: editEndDate || null,
       }
 
       await updateProjectInDb(projectId, updates)
@@ -629,14 +633,14 @@ export const ProjectDetailPage = () => {
 
           <div className="space-y-1">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-              Budget & Start Date
+              Budget & Dates
             </span>
             <div className="text-xs text-fg space-y-0.5">
               <p className="font-semibold text-emerald-600 dark:text-emerald-400">
                 {project.budget ? `₹${Number(project.budget).toLocaleString()}` : 'Not Specified'}
               </p>
               <p className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
-                <Calendar className="w-3 h-3" /> Start: {getProjectStartDate(project) || '—'}
+                <Calendar className="w-3 h-3" /> Start: {getProjectStartDate(project) || '—'} · End: {getProjectEndDate(project) || '—'}
               </p>
             </div>
           </div>
@@ -1265,12 +1269,21 @@ export const ProjectDetailPage = () => {
                 </div>
               </div>
 
-              <Input
-                label="Start Date"
-                type="date"
-                value={editEstimatedDate}
-                onChange={(e) => setEditEstimatedDate(e.target.value)}
-              />
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  label="Start Date"
+                  type="date"
+                  value={editEstimatedDate}
+                  onChange={(e) => setEditEstimatedDate(e.target.value)}
+                />
+                <Input
+                  label="End Date"
+                  type="date"
+                  value={editEndDate}
+                  min={editEstimatedDate || undefined}
+                  onChange={(e) => setEditEndDate(e.target.value)}
+                />
+              </div>
 
               <div className="space-y-1.5">
                 <label className="block text-xs font-medium text-fg">

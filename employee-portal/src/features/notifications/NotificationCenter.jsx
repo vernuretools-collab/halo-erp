@@ -15,6 +15,7 @@ import {
   Heart,
   Clock,
   Share2,
+  CalendarDays,
   ArrowRight,
   Megaphone,
 } from 'lucide-react'
@@ -46,6 +47,8 @@ export const NotificationCenter = () => {
         return <Share2 className="w-4 h-4 text-sky-600 dark:text-sky-400" />
       case 'eod':
         return <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+      case 'timesheet':
+        return <CalendarDays className="w-4 h-4 text-accent" />
       default:
         return <Info className="w-4 h-4 text-accent" />
     }

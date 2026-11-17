@@ -14,6 +14,7 @@ import {
   matchesUserIdentity,
   getProjectDisplayStatus,
   getProjectStartDate,
+  getProjectEndDate,
 } from './services/projectService'
 import { useUserStore } from '../../stores/userStore'
 import { isDirectoryVisible } from '../../../../shared/employees/employmentStatus.js'
@@ -115,6 +116,7 @@ export const ProjectList = () => {
   const [selectedClientId, setSelectedClientId] = useState('')
   const [description, setDescription] = useState('')
   const [estimatedDate, setEstimatedDate] = useState('')
+  const [endDate, setEndDate] = useState('')
   const [createError, setCreateError] = useState('')
   const [createSubmitting, setCreateSubmitting] = useState(false)
 
@@ -140,6 +142,7 @@ export const ProjectList = () => {
   const [editBudget, setEditBudget] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [editEstimatedDate, setEditEstimatedDate] = useState('')
+  const [editEndDate, setEditEndDate] = useState('')
   const [editStatus, setEditStatus] = useState('active')
   const [editSubmitting, setEditSubmitting] = useState(false)
 
@@ -323,6 +326,10 @@ export const ProjectList = () => {
   const handleCreateProject = async (e) => {
     e.preventDefault()
     if (!projName.trim() || createSubmitting) return
+    if (estimatedDate && endDate && endDate < estimatedDate) {
+      setCreateError('End date must be on or after the start date.')
+      return
+    }
 
     // Without a resolved id the project has no owner, so nobody (including the
     // creator) would match it once the row is written.
@@ -353,6 +360,7 @@ export const ProjectList = () => {
         description,
         estimatedDate: estimatedDate || null,
         startDate: estimatedDate || null,
+        endDate: endDate || null,
         ownerName: currentDisplayName,
         employeeId: currentUserId,
         assignedEmployeeIds: [currentUserId],
@@ -367,6 +375,7 @@ export const ProjectList = () => {
       setSelectedClientId('')
       setDescription('')
       setEstimatedDate('')
+      setEndDate('')
       setShowAddModal(false)
     } catch (err) {
       setCreateError(err?.message || 'Could not create the project.')
@@ -389,6 +398,7 @@ export const ProjectList = () => {
     setEditBudget(proj.budget !== undefined && proj.budget !== null ? String(proj.budget) : '')
     setEditDescription(proj.description || '')
     setEditEstimatedDate(proj.startDate || proj.estimatedDate || '')
+    setEditEndDate(getProjectEndDate(proj) || '')
     setEditStatus(proj.status || 'active')
   }
 
@@ -410,6 +420,7 @@ export const ProjectList = () => {
         description: editDescription,
         estimatedDate: editEstimatedDate || null,
         startDate: editEstimatedDate || null,
+        endDate: editEndDate || null,
         status: editStatus || 'active',
       })
 
@@ -641,6 +652,7 @@ export const ProjectList = () => {
               proj.createdBy && currentUserId && String(proj.createdBy) === String(currentUserId)
             const displayStatus = getProjectDisplayStatus(proj)
             const startDate = getProjectStartDate(proj)
+            const endDateLabel = getProjectEndDate(proj)
 
             return (
               <Card
@@ -769,6 +781,9 @@ export const ProjectList = () => {
                   <div className="flex items-center gap-3">
                     <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold">
                       <Calendar className="w-3.5 h-3.5" /> Start: {startDate || '—'}
+                    </span>
+                    <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold">
+                      End: {endDateLabel || '—'}
                     </span>
                     <span className="flex items-center gap-1 text-accent font-semibold">
                       <Clock className="w-3.5 h-3.5" /> {formatHoursAsHrsMins(proj.totalHoursLogged)}
@@ -973,13 +988,23 @@ export const ProjectList = () => {
                 />
               </div>
 
-              <Input
-                label="Start Date"
-                type="date"
-                value={estimatedDate}
-                onChange={(e) => setEstimatedDate(e.target.value)}
-                required
-              />
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  label="Start Date"
+                  type="date"
+                  value={estimatedDate}
+                  onChange={(e) => setEstimatedDate(e.target.value)}
+                  required
+                />
+                <Input
+                  label="End Date"
+                  type="date"
+                  value={endDate}
+                  min={estimatedDate || undefined}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  required
+                />
+              </div>
 
               {createError && (
                 <p className="text-xs font-semibold text-rose-500">{createError}</p>
@@ -1085,6 +1110,13 @@ export const ProjectList = () => {
                   type="date"
                   value={editEstimatedDate}
                   onChange={(e) => setEditEstimatedDate(e.target.value)}
+                />
+                <Input
+                  label="End Date"
+                  type="date"
+                  value={editEndDate}
+                  min={editEstimatedDate || undefined}
+                  onChange={(e) => setEditEndDate(e.target.value)}
                 />
               </div>
 

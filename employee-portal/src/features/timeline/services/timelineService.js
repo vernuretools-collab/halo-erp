@@ -12,6 +12,7 @@ import {
   listWorkTimelineEntries,
   mapTimelineRow,
 } from '../../../../../shared/supabase/listWorkTimelineEntries.js'
+import { normalizeEntryType } from '../../../../../shared/timelineEntryTypes.js'
 
 const IS_MOCK = import.meta.env.VITE_FIREBASE_API_KEY === 'mock_api_key_dev'
 
@@ -69,7 +70,7 @@ export const fetchTimelineEntries = async (uidOrIds, startDate, endDate) => {
       .filter((e) => ids.includes(String(e.uid)) && e.date >= startDate && e.date <= endDate)
       .map((e) => ({
         ...e,
-        entryType: e.entryType === 'upskilling' ? 'upskilling' : 'work',
+        entryType: normalizeEntryType(e.entryType),
       }))
       .sort((a, b) => {
         if (a.date !== b.date) return a.date.localeCompare(b.date)
@@ -92,13 +93,10 @@ export const fetchTimelineEntries = async (uidOrIds, startDate, endDate) => {
   }
 }
 
-const normalizeEntryType = (entryType) =>
-  entryType === 'upskilling' ? 'upskilling' : 'work'
-
 /**
  * Create a new timeline entry.
  *
- * @param {{ uid: string, employeeName?: string, date: string, description: string, hours: number, entryType?: 'work'|'upskilling' }} payload
+ * @param {{ uid: string, employeeName?: string, date: string, description: string, hours: number, entryType?: string }} payload
  * @returns {Promise<object|null>}
  */
 export const createTimelineEntry = async (payload) => {
@@ -167,7 +165,7 @@ export const createTimelineEntry = async (payload) => {
  * Update an existing timeline entry.
  *
  * @param {string} entryId
- * @param {{ description?: string, hours?: number, date?: string, entryType?: 'work'|'upskilling' }} updates
+ * @param {{ description?: string, hours?: number, date?: string, entryType?: string }} updates
  * @returns {Promise<boolean>}
  */
 export const updateTimelineEntry = async (entryId, updates) => {

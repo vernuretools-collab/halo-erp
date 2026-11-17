@@ -11,7 +11,7 @@ import { useProjectStore } from './stores/projectStore'
 import { useTeamStore } from '../team/stores/teamStore'
 import { useUserStore } from '../../stores/userStore'
 import { getEmployees } from '../team/services/teamService'
-import { isTaskVisibleToUser, getAttendanceGatedElapsedMs, formatElapsed, buildTaskVisibilityIndex, isEmployeeActivelyWorking } from './services/projectService'
+import { isTaskVisibleToUser, getAttendanceGatedElapsedMs, formatElapsed, buildTaskVisibilityIndex, isEmployeeActivelyWorking, subscribeTaskActivity } from './services/projectService'
 import { TaskListView } from './components/TaskListView'
 import { TaskCalendarView } from './components/TaskCalendarView'
 import { EmployeeTrashPanel } from './components/EmployeeTrashPanel'
@@ -204,6 +204,8 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
   const [createError, setCreateError] = useState('')
   const [projectId, setProjectId] = useState(defaultProjId)
   const [priority, setPriority] = useState('medium')
+  const [taskStartDate, setTaskStartDate] = useState('')
+  const [taskEndDate, setTaskEndDate] = useState('')
 
   useEffect(() => {
     fetchProjectsAndTasks()
@@ -211,6 +213,18 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
 
   useEffect(() => {
     setActiveSubtaskId(null)
+  }, [selectedTask?.taskId])
+
+  useEffect(() => {
+    const taskId = selectedTask?.taskId
+    if (!taskId) return undefined
+    return subscribeTaskActivity(taskId, (activity) => {
+      useProjectStore.setState((state) => ({
+        tasks: state.tasks.map((task) =>
+          task.taskId === taskId ? { ...task, activity } : task
+        ),
+      }))
+    })
   }, [selectedTask?.taskId])
 
   useEffect(() => {
@@ -279,15 +293,32 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
     ? tasks.find((t) => t.taskId === selectedTask.taskId) || null
     : null
 
+  const closeSelectedTask = React.useCallback(() => {
+    setSelectedTask(null)
+    if (!searchParams.get('taskId')) return
+    const next = new URLSearchParams(searchParams)
+    next.delete('taskId')
+    setSearchParams(next, { replace: true })
+  }, [searchParams, setSearchParams])
+
+  useEffect(() => {
+    const urlTaskId = searchParams.get('taskId')
+    if (!urlTaskId) return
+    const match = tasks.find((task) => task.taskId === urlTaskId || task.id === urlTaskId)
+    if (!match) return
+    setSelectedTask((current) => (current?.taskId === match.taskId ? current : match))
+    if (match.projectId) setSelectedProjectId(match.projectId)
+  }, [searchParams, tasks, setSelectedProjectId])
+
   useEffect(() => {
     if (!liveSelectedTask || deleteConfirmTask) return undefined
     const onKey = (event) => {
       if (event.key !== 'Escape') return
-      setSelectedTask(null)
+      closeSelectedTask()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [liveSelectedTask, deleteConfirmTask])
+  }, [liveSelectedTask, deleteConfirmTask, closeSelectedTask])
 
   useEffect(() => {
     if (viewMode !== 'board') return undefined
@@ -326,6 +357,14 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
       setCreateError('Your account is still loading. Please refresh and try again.')
       return
     }
+    if (!taskStartDate || !taskEndDate) {
+      setCreateError('Start date and end date are required.')
+      return
+    }
+    if (taskEndDate < taskStartDate) {
+      setCreateError('End date must be on or after the start date.')
+      return
+    }
     setCreateError('')
 
     const targetProjId = projectId || defaultProjId
@@ -342,7 +381,8 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
       assigneeEmail: currentUserEmail || null,
       assigneeName: employeeName,
       employeeId: currentUserId,
-      dueDate: new Date(Date.now() + 86400000 * 7).toISOString().split('T')[0],
+      startDate: taskStartDate,
+      dueDate: taskEndDate,
       createdBy: currentUserId,
       createdByEmail: currentUserEmail || null,
       createdByName: employeeName,
@@ -352,6 +392,8 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
 
     setTaskTitle('')
     setTaskDesc('')
+    setTaskStartDate('')
+    setTaskEndDate('')
     setShowAddModal(false)
   }
 
@@ -696,6 +738,12 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
                         <p className="text-[11px] text-accent font-medium truncate">
                           {t.projectName}
                         </p>
+                        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                          <span className="inline-flex items-center gap-1">
+                            <Calendar className="w-3 h-3" /> Start: {t.startDate ? String(t.startDate).slice(0, 10) : '—'}
+                          </span>
+                          <span>End: {t.dueDate ? String(t.dueDate).slice(0, 10) : '—'}</span>
+                        </p>
 
                         {/* Subtask Mini Stepper Bar on Kanban Card */}
                         <SubtaskStepper taskId={t.taskId} subtasks={t.subtasks || []} compact={true} />
@@ -716,7 +764,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
                         >
                           <span className="flex items-center gap-1.5 shrink-0">
                             Status:
-                            {t.timerStatus === 'running' && t.status !== 'done' && t.status !== 'todo' && (
+                            {t.timerStatus === 'running' && t.status === 'in_progress' && (
                               <button
                                 type="button"
                                 onClick={() => pauseTaskTimer(t.taskId)}
@@ -726,7 +774,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
                                 <Pause className="w-2.5 h-2.5" /> Pause
                               </button>
                             )}
-                            {t.timerStatus === 'paused' && t.status !== 'done' && t.status !== 'todo' && (
+                            {t.timerStatus === 'paused' && t.status === 'in_progress' && (
                               <button
                                 type="button"
                                 onClick={() => resumeTaskTimer(t.taskId)}
@@ -835,6 +883,24 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
                 </select>
               </div>
 
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  label="Start Date"
+                  type="date"
+                  value={taskStartDate}
+                  onChange={(e) => setTaskStartDate(e.target.value)}
+                  required
+                />
+                <Input
+                  label="End Date"
+                  type="date"
+                  value={taskEndDate}
+                  min={taskStartDate || undefined}
+                  onChange={(e) => setTaskEndDate(e.target.value)}
+                  required
+                />
+              </div>
+
               <p className="text-[11px] text-muted flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5 text-accent" />
                 Timer starts automatically when the task is created.
@@ -861,6 +927,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
       {liveSelectedTask && (() => {
         const statusMeta = visibleStatuses.find((status) => status.id === liveSelectedTask.status)
         const dueLabel = formatTaskDate(liveSelectedTask.dueDate)
+        const startLabel = formatTaskDate(liveSelectedTask.startDate)
         const assigneeName = liveSelectedTask.assigneeName || 'Unassigned'
         const createdByName = liveSelectedTask.createdByName || liveSelectedTask.assigneeName || 'Employee'
         const stateLabel = timerStateLabel(liveSelectedTask)
@@ -881,7 +948,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
         <div
           className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
           onClick={() => {
-            if (!deleteConfirmTask) setSelectedTask(null)
+            if (!deleteConfirmTask) closeSelectedTask()
           }}
         >
           <div
@@ -918,10 +985,16 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
                       </span>
                       {assigneeName}
                     </span>
+                    {startLabel && (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-border bg-chrome px-2 py-0.5 text-[11px] font-medium text-fg">
+                        <Calendar className="w-3 h-3 text-muted" />
+                        Start {startLabel}
+                      </span>
+                    )}
                     {dueLabel && (
                       <span className="inline-flex items-center gap-1 rounded-full border border-border bg-chrome px-2 py-0.5 text-[11px] font-medium text-fg">
                         <Calendar className="w-3 h-3 text-muted" />
-                        Due {dueLabel}
+                        End {dueLabel}
                       </span>
                     )}
                     <span className="inline-flex items-center rounded-full border border-border bg-chrome px-2 py-0.5 text-[11px] font-medium text-muted">
@@ -938,7 +1011,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
                       <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${stateTone}`}>
                         {stateLabel}
                       </span>
-                      {liveSelectedTask.timerStatus === 'running' && liveSelectedTask.status !== 'done' && liveSelectedTask.status !== 'todo' && (
+                      {liveSelectedTask.timerStatus === 'running' && liveSelectedTask.status === 'in_progress' && (
                         <Button
                           type="button"
                           variant="secondary"
@@ -949,7 +1022,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
                           Pause
                         </Button>
                       )}
-                      {liveSelectedTask.timerStatus === 'paused' && liveSelectedTask.status !== 'done' && liveSelectedTask.status !== 'todo' && (
+                      {liveSelectedTask.timerStatus === 'paused' && liveSelectedTask.status === 'in_progress' && (
                         <Button
                           type="button"
                           variant="primary"
@@ -969,7 +1042,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
                   </div>
                   <button
                     type="button"
-                    onClick={() => setSelectedTask(null)}
+                    onClick={closeSelectedTask}
                     aria-label="Close"
                     className="text-slate-400 hover:text-slate-900 dark:hover:text-white p-1 rounded-lg hover:bg-chrome transition-colors"
                   >
@@ -1012,7 +1085,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
               {liveSelectedTask.status === 'done' && (
                 <span className="text-xs text-muted">Task is done</span>
               )}
-              <Button type="button" variant="secondary" size="sm" onClick={() => setSelectedTask(null)}>
+              <Button type="button" variant="secondary" size="sm" onClick={closeSelectedTask}>
                 Close
               </Button>
             </div>
@@ -1056,7 +1129,7 @@ export const TaskBoard = ({ embedded = false, lockedProjectId = null }) => {
                   try {
                     await deleteTask(id)
                     setDeleteConfirmTask(null)
-                    setSelectedTask(null)
+                    closeSelectedTask()
                   } catch (err) {
                     console.error('Error deleting task:', err)
                   }

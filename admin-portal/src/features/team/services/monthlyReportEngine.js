@@ -15,6 +15,7 @@ import {
   LATE_GRACE_MINUTES,
 } from './attendanceStatsUtils'
 import { clockMinutes, normalizeWorkingHours, DEFAULT_WORKING_HOURS } from '../../../../../shared/workingHours.js'
+import { isProductiveEntryType } from '../../../../../shared/timelineEntryTypes.js'
 import {
   classifyApprovedLeaveByDate,
   approvedExtraWorkByDate,
@@ -279,6 +280,7 @@ export function buildEmployeeMonthlyReport({
     if (entry.uid && uid && String(entry.uid) !== String(uid)) return
     const hrs = Number(entry.hours) || 0
     timelineEntryCount += 1
+    if (!isProductiveEntryType(entry.entryType)) return
     if (entry.entryType === 'upskilling') timelineUpskillHours += hrs
     else timelineWorkHours += hrs
     if (!timelineByDate[entry.date]) timelineByDate[entry.date] = 0

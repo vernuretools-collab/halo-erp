@@ -10,6 +10,7 @@ import {
   restoreTaskFromDb,
   permanentlyDeleteProjectFromDb,
   permanentlyDeleteTaskFromDb,
+  appendTaskCommentInDb,
 } from '../services/projectService'
 
 const PROJECTS_TTL_MS = 45_000
@@ -365,6 +366,31 @@ export const useProjectStore = create(
 
   permanentlyDeleteTask: async (taskId) => {
     await permanentlyDeleteTaskFromDb(taskId)
+  },
+
+  mergeTaskActivity: (taskId, entries) => {
+    const incoming = (entries || []).filter(Boolean)
+    if (!taskId || !incoming.length) return
+    set((state) => ({
+      tasks: state.tasks.map((task) => {
+        if (task.taskId !== taskId) return task
+        const existing = Array.isArray(task.activity) ? task.activity : []
+        const ids = new Set(existing.map((item) => item.id))
+        const next = [...existing]
+        for (const entry of incoming) {
+          if (!entry.id || ids.has(entry.id)) continue
+          ids.add(entry.id)
+          next.push(entry)
+        }
+        return { ...task, activity: next.slice(-300) }
+      }),
+    }))
+  },
+
+  addTaskComment: async (taskId, text) => {
+    const entry = await appendTaskCommentInDb(taskId, text)
+    if (entry) get().mergeTaskActivity(taskId, [entry])
+    return entry
   },
     }),
     {

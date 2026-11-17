@@ -61,6 +61,10 @@ export const TaskListView = ({
           av = (a.createdByName || a.assigneeName || '').toLowerCase()
           bv = (b.createdByName || b.assigneeName || '').toLowerCase()
           return av.localeCompare(bv) * dir
+        case 'startDate':
+          av = a.startDate || '9999-12-31'
+          bv = b.startDate || '9999-12-31'
+          return av.localeCompare(bv) * dir
         case 'dueDate':
         default:
           av = a.dueDate || '9999-12-31'
@@ -114,7 +118,10 @@ export const TaskListView = ({
                 <SortHeader label="Assignee" column="assignee" />
               </th>
               <th className="px-4 py-3 font-semibold">
-                <SortHeader label="Due" column="dueDate" />
+                <SortHeader label="Start" column="startDate" />
+              </th>
+              <th className="px-4 py-3 font-semibold">
+                <SortHeader label="End" column="dueDate" />
               </th>
               <th className="px-4 py-3 font-semibold">{metaLabel}</th>
             </tr>
@@ -171,7 +178,13 @@ export const TaskListView = ({
                 <td className="px-4 py-3">
                   <span className="inline-flex items-center gap-1 text-[11px] text-muted">
                     <Calendar className="w-3 h-3 text-accent" />
-                    {task.dueDate || '—'}
+                    {task.startDate ? String(task.startDate).slice(0, 10) : '—'}
+                  </span>
+                </td>
+                <td className="px-4 py-3">
+                  <span className="inline-flex items-center gap-1 text-[11px] text-muted">
+                    <Calendar className="w-3 h-3 text-accent" />
+                    {task.dueDate ? String(task.dueDate).slice(0, 10) : '—'}
                   </span>
                 </td>
                 <td className="px-4 py-3">

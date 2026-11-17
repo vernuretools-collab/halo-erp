@@ -1,4 +1,5 @@
 import { supabase } from './client.js'
+import { normalizeEntryType } from '../timelineEntryTypes.js'
 
 export async function listWorkTimelineEntries(uids, startDate, endDate) {
   const ids = [...new Set((Array.isArray(uids) ? uids : [uids]).filter(Boolean).map(String))]
@@ -18,6 +19,6 @@ export const mapTimelineRow = (row) => {
   return {
     entryId: row.id,
     ...payload,
-    entryType: payload.entryType === 'upskilling' ? 'upskilling' : 'work',
+    entryType: normalizeEntryType(payload.entryType),
   }
 }
