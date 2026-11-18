@@ -2,6 +2,7 @@ import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useNotificationStore } from './stores/notificationStore'
 import { useUserStore } from '../../stores/userStore'
+import { employeeCanSeeReels } from '../../../../shared/qc/qcAccess.js'
 import { Card } from '../../components/ui/Card'
 import { Badge } from '../../components/ui/Badge'
 import {
@@ -22,11 +23,14 @@ import {
 
 export const NotificationCenter = () => {
   const navigate = useNavigate()
-  const { user } = useUserStore()
+  const { user, userDoc } = useUserStore()
   const { notifications, setIsOpen, markAsRead, markAllAsRead } = useNotificationStore()
 
   const uid = user?.uid
-  const unreadCount = notifications.filter((n) => !n.isRead).length
+  const visible = employeeCanSeeReels(userDoc)
+    ? notifications
+    : notifications.filter((n) => n.type !== 'reel' && !String(n.link || '').startsWith('/reels'))
+  const unreadCount = visible.filter((n) => !n.isRead).length
 
   const getIcon = (type) => {
     switch (type) {
@@ -45,6 +49,8 @@ export const NotificationCenter = () => {
         return <Heart className="w-4 h-4 text-rose-600 dark:text-rose-400" />
       case 'social_post':
         return <Share2 className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+      case 'reel':
+        return <Share2 className="w-4 h-4 text-accent" />
       case 'eod':
         return <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400" />
       case 'timesheet':
@@ -84,13 +90,13 @@ export const NotificationCenter = () => {
 
       {/* Notification List */}
       <div className="max-h-80 overflow-y-auto divide-y divide-border">
-        {notifications.length === 0 ? (
+        {visible.length === 0 ? (
           <div className="p-8 text-center text-xs text-muted">
             <Bell className="w-8 h-8 mx-auto mb-2 opacity-30" />
             No notifications yet.
           </div>
         ) : (
-          notifications.slice(0, 8).map((n) => (
+          visible.slice(0, 8).map((n) => (
             <div
               key={n.notificationId}
               onClick={() => {
@@ -127,7 +133,7 @@ export const NotificationCenter = () => {
       </div>
 
       {/* Footer */}
-      {notifications.length > 0 && (
+      {visible.length > 0 && (
         <div className="p-2.5 border-t border-border bg-chrome">
           <button
             onClick={() => {

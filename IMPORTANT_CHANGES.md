@@ -129,3 +129,32 @@ The employee end-of-day notification is no longer fixed at 6:00 PM. It is sent w
 - The inbox item and the browser notification say that office-end time and ask the employee to report the EOD update and clock out.
 - One reminder is sent per employee per day. Changing the end time after it has already been sent does not send a second one that day.
 - Office end still does not change the workday length, overtime, or auto clock-out.
+
+## 2026-11-18 — QC is only for marked editors and SMMs
+
+An admin chooses QC access on the employee record with two checkboxes: Editor and SMM.
+
+- Either checkbox lets that employee open the QC page. Everyone else does not see QC in the employee menu, and a direct `/qc` visit returns them to the dashboard.
+- The admin QC page stays available to admins. The checkboxes are stored on the employee record as `qcEditor` and `qcSmm`.
+- Unchecking both removes that employee's QC page. It does not delete the employee or their other records.
+
+## 2026-11-18 — Reels uses the same Editor and SMM checkboxes
+
+The Reels pages in the employee portal follow the same Editor and SMM checkboxes as QC.
+
+- Either checkbox lets that employee open Reels. Everyone else does not see Reels in the menu, and a direct `/reels` visit returns them to the dashboard.
+- Reel popups stay off for everyone else. Unchecking both removes Reels. It does not delete the employee or their reel records.
+
+## 2026-11-18 — Plan reel editors are the marked editors
+
+The Editor list on Plan reel shows only employees the admin marked Editor on Team Management.
+
+- The checkbox is `qcEditor` on the employee record. SMM alone does not put someone in that list.
+- A reel still needs an editor. If nobody is marked, the list stays empty until an admin checks Editor.
+
+## 2026-11-18 — Go-live cannot be a past day
+
+Plan reel and Change go-live only accept today or a later day in India time.
+
+- Earlier days stay unselectable. T-7, T-5, T-4, and T-3 are counted back from go-live, so a past go-live would already have missed those steps.
+- A go-live inside the next 72 hours is still a rush. Today is allowed.

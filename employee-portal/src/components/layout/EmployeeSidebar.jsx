@@ -26,6 +26,7 @@ import {
   StickyNote,
   ListChecks,
   Clapperboard,
+  Film,
 } from 'lucide-react'
 import haloLogo from '../../assets/halologo.png'
 import { useUIStore } from '../../stores/uiStore'
@@ -33,6 +34,7 @@ import { useUserStore } from '../../stores/userStore'
 import { logoutUser } from '../../shared/services/authService'
 import { EmployeeAvatar } from '../../../../shared/ui/EmployeeAvatar.jsx'
 import { useIsScrumConductor } from '../../../../shared/scrum/useScrumConductor.js'
+import { employeeCanSeeQc, employeeCanSeeReels } from '../../../../shared/qc/qcAccess.js'
 
 const NAV_GROUPS = [
   {
@@ -54,6 +56,7 @@ const NAV_GROUPS = [
       { name: 'Client Documents', path: '/client-documents', icon: Send },
       { name: 'Notes', path: '/project-notes', icon: StickyNote },
       { name: 'QC', path: '/qc', icon: Clapperboard },
+      { name: 'Reels', path: '/reels', icon: Film },
       { name: 'Client Support', path: '/helpdesk', icon: LifeBuoy },
     ],
   },
@@ -103,16 +106,23 @@ export const EmployeeSidebar = () => {
   const { sidebarOpen, toggleSidebar } = useUIStore()
   const { user, userDoc, clearUser } = useUserStore()
   const { isConductor } = useIsScrumConductor(user, userDoc)
+  const canSeeQc = employeeCanSeeQc(userDoc)
+  const canSeeReels = employeeCanSeeReels(userDoc)
   const location = useLocation()
   const navigate = useNavigate()
   const navGroups = NAV_GROUPS.map((group) => {
-    if (group.key !== 'team' || !isConductor) return group
+    const items = group.items.filter((item) => {
+      if (item.path === '/qc') return canSeeQc
+      if (item.path === '/reels') return canSeeReels
+      return true
+    })
+    if (group.key !== 'team' || !isConductor) return { ...group, items }
     return {
       ...group,
       items: [
-        group.items[0],
+        items[0],
         { name: 'Scrum', path: '/team/scrum', icon: ListChecks },
-        ...group.items.slice(1),
+        ...items.slice(1),
       ],
     }
   })

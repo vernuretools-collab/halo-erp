@@ -36,6 +36,7 @@ import {
   Clapperboard,
 } from 'lucide-react'
 import haloLogo from '../../assets/halologo.png'
+import { employeeCanSeeQc } from '../../../../shared/qc/qcAccess.js'
 import { useUIStore } from '../../stores/uiStore'
 import { useUserStore } from '../../stores/userStore'
 
@@ -227,7 +228,13 @@ export const Sidebar = () => {
 
   const getNavGroups = () => {
     if (userTier === 'client' || userRole === 'client') return CLIENT_GROUPS
-    if (userRole === 'employee') return EMPLOYEE_GROUPS
+    if (userRole === 'employee') {
+      if (employeeCanSeeQc(userDoc)) return EMPLOYEE_GROUPS
+      return EMPLOYEE_GROUPS.map((group) => ({
+        ...group,
+        items: group.items.filter((item) => item.path !== '/qc'),
+      }))
+    }
     return ADMIN_GROUPS
   }
 

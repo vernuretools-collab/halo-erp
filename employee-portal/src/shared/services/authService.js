@@ -186,6 +186,10 @@ export const getUserDoc = async (uid, emailHint) => {
     if (!merged.departmentName && empData?.departmentName) {
       merged.departmentName = empData.departmentName
     }
+    if (empData) {
+      merged.qcEditor = empData.qcEditor === true
+      merged.qcSmm = empData.qcSmm === true
+    }
     if (!merged.role) merged.role = 'employee'
     merged.employmentStatus = empData?.status || 'active'
 

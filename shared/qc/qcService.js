@@ -114,8 +114,7 @@ async function discardR2Object(key) {
   }
 }
 
-async function uploadVersionFile(itemId, versionNumber, file) {
-  const storagePath = `${itemId}/v${versionNumber}-${safeFileName(file.name)}`
+export async function uploadQcObject(storagePath, file) {
   const url = await r2SignedUrl('upload', storagePath)
   const response = await fetch(url, {
     method: 'PUT',
@@ -125,6 +124,16 @@ async function uploadVersionFile(itemId, versionNumber, file) {
   if (!response.ok) {
     throw new Error('Could not upload this file. Check that the Cloudflare bucket allows uploads from the portal.')
   }
+  return storagePath
+}
+
+export async function discardQcObject(storagePath) {
+  return discardR2Object(storagePath)
+}
+
+async function uploadVersionFile(itemId, versionNumber, file) {
+  const storagePath = `${itemId}/v${versionNumber}-${safeFileName(file.name)}`
+  await uploadQcObject(storagePath, file)
   return storagePath
 }
 

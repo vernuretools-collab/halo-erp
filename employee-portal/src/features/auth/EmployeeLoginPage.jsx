@@ -9,6 +9,7 @@ import haloLogo from '../../assets/halologo.png'
 import { loginWithEmail, logoutUser, signupWithEmail, fetchCustomClaims, getUserDoc } from '../../shared/services/authService'
 import { isJoiningAccount } from '../../../../shared/supabase/employeeOnboarding.js'
 import { isSignInBlocked } from '../../../../shared/employees/employmentStatus.js'
+import { armBrowserNotifications } from '../../shared/services/fcmService'
 
 export const EmployeeLoginPage = () => {
   const navigate = useNavigate()
@@ -55,6 +56,7 @@ export const EmployeeLoginPage = () => {
         role: userDoc?.role || claims?.role || 'employee',
         tier: claims?.tier || 'company',
       })
+      void armBrowserNotifications()
       navigate('/dashboard')
     } catch (err) {
       console.error('Employee Auth error:', err)

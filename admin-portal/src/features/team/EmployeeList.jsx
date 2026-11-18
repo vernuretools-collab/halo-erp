@@ -29,6 +29,7 @@ import { db } from '../../shared/services/firebaseService'
 import { collection, query, where, onSnapshot } from 'firebase/firestore'
 import { createEmployeeAccount, createAdminAccount } from '../../shared/services/authService'
 import { EmployeeAvatar } from '../../../../shared/ui/EmployeeAvatar.jsx'
+import { qcAccessLabel } from '../../../../shared/qc/qcAccess.js'
 import { TeamSubNav } from './components/TeamSubNav'
 import {
   Users,
@@ -49,6 +50,23 @@ import {
   AlertCircle,
   UserX,
 } from 'lucide-react'
+
+function QcAccessFields({ qcEditor, qcSmm, onEditor, onSmm }) {
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-fg">QC and Reels</p>
+      <p className="text-[11px] text-muted">Only editors and SMMs see QC and Reels in the employee portal.</p>
+      <label className="flex items-center gap-2 text-sm text-fg cursor-pointer">
+        <input type="checkbox" checked={qcEditor} onChange={(e) => onEditor(e.target.checked)} className="accent-accent" />
+        Editor
+      </label>
+      <label className="flex items-center gap-2 text-sm text-fg cursor-pointer">
+        <input type="checkbox" checked={qcSmm} onChange={(e) => onSmm(e.target.checked)} className="accent-accent" />
+        SMM
+      </label>
+    </div>
+  )
+}
 
 function todayDateStr() {
   const d = new Date()
@@ -90,6 +108,8 @@ export const EmployeeList = () => {
   const [isCustomDept, setIsCustomDept] = useState(false)
   const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
+  const [qcEditor, setQcEditor] = useState(false)
+  const [qcSmm, setQcSmm] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [listError, setListError] = useState('')
@@ -288,8 +308,14 @@ export const EmployeeList = () => {
           name,
           roleName,
           finalDept,
-          phone
+          phone,
+          { qcEditor, qcSmm }
         )
+        const createdId = created?.uid || created?.id
+        if (createdId) {
+          await updateEmployeeInDb(createdId, { qcEditor, qcSmm })
+          created = { ...created, qcEditor, qcSmm }
+        }
         addEmployee(created)
         setSuccess(`Employee account created successfully for ${email}!`)
       }
@@ -299,6 +325,8 @@ export const EmployeeList = () => {
       setRoleName('')
       setPhone('')
       setPassword('')
+      setQcEditor(false)
+      setQcSmm(false)
       setCustomDept('')
       setIsCustomDept(false)
 
@@ -325,6 +353,8 @@ export const EmployeeList = () => {
     setSkillInput('')
     setJoiningDate(emp.joiningDate || emp.startDate || '')
     setBio(emp.bio || emp.about || '')
+    setQcEditor(emp.qcEditor === true)
+    setQcSmm(emp.qcSmm === true)
 
     const isCustom = !departments.some((d) => d.name === emp.departmentName)
     if (isCustom && emp.departmentName) {
@@ -392,6 +422,8 @@ export const EmployeeList = () => {
         startDate: joiningDate,
         bio,
         about: bio,
+        qcEditor,
+        qcSmm,
       }
 
       const uid = editingEmployee.uid || editingEmployee.employeeId
@@ -519,6 +551,9 @@ export const EmployeeList = () => {
                       {emp.displayName}
                     </h4>
                     <p className="text-xs text-muted truncate">{emp.roleName}</p>
+                    {qcAccessLabel(emp) && (
+                      <p className="text-[10px] font-semibold text-accent truncate">QC & Reels · {qcAccessLabel(emp)}</p>
+                    )}
                     {normalizeEmploymentStatus(emp.status) === EMPLOYMENT_STATUS.NOTICE_PERIOD && (
                       <p className="text-[10px] font-semibold text-amber-600">{employmentStatusLabel(emp.status)}</p>
                     )}
@@ -775,6 +810,7 @@ export const EmployeeList = () => {
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                   />
+                  <QcAccessFields qcEditor={qcEditor} qcSmm={qcSmm} onEditor={setQcEditor} onSmm={setQcSmm} />
                 </>
               )}
 
@@ -934,6 +970,9 @@ export const EmployeeList = () => {
                       </select>
                     </div>
                   )}
+                </div>
+                <div className="mt-3">
+                  <QcAccessFields qcEditor={qcEditor} qcSmm={qcSmm} onEditor={setQcEditor} onSmm={setQcSmm} />
                 </div>
               </div>
 

@@ -872,6 +872,7 @@ export const updateEmployeeInDb = async (uid, data) => {
     }
   } catch (err) {
     console.error('Error updating employee in Firestore:', err)
+    throw err
   }
 }
 

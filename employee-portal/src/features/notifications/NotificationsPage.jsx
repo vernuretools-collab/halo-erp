@@ -8,6 +8,7 @@ import { PageHeader } from '../../components/layout/PageHeader'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
 import { Badge } from '../../components/ui/Badge'
+import { employeeCanSeeReels } from '../../../../shared/qc/qcAccess.js'
 
 const getIconForType = (type) => {
   switch (type) {
@@ -24,6 +25,8 @@ const getIconForType = (type) => {
       return <HeartPulse className="w-5 h-5 text-rose-500" />
     case 'social_post':
       return <Share2 className="w-5 h-5 text-sky-500" />
+    case 'reel':
+      return <Share2 className="w-5 h-5 text-accent" />
     case 'eod':
       return <Clock className="w-5 h-5 text-amber-600" />
     case 'timesheet':
@@ -51,6 +54,8 @@ const getBgForType = (type) => {
       return 'bg-rose-50 dark:bg-rose-500/10'
     case 'social_post':
       return 'bg-sky-50 dark:bg-sky-500/10'
+    case 'reel':
+      return 'bg-accent-soft'
     case 'eod':
       return 'bg-amber-50 dark:bg-amber-500/10'
     case 'timesheet':
@@ -71,6 +76,7 @@ const TABS = [
   { id: 'project', label: 'Project' },
   { id: 'wellness', label: 'Wellness' },
   { id: 'social_post', label: 'Posts' },
+  { id: 'reel', label: 'Reels' },
   { id: 'info', label: 'Info' }
 ]
 
@@ -136,9 +142,14 @@ export const NotificationsPage = () => {
     }
   }
 
-  const unreadCount = notifications.filter(n => !n.isRead).length
+  const canSeeReels = employeeCanSeeReels(userDoc)
+  const visible = canSeeReels
+    ? notifications
+    : notifications.filter((n) => n.type !== 'reel' && !String(n.link || '').startsWith('/reels'))
+  const tabs = canSeeReels ? TABS : TABS.filter((tab) => tab.id !== 'reel')
+  const unreadCount = visible.filter(n => !n.isRead).length
 
-  const filteredNotifications = notifications.filter(n => {
+  const filteredNotifications = visible.filter(n => {
     if (activeTab === 'all') return true
     if (activeTab === 'unread') return !n.isRead
     if (activeTab === 'project') return n.type === 'project' || n.type === 'task'
@@ -211,7 +222,7 @@ export const NotificationsPage = () => {
       />
 
       <div className="flex items-center gap-2 mb-6 overflow-x-auto pb-2 scrollbar-hide">
-        {TABS.map((tab) => (
+        {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}

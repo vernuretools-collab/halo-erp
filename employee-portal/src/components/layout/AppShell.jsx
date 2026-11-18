@@ -14,12 +14,14 @@ import { useSocialPostReminders } from '../../features/social-posts/hooks/useSoc
 import { useAutoClockOutAfterWorkday } from '../../features/team/hooks/useAutoClockOutAfterWorkday'
 import { useEodClockOutReminder } from '../../features/team/hooks/useEodClockOutReminder'
 import { TimesheetHourlyReminder } from '../../features/timeline/hooks/useTimesheetHourlyReminder.jsx'
+import { ReelPopups } from '../../features/reels/ReelPopups'
 import { useFixedLunchSchedule } from '../../features/team/hooks/useFixedLunchSchedule'
 import { useAnnouncementBrowserAlerts } from '../../features/announcements/hooks/useAnnouncementBrowserAlerts'
 import { usePayslipBrowserAlerts } from '../../features/payslips/hooks/usePayslipBrowserAlerts'
 import { useProjectBrowserAlerts } from '../../features/projects/hooks/useProjectBrowserAlerts'
 import { collectUserIdentityIds } from '../../features/projects/services/projectService'
 import { isJoiningAccount } from '../../../../shared/supabase/employeeOnboarding.js'
+import { employeeCanSeeReels } from '../../../../shared/qc/qcAccess.js'
 import { DesktopAttendanceBridge } from '../../features/team/components/DesktopAttendanceBridge'
 import { useAttendanceLinkedTaskTimers } from '../../features/projects/hooks/useAttendanceLinkedTaskTimers'
 
@@ -75,7 +77,19 @@ export const AppShell = () => {
     const docId = userDoc?.employeeDocId
     if (!docId) return undefined
     return onSnapshot(doc(db, 'employees', docId), (snap) => {
-      if (snap.exists() && isSignInBlocked(snap.data())) logoutUser()
+      if (!snap.exists()) return
+      const data = snap.data() || {}
+      if (isSignInBlocked(data)) {
+        logoutUser()
+        return
+      }
+      const qcEditor = data.qcEditor === true
+      const qcSmm = data.qcSmm === true
+      const current = useUserStore.getState().userDoc
+      if (!current) return
+      if ((current.qcEditor === true) === qcEditor && (current.qcSmm === true) === qcSmm) return
+      const { user: currentUser, claims: currentClaims } = useUserStore.getState()
+      setUser(currentUser || user, { ...current, qcEditor, qcSmm }, currentClaims || claims)
     })
   }, [user, userDoc])
 
@@ -106,6 +120,7 @@ export const AppShell = () => {
     <div className="min-h-screen bg-canvas text-fg flex flex-col transition-colors">
       <DesktopAttendanceBridge />
       <TimesheetHourlyReminder />
+      {employeeCanSeeReels(userDoc) && <ReelPopups identityIds={identityIds} />}
       <EmployeeSidebar />
       <div
         className={`min-w-0 flex-1 flex flex-col transition-all duration-300 ${

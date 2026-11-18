@@ -579,6 +579,8 @@ Deno.serve(async (req) => {
     status: 'active',
     joinedAt: now.split('T')[0],
     utilizationRate: 85,
+    qcEditor: body.qcEditor === true,
+    qcSmm: body.qcSmm === true,
     role: 'employee',
     tier: 'company',
     orgId,

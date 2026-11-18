@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search } from 'lucide-react'
 import { loadSearchIndex, searchAdmin } from './adminSearchIndex'
+import { useUserStore } from '../../stores/userStore'
+import { employeeCanSeeQc } from '../../../../shared/qc/qcAccess.js'
 
 const shortcutLabel = (() => {
   if (typeof navigator === 'undefined') return 'Ctrl K'
@@ -11,6 +13,8 @@ const shortcutLabel = (() => {
 
 export const AdminSearch = () => {
   const navigate = useNavigate()
+  const { claims, userDoc } = useUserStore()
+  const hideQc = (claims?.role || userDoc?.role) === 'employee' && !employeeCanSeeQc(userDoc)
   const rootRef = useRef(null)
   const inputRef = useRef(null)
   const [query, setQuery] = useState('')
@@ -19,7 +23,11 @@ export const AdminSearch = () => {
   const [loading, setLoading] = useState(false)
   const [active, setActive] = useState(0)
 
-  const results = useMemo(() => searchAdmin(query, index), [query, index])
+  const results = useMemo(() => {
+    const rows = searchAdmin(query, index)
+    if (!hideQc) return rows
+    return rows.filter((row) => row.href !== '/qc')
+  }, [query, index, hideQc])
 
   useEffect(() => {
     setActive(0)

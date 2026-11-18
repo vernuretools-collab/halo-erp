@@ -8,6 +8,7 @@ import { useNotificationStore } from '../../features/notifications/stores/notifi
 import { NotificationCenter } from '../../features/notifications/NotificationCenter'
 import { collectUserIdentityIds } from '../../features/projects/services/projectService'
 import { EmployeeAvatar } from '../../../../shared/ui/EmployeeAvatar.jsx'
+import { employeeCanSeeReels } from '../../../../shared/qc/qcAccess.js'
 
 export const EmployeeTopBar = () => {
   const { user, userDoc } = useUserStore()
@@ -18,7 +19,10 @@ export const EmployeeTopBar = () => {
   const navigate = useNavigate()
 
   const displayName = userDoc?.displayName || user?.displayName || 'Employee Staff'
-  const unreadCount = notifications.filter((n) => !n.isRead).length
+  const visible = employeeCanSeeReels(userDoc)
+    ? notifications
+    : notifications.filter((n) => n.type !== 'reel' && !String(n.link || '').startsWith('/reels'))
+  const unreadCount = visible.filter((n) => !n.isRead).length
 
   // Subscribe to Firestore notifications on mount
   useEffect(() => {

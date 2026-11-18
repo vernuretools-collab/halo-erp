@@ -5,6 +5,7 @@ import { EmployeeLoginPage } from './features/auth/EmployeeLoginPage'
 import { JoiningLoginPage } from './features/joining/JoiningLoginPage'
 import { JoiningFormPage } from './features/joining/JoiningFormPage'
 import { DesktopTimingLayout } from './features/desktop/DesktopTimingLayout'
+import { ReelAccess } from './features/reels/ReelAccess'
 
 const EmployeeDashboard = lazy(() =>
   import('./features/dashboard/EmployeeDashboard').then((m) => ({ default: m.EmployeeDashboard }))
@@ -77,6 +78,27 @@ const SocialPostRemindersPage = lazy(() =>
   import('./features/social-posts/SocialPostRemindersPage').then((m) => ({ default: m.SocialPostRemindersPage }))
 )
 const QcPage = lazy(() => import('./features/qc/QcPage').then((m) => ({ default: m.QcPage })))
+const ReelsBoardPage = lazy(() =>
+  import('./features/reels/ReelsBoardPage').then((m) => ({ default: m.ReelsBoardPage }))
+)
+const ReelsCalendarPage = lazy(() =>
+  import('./features/reels/ReelsCalendarPage').then((m) => ({ default: m.ReelsCalendarPage }))
+)
+const ReelQuotaPage = lazy(() =>
+  import('./features/reels/ReelQuotaPage').then((m) => ({ default: m.ReelQuotaPage }))
+)
+const ReelLeadershipPage = lazy(() =>
+  import('./features/reels/ReelLeadershipPage').then((m) => ({ default: m.ReelLeadershipPage }))
+)
+const ReelDetailPage = lazy(() =>
+  import('./features/reels/ReelDetailPage').then((m) => ({ default: m.ReelDetailPage }))
+)
+const ReelsListPage = lazy(() =>
+  import('./features/reels/ReelsListPage').then((m) => ({ default: m.ReelsListPage }))
+)
+const ReelGuidePage = lazy(() =>
+  import('./features/reels/ReelGuidePage').then((m) => ({ default: m.ReelGuidePage }))
+)
 const HelpDeskPage = lazy(() =>
   import('./features/helpdesk/HelpDeskPage').then((m) => ({ default: m.HelpDeskPage }))
 )
@@ -147,6 +169,13 @@ export const router = createBrowserRouter([
       { path: 'wellness', element: <WellnessSettings /> },
       { path: 'post-reminders', element: <SocialPostRemindersPage /> },
       { path: 'qc', element: <QcPage /> },
+      { path: 'reels', element: <ReelAccess><ReelsBoardPage /></ReelAccess> },
+      { path: 'reels/calendar', element: <ReelAccess><ReelsCalendarPage /></ReelAccess> },
+      { path: 'reels/list', element: <ReelAccess><ReelsListPage /></ReelAccess> },
+      { path: 'reels/quota', element: <ReelAccess><ReelQuotaPage /></ReelAccess> },
+      { path: 'reels/leadership', element: <ReelAccess><ReelLeadershipPage /></ReelAccess> },
+      { path: 'reels/guide', element: <ReelAccess><ReelGuidePage /></ReelAccess> },
+      { path: 'reels/:reelId', element: <ReelAccess><ReelDetailPage /></ReelAccess> },
       { path: 'profile', element: <EmployeeProfile /> },
 
       { path: 'notifications', element: <NotificationsPage /> },

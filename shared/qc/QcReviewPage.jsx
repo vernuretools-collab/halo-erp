@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { QcStage } from './QcStage.jsx'
+import { addReelVersion, decideReel, validateReelReviewFile } from '../reels/reelService.js'
 import {
   QC_ACCEPT,
   QC_FILTERS,
@@ -54,6 +55,7 @@ export function QcReviewPage({ mode, projects, actor }) {
   const [title, setTitle] = useState('')
   const [file, setFile] = useState(null)
   const [nextFile, setNextFile] = useState(null)
+  const [fullQualityUrl, setFullQualityUrl] = useState('')
   const [comment, setComment] = useState('')
   const [drawing, setDrawing] = useState(false)
   const [shapes, setShapes] = useState([])
@@ -107,6 +109,9 @@ export function QcReviewPage({ mode, projects, actor }) {
     selected?.versions?.find((version) => version.id === versionId) ||
     selected?.versions?.[selected.versions.length - 1] ||
     null
+  const isReel = Boolean(selected?.reel_id)
+  const showDecision = canReview || (isReel && selected?.uploader_id !== actor?.id)
+  const showNextUpload = !showDecision
 
   useEffect(() => {
     if (!selected) return
@@ -228,7 +233,7 @@ export function QcReviewPage({ mode, projects, actor }) {
         >
           <label className="block text-sm md:col-span-2">
             <span className="mb-1 block text-muted">Title</span>
-            <input className={FIELD} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Reel v1" />
+            <input className={FIELD} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="" />
           </label>
           <label className="block text-sm md:col-span-2">
             <span className="mb-1 block text-muted">File (MP4, WebM, or image)</span>
@@ -289,7 +294,7 @@ export function QcReviewPage({ mode, projects, actor }) {
                     item.id === selected?.id ? 'border-accent bg-surface' : 'border-border bg-surface'
                   }`}
                 >
-                  <p className="text-sm font-medium text-fg">{item.title}</p>
+                  <p className="text-sm font-medium text-fg">{item.reel_id ? `${item.reel_id} · ` : ''}{item.title}</p>
                   {projectName(projectOptions, item.project_id) && (
                     <p className="mt-1 text-xs text-muted">{projectName(projectOptions, item.project_id)}</p>
                   )}
@@ -384,7 +389,7 @@ export function QcReviewPage({ mode, projects, actor }) {
                     )}
                   </div>
 
-                  {canReview && (
+                  {showDecision && (
                     <form
                       className="space-y-3"
                       onSubmit={(event) => {
@@ -433,7 +438,11 @@ export function QcReviewPage({ mode, projects, actor }) {
                           className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                           onClick={() =>
                             run(async () => {
-                              await setQcStatus({ itemId: selected.id, status: 'approved', actor })
+                              if (selected.reel_id) {
+                                await decideReel({ reelId: selected.reel_id, decision: 'approved', feedback: '' })
+                              } else {
+                                await setQcStatus({ itemId: selected.id, status: 'approved', actor })
+                              }
                               await refresh(selected.id)
                               setFilter('approved')
                             })
@@ -447,8 +456,9 @@ export function QcReviewPage({ mode, projects, actor }) {
                           className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                           onClick={() =>
                             run(async () => {
-                              if (!comment.trim() && !selectedVersion.comments?.length) {
-                                throw new Error('Add a comment so the editor knows what to change.')
+                              const feedback = comment.trim() || selectedVersion.comments?.[selectedVersion.comments.length - 1]?.body || ''
+                              if (!feedback && !selectedVersion.comments?.length) {
+                                throw new Error('Tell the editor what to change.')
                               }
                               if (comment.trim()) {
                                 await addQcComment({
@@ -461,7 +471,15 @@ export function QcReviewPage({ mode, projects, actor }) {
                                 setShapes([])
                                 setDrawing(false)
                               }
-                              await setQcStatus({ itemId: selected.id, status: 'changes_requested', actor })
+                              if (selected.reel_id) {
+                                await decideReel({
+                                  reelId: selected.reel_id,
+                                  decision: 'changes',
+                                  feedback: feedback || 'See the frame comments.',
+                                })
+                              } else {
+                                await setQcStatus({ itemId: selected.id, status: 'changes_requested', actor })
+                              }
                               await refresh(selected.id)
                             })
                           }
@@ -472,13 +490,26 @@ export function QcReviewPage({ mode, projects, actor }) {
                     </form>
                   )}
 
-                  {!canReview && (
+                  {showNextUpload && (
                     <form
                       className="flex flex-wrap items-center gap-3"
                       onSubmit={(event) => {
                         event.preventDefault()
                         run(async () => {
-                          await addQcVersion({ item: selected, file: nextFile, actor })
+                          if (selected.reel_id) {
+                            const message = validateReelReviewFile(nextFile)
+                            if (message) throw new Error(message)
+                            const versionNo = (selected.versions?.reduce((max, version) => Math.max(max, version.version_number), 0) || 0) + 1
+                            await addReelVersion({
+                              reelId: selected.reel_id,
+                              versionNo,
+                              file: nextFile,
+                              fullQualityUrl,
+                            })
+                            setFullQualityUrl('')
+                          } else {
+                            await addQcVersion({ item: selected, file: nextFile, actor })
+                          }
                           setNextFile(null)
                           event.target.reset()
                           await refresh(selected.id)
@@ -487,10 +518,18 @@ export function QcReviewPage({ mode, projects, actor }) {
                     >
                       <input
                         type="file"
-                        accept={QC_ACCEPT}
+                        accept={selected?.reel_id ? 'video/mp4,video/webm,.mp4,.webm' : QC_ACCEPT}
                         className="text-sm text-fg"
                         onChange={(event) => setNextFile(event.target.files?.[0] || null)}
                       />
+                      {selected?.reel_id && (
+                        <input
+                          className={FIELD}
+                          value={fullQualityUrl}
+                          onChange={(event) => setFullQualityUrl(event.target.value)}
+                          placeholder="Full-quality link"
+                        />
+                      )}
                       <button
                         type="submit"
                         disabled={busy || !nextFile}

@@ -133,7 +133,15 @@ export const getUserDoc = async (uid) => {
     const userRef = doc(db, 'users', uid)
     const snap = await getDoc(userRef)
     if (snap.exists()) {
-      return snap.data()
+      const profile = snap.data() || {}
+      const empSnap = await getDoc(doc(db, 'employees', uid))
+      if (!empSnap.exists()) return profile
+      const employee = empSnap.data() || {}
+      return {
+        ...profile,
+        qcEditor: employee.qcEditor === true,
+        qcSmm: employee.qcSmm === true,
+      }
     }
     const empRef = doc(db, 'employees', uid)
     const empSnap = await getDoc(empRef)
@@ -292,7 +300,9 @@ export const deleteClientAccount = async (uid) => {
 /**
  * Programmatically create an Employee Auth user & Firestore profile without logging out the active admin.
  */
-export const createEmployeeAccount = async (email, password, displayName, roleName, departmentName, phone) => {
+export const createEmployeeAccount = async (email, password, displayName, roleName, departmentName, phone, access = {}) => {
+  const qcEditor = access.qcEditor === true
+  const qcSmm = access.qcSmm === true
   const employeePayload = {
     displayName,
     email,
@@ -303,6 +313,8 @@ export const createEmployeeAccount = async (email, password, displayName, roleNa
     status: 'active',
     joinedAt: new Date().toISOString().split('T')[0],
     utilizationRate: 85,
+    qcEditor,
+    qcSmm,
   }
 
   if (import.meta.env.VITE_FIREBASE_API_KEY === 'mock_api_key_dev') {
@@ -328,6 +340,8 @@ export const createEmployeeAccount = async (email, password, displayName, roleNa
     roleName,
     departmentName,
     phone,
+    qcEditor,
+    qcSmm,
   })
 }
 
