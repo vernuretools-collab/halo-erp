@@ -3,7 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore'
 import { CalendarDays } from 'lucide-react'
 import { db } from '../../../shared/services/firebaseService'
-import { showForegroundBrowserNotification } from '../../../shared/services/fcmService'
+import {
+  armBrowserNotifications,
+  playAnnouncementChime,
+  showForegroundBrowserNotification,
+} from '../../../shared/services/fcmService'
 import { useUserStore } from '../../../stores/userStore'
 import { useTeamStore } from '../../team/stores/teamStore'
 
@@ -52,6 +56,14 @@ export const TimesheetHourlyReminder = () => {
   const inflightRef = useRef(false)
 
   useEffect(() => {
+    void armBrowserNotifications()
+  }, [])
+
+  useEffect(() => {
+    if (open) playAnnouncementChime()
+  }, [open])
+
+  useEffect(() => {
     if (!uid) return undefined
     let cancelled = false
     let timer
@@ -85,6 +97,7 @@ export const TimesheetHourlyReminder = () => {
             type: 'timesheet',
             link: LINK,
             tag: `timesheet-reminder-${stamp}`,
+            skipChime: true,
           },
         })
       } catch (err) {

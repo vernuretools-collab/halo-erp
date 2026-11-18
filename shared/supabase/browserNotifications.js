@@ -17,9 +17,6 @@ const ensurePrimedAudio = () => {
   return primedAudio
 }
 
-const runningAudioContext = () =>
-  audioCtx && audioCtx.state === 'running' ? audioCtx : null
-
 const markAudioUnlocked = () => {
   audioUnlocked = true
   detachUnlockListeners()
@@ -107,12 +104,8 @@ const bindAnnouncementAudioUnlock = () => {
 }
 
 export const playAnnouncementChime = () => {
-  if (!audioUnlocked) return
-
   const playOscillator = () => {
-    try {
-      const ctx = runningAudioContext()
-      if (!ctx) return
+    const beep = (ctx) => {
       const now = ctx.currentTime
       const osc = ctx.createOscillator()
       const gain = ctx.createGain()
@@ -126,6 +119,18 @@ export const playAnnouncementChime = () => {
       gain.connect(ctx.destination)
       osc.start(now)
       osc.stop(now + 0.42)
+    }
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext
+      if (!Ctx) return
+      if (!audioCtx) audioCtx = new Ctx()
+      if (audioCtx.state === 'running') {
+        beep(audioCtx)
+        return
+      }
+      void audioCtx.resume().then(() => {
+        if (audioCtx?.state === 'running') beep(audioCtx)
+      }).catch(() => {})
     } catch {
       // ignore
     }
@@ -212,7 +217,7 @@ export const showForegroundBrowserNotification = async (payload) => {
   recentlyShown.add(tag)
   setTimeout(() => recentlyShown.delete(tag), 30000)
 
-  playAnnouncementChime()
+  if (!payload?.data?.skipChime) playAnnouncementChime()
 
   if (isElectronDesktop()) {
     try {

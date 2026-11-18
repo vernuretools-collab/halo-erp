@@ -19,7 +19,6 @@ import {
   CalendarDays,
 } from 'lucide-react'
 import {
-  LUNCH_BREAK_HOURS,
   PRODUCTIVE_DAY_HOURS,
   entryTypeLabel,
   isProductiveEntryType,
@@ -32,9 +31,8 @@ const TARGET_DAY_HOURS = PRODUCTIVE_DAY_HOURS
 
 const TYPE_TEXT_CLASS = {
   work: 'text-muted',
-  meeting: 'text-sky-600 dark:text-sky-400',
-  shoot: 'text-amber-600 dark:text-amber-400',
   upskilling: 'text-violet-500 dark:text-violet-400',
+  work_activities: 'text-sky-600 dark:text-sky-400',
   extra_break: 'text-orange-600 dark:text-orange-400',
 }
 
@@ -303,10 +301,11 @@ export function EmployeeTimelinePage() {
                     >
                       {formatHours(productiveTotal)} of {TARGET_DAY_HOURS}h
                     </span>
-                    <p className="mt-1 text-[10px] text-muted">
-                      Includes {LUNCH_BREAK_HOURS}h lunch
-                      {extraBreakTotal > 0 ? ` · extra ${formatHours(extraBreakTotal)}` : ''}
-                    </p>
+                    {extraBreakTotal > 0 ? (
+                      <p className="mt-1 text-[10px] text-muted">
+                        Extra {formatHours(extraBreakTotal)}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
               </div>

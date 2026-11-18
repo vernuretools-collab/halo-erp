@@ -4,21 +4,39 @@ export const LUNCH_BREAK_HOURS = 1
 
 export const TIMELINE_ENTRY_TYPES = [
   { id: 'work', label: 'Work', productive: true },
-  { id: 'meeting', label: 'Meeting', productive: true },
-  { id: 'shoot', label: 'Shoot', productive: true },
   { id: 'upskilling', label: 'Upskilling', productive: true },
-  { id: 'extra_break', label: 'Extra break', productive: false },
+  { id: 'work_activities', label: 'Work Activities', productive: true },
 ]
+
+/** Older activity logs that now sit under Work Activities. */
+const WORK_ACTIVITY_ALIASES = new Set([
+  'meeting',
+  'shoot',
+  'discussion',
+  'on_duty',
+  'onduty',
+])
+
+const LEGACY_LABELS = {
+  extra_break: 'Extra break',
+}
 
 const TYPE_IDS = new Set(TIMELINE_ENTRY_TYPES.map((type) => type.id))
 
 export function normalizeEntryType(entryType) {
-  return TYPE_IDS.has(entryType) ? entryType : 'work'
+  const raw = String(entryType || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_')
+  if (TYPE_IDS.has(raw)) return raw
+  if (raw === 'extra_break' || raw === 'extrabreak') return 'extra_break'
+  if (WORK_ACTIVITY_ALIASES.has(raw)) return 'work_activities'
+  return 'work'
 }
 
 export function entryTypeLabel(entryType) {
   const id = normalizeEntryType(entryType)
-  return TIMELINE_ENTRY_TYPES.find((type) => type.id === id)?.label || 'Work'
+  return TIMELINE_ENTRY_TYPES.find((type) => type.id === id)?.label || LEGACY_LABELS[id] || 'Work'
 }
 
 export function isProductiveEntryType(entryType) {

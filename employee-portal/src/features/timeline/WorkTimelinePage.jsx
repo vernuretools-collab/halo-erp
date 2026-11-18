@@ -17,7 +17,6 @@ import {
   X,
 } from 'lucide-react'
 import {
-  LUNCH_BREAK_HOURS,
   PRODUCTIVE_DAY_HOURS,
   TIMELINE_ENTRY_TYPES,
   entryTypeLabel,
@@ -27,7 +26,6 @@ import {
 } from '../../../../shared/timelineEntryTypes.js'
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const MINUTE_OPTIONS = ['00', '15', '30', '45']
 const ENTRY_TYPES = TIMELINE_ENTRY_TYPES
 
 const ENTRY_PROMPTS = {
@@ -36,20 +34,15 @@ const ENTRY_PROMPTS = {
     placeholder: 'e.g. API integration for client portal',
     required: 'Please describe what you worked on.',
   },
-  meeting: {
-    label: 'What was the meeting?',
-    placeholder: 'e.g. Client standup',
-    required: 'Please describe the meeting.',
-  },
-  shoot: {
-    label: 'What was the shoot?',
-    placeholder: 'e.g. Product shoot for the campaign',
-    required: 'Please describe the shoot.',
-  },
   upskilling: {
     label: 'What are you upskilling on?',
     placeholder: 'e.g. React advanced patterns course',
     required: 'Please describe what you are upskilling on.',
+  },
+  work_activities: {
+    label: 'What was the work activity?',
+    placeholder: 'e.g. Client meeting, shoot, or on-duty visit',
+    required: 'Please describe the work activity.',
   },
   extra_break: {
     label: 'What was the extra break?',
@@ -60,9 +53,8 @@ const ENTRY_PROMPTS = {
 
 const TYPE_TEXT_CLASS = {
   work: 'text-slate-400 dark:text-slate-500',
-  meeting: 'text-sky-600 dark:text-sky-400',
-  shoot: 'text-amber-600 dark:text-amber-400',
   upskilling: 'text-violet-500 dark:text-violet-400',
+  work_activities: 'text-sky-600 dark:text-sky-400',
   extra_break: 'text-orange-600 dark:text-orange-400',
 }
 
@@ -76,29 +68,14 @@ function formatHours(hours) {
   return `${h}h ${m}m`
 }
 
-/** Split decimal hours into integer hours + quarter minutes (snap nearest). */
+/** Split decimal hours into typed hours and minutes. */
 function decimalToParts(decimalHours) {
-  const n = Number(decimalHours) || 0
-  const totalMinutes = Math.round(n * 60)
+  const totalMinutes = Math.round((Number(decimalHours) || 0) * 60)
   const h = Math.floor(totalMinutes / 60)
-  const rawMins = totalMinutes % 60
-  const quarters = [0, 15, 30, 45]
-  let nearest = quarters[0]
-  let best = Math.abs(rawMins - nearest)
-  for (const q of quarters) {
-    const d = Math.abs(rawMins - q)
-    if (d < best) {
-      best = d
-      nearest = q
-    }
-  }
-  // If closer to 60 than to 45, roll into next hour
-  if (Math.abs(rawMins - 60) < best) {
-    return { hoursPart: String(Math.min(h + 1, 23)), minutesPart: '00' }
-  }
+  const minutes = totalMinutes % 60
   return {
     hoursPart: String(Math.min(Math.max(h, 0), 23)),
-    minutesPart: String(nearest).padStart(2, '0'),
+    minutesPart: String(minutes),
   }
 }
 
@@ -187,7 +164,7 @@ export const WorkTimelinePage = ({ embedded = false }) => {
   const [entryType, setEntryType] = useState('work')
   const [description, setDescription] = useState('')
   const [hoursPart, setHoursPart] = useState('')
-  const [minutesPart, setMinutesPart] = useState('00')
+  const [minutesPart, setMinutesPart] = useState('')
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
 
@@ -208,20 +185,20 @@ export const WorkTimelinePage = ({ embedded = false }) => {
   }, [entries, weekDays])
 
   const durationPreview = useMemo(() => {
-    const h = Number(hoursPart)
-    const m = Number(minutesPart)
-    if (hoursPart === '' || Number.isNaN(h) || Number.isNaN(m)) return '0h'
+    const h = hoursPart === '' ? 0 : Number(hoursPart)
+    const m = minutesPart === '' ? 0 : Number(minutesPart)
+    if (Number.isNaN(h) || Number.isNaN(m)) return '0h'
     return formatHours(h + m / 60)
   }, [hoursPart, minutesPart])
 
-  const openAddModal = (dateStr, e, preset) => {
+  const openAddModal = (dateStr, e) => {
     e?.stopPropagation?.()
     setSelectedDate(dateStr)
     setEditingEntry(null)
     setEntryType('work')
     setDescription('')
-    setHoursPart(preset?.hours === PRODUCTIVE_DAY_HOURS ? String(PRODUCTIVE_DAY_HOURS) : '')
-    setMinutesPart('00')
+    setHoursPart('')
+    setMinutesPart('')
     setFormError('')
     setModalOpen(true)
   }
@@ -245,7 +222,7 @@ export const WorkTimelinePage = ({ embedded = false }) => {
     setEntryType('work')
     setDescription('')
     setHoursPart('')
-    setMinutesPart('00')
+    setMinutesPart('')
     setFormError('')
   }
 
@@ -259,25 +236,19 @@ export const WorkTimelinePage = ({ embedded = false }) => {
     }
 
     const trimmed = description.trim()
-    const h = Number(hoursPart)
-    const m = Number(minutesPart)
+    const h = hoursPart === '' ? 0 : Number(hoursPart)
+    const m = minutesPart === '' ? 0 : Number(minutesPart)
 
     if (!trimmed) {
       setFormError(ENTRY_PROMPTS[entryType]?.required || ENTRY_PROMPTS.work.required)
       return
     }
-    if (
-      hoursPart === '' ||
-      Number.isNaN(h) ||
-      !Number.isInteger(h) ||
-      h < 0 ||
-      h > 23
-    ) {
+    if (Number.isNaN(h) || !Number.isInteger(h) || h < 0 || h > 23) {
       setFormError('Enter hours as a whole number from 0 to 23.')
       return
     }
-    if (!MINUTE_OPTIONS.includes(minutesPart)) {
-      setFormError('Minutes must be 00, 15, 30, or 45.')
+    if (!Number.isInteger(m) || m < 0 || m > 59) {
+      setFormError('Enter minutes as a whole number from 0 to 59.')
       return
     }
     const hours = h + m / 60
@@ -337,46 +308,24 @@ export const WorkTimelinePage = ({ embedded = false }) => {
   const targetLabel = formatHours(PRODUCTIVE_DAY_HOURS)
   const prompt = ENTRY_PROMPTS[entryType] || ENTRY_PROMPTS.work
 
-  const applyEightHours = () => {
-    setHoursPart(String(PRODUCTIVE_DAY_HOURS))
-    setMinutesPart('00')
-  }
-
   return (
     <div className="space-y-6">
       {!embedded ? (
         <PageHeader
           title="Work Timeline"
-          description="Log 8h of work, meetings, shoots, and upskilling. Lunch is the 1h break."
+          description="Log work, upskilling, and work activities. Lunch is the 1h break."
           actions={
-            <div className="flex items-center gap-2">
-              <Button
-                icon={Clock}
-                variant="secondary"
-                onClick={(e) => openAddModal(todayStr, e, { hours: PRODUCTIVE_DAY_HOURS })}
-              >
-                Log 8h
-              </Button>
-              <Button
-                icon={Plus}
-                variant="primary"
-                onClick={(e) => openAddModal(todayStr, e)}
-              >
-                Add Entry
-              </Button>
-            </div>
+            <Button
+              icon={Plus}
+              variant="primary"
+              onClick={(e) => openAddModal(todayStr, e)}
+            >
+              Add Entry
+            </Button>
           }
         />
       ) : (
         <div className="flex items-center justify-end gap-2">
-          <Button
-            icon={Clock}
-            variant="secondary"
-            size="sm"
-            onClick={(e) => openAddModal(todayStr, e, { hours: PRODUCTIVE_DAY_HOURS })}
-          >
-            Log 8h
-          </Button>
           <Button
             icon={Plus}
             variant="primary"
@@ -489,10 +438,11 @@ export const WorkTimelinePage = ({ embedded = false }) => {
                     >
                       {formatHours(productiveTotal)} of {targetLabel}
                     </span>
-                    <p className="mt-1 text-[10px] text-muted">
-                      Includes {formatHours(LUNCH_BREAK_HOURS)} lunch
-                      {extraBreakTotal > 0 ? ` · extra ${formatHours(extraBreakTotal)}` : ''}
-                    </p>
+                    {extraBreakTotal > 0 ? (
+                      <p className="mt-1 text-[10px] text-muted">
+                        Extra {formatHours(extraBreakTotal)}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -518,23 +468,13 @@ export const WorkTimelinePage = ({ embedded = false }) => {
                 )}
               </div>
 
-              <div className="mt-3 pt-2 border-t border-border flex gap-1">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  icon={Clock}
-                  className="flex-1 justify-center text-xs"
-                  onClick={(e) => openAddModal(dateStr, e, { hours: PRODUCTIVE_DAY_HOURS })}
-                >
-                  Log 8h
-                </Button>
+              <div className="mt-3 pt-2 border-t border-border">
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   icon={Plus}
-                  className="flex-1 justify-center text-xs"
+                  className="w-full justify-center text-xs"
                   onClick={(e) => openAddModal(dateStr, e)}
                 >
                   Add
@@ -602,7 +542,7 @@ export const WorkTimelinePage = ({ embedded = false }) => {
               })}
             </div>
             <p className="text-[11px] text-muted leading-relaxed">
-              Work, meeting, shoot, and upskilling count together toward 8h. Lunch is the 1h break. Extra break is time beyond lunch.
+              Work, upskilling, and work activities count together toward 8h. Meetings, shoots, discussions, and on-duty time go under Work Activities. Lunch is the 1h break.
             </p>
 
             <form onSubmit={handleSave} className="space-y-4">
@@ -620,20 +560,9 @@ export const WorkTimelinePage = ({ embedded = false }) => {
               </div>
 
               <div className="space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="block text-xs font-medium text-fg">
-                    Duration
-                  </p>
-                  {entryType !== 'extra_break' ? (
-                    <button
-                      type="button"
-                      onClick={applyEightHours}
-                      className="rounded-lg bg-accent/10 text-accent text-[11px] font-semibold px-2.5 py-1 cursor-pointer hover:bg-accent/20"
-                    >
-                      Log 8h
-                    </button>
-                  ) : null}
-                </div>
+                <p className="block text-xs font-medium text-fg">
+                  Duration
+                </p>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <label
@@ -662,18 +591,18 @@ export const WorkTimelinePage = ({ embedded = false }) => {
                     >
                       Minutes
                     </label>
-                    <select
+                    <input
                       id="timeline-minutes"
+                      type="number"
+                      min={0}
+                      max={59}
+                      step={1}
+                      inputMode="numeric"
                       value={minutesPart}
                       onChange={(e) => setMinutesPart(e.target.value)}
-                      className="w-full bg-chrome border border-border text-fg text-sm rounded-xl py-2.5 px-3.5 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent cursor-pointer"
-                    >
-                      {MINUTE_OPTIONS.map((opt) => (
-                        <option key={opt} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder="0"
+                      className="w-full bg-chrome border border-border text-fg placeholder-slate-400 text-sm rounded-xl py-2.5 px-3.5 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
+                    />
                   </div>
                 </div>
                 <p className="text-xs text-muted">
