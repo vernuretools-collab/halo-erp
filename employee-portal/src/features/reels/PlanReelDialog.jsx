@@ -348,7 +348,7 @@ export function PlanReelDialog({ open, onClose, projects, employees, reels, onPl
           </label>
           <label className="text-sm">
             <span className="mb-1 block text-muted">Reel</span>
-            <input className={FIELD} readOnly value={previewId || clientCode || 'Select a client'} />
+            <input className={FIELD} readOnly value={previewId || clientCode || ''} />
           </label>
           <label className="text-sm md:col-span-2">
             <span className="mb-1 block text-muted">Title</span>

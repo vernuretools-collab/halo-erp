@@ -158,3 +158,62 @@ Plan reel and Change go-live only accept today or a later day in India time.
 
 - Earlier days stay unselectable. T-7, T-5, T-4, and T-3 are counted back from go-live, so a past go-live would already have missed those steps.
 - A go-live inside the next 72 hours is still a rush. Today is allowed.
+
+## 2026-11-19 — Reel editing stages can be moved on the board
+
+A reel in To Do, In Progress, In Review, or Changes Requested can be moved between those four stages from the Reels board or the reel page.
+
+- That move goes through `reel_move_stage`. A direct update of `reels.status` is still rejected.
+- Ready to Schedule, Scheduled, and Published stay on the schedule and publish actions.
+- The person moving the reel must be able to open it: the editor, the SMM, the reviewer, or leadership.
+
+## 2026-11-19 — Employee QC follows the QC Studio review loop
+
+On the employee QC page, an SMM marks a moment on the video and attaches a note. An editor opens that mark, jumps to that time, and submits the next version.
+
+- The Editor checkbox is the editor. The SMM checkbox is the reviewer. Someone with both can mark and submit.
+- Marks stay on the version as timed comments. Approving or requesting changes still uses the existing QC actions.
+
+## 2026-11-19 — SMM can create a QC review
+
+An SMM can add a QC item and a timed note. An editor can open that review and its notes.
+
+- Creating a review, or moving it to Changes requested or Approved, is allowed for an SMM, leadership, or an admin.
+- An editor can read the review and send the next cut back to In Review. An editor does not approve it or request changes.
+
+## 2026-11-19 — Reels is only for marked SMMs
+
+The Reels pages in the employee portal follow the SMM checkbox only. The Editor checkbox no longer opens Reels.
+
+- `qcSmm` lets that employee open Reels. An editor who is not also marked SMM does not see Reels in the menu, does not get reel popups or reel notifications, and a direct `/reels` visit returns them to the dashboard.
+- QC stays available to either checkbox. An editor still uses the QC page.
+- Unchecking SMM removes Reels. It does not delete the employee or their reel records.
+
+## 2026-11-19 — Editors open planned reels on QC
+
+The employee QC page lists every reel an SMM or an admin planned, with its title. An editor does not create a reel or a new QC review.
+
+- Opening a planned reel shows the brief, client, editor, SMM, go-live, and raw footage.
+- The assigned editor uploads an MP4 or WebM and a full-quality link, then sends that cut for review. A reel still in To Do is started as part of that send.
+- An editor who is not the assignee can read the task. They do not get the upload form.
+- An SMM can still add a QC review. A pure editor does not see that create form.
+
+## 2026-11-19 — Employee QC hides the new-review bar
+
+On the employee QC page, the title field and the Send for review bar stay hidden for an editor and for an SMM.
+
+- Those controls stay on the admin QC page.
+- The Reels page is unchanged. An SMM still plans reels there.
+
+## 2026-11-19 — Reel upload does not ask for a full-quality link
+
+An editor uploads the cut as a video file. The QC page and the reel page do not ask for a full-quality link, and the upload is not rejected when that link is missing.
+
+- The file and Send for review stay. Raw footage stays on the planned reel.
+
+## 2026-11-19 — Approval hides the reel video from the database
+
+When a reel is approved, `reel_decide` sets `reels.hide_video` to true. The status stays `ready_to_schedule`, the version decision stays `approved`, and the QC item stays `approved`.
+
+- A change request sets `hide_video` back to false.
+- The QC screen hides the player only when that flag is true.

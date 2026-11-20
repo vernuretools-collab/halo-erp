@@ -1,6 +1,5 @@
 import { supabase } from '../supabase/client.js'
 import { discardQcObject, uploadQcObject } from '../qc/qcService.js'
-import { isHttpUrl } from './deadlines.js'
 
 const MAX_BYTES = 50 * 1024 * 1024
 
@@ -116,16 +115,21 @@ export async function planReel(input) {
   return data
 }
 
+export async function moveReelStage(reelId, status) {
+  const client = requireClient()
+  const { error } = await client.rpc('reel_move_stage', { p_reel_id: reelId, p_status: status })
+  raise(error)
+}
+
 export async function startReel(reelId) {
   const client = requireClient()
   const { error } = await client.rpc('reel_start', { p_reel_id: reelId })
   raise(error)
 }
 
-export async function addReelVersion({ reelId, versionNo, file, fullQualityUrl }) {
+export async function addReelVersion({ reelId, versionNo, file }) {
   const fileError = validateReelReviewFile(file)
   if (fileError) throw new Error(fileError)
-  if (!isHttpUrl(fullQualityUrl)) throw new Error('Add the full-quality link. That link is required.')
   const storagePath = `${reelId}/v${versionNo}-${safeFileName(file.name)}`
   await uploadQcObject(storagePath, file)
   const client = requireClient()
@@ -135,7 +139,7 @@ export async function addReelVersion({ reelId, versionNo, file, fullQualityUrl }
     p_file_name: file.name,
     p_content_type: file.type || null,
     p_byte_size: file.size,
-    p_full_quality_url: String(fullQualityUrl).trim(),
+    p_full_quality_url: null,
   })
   if (error) {
     await discardQcObject(storagePath)

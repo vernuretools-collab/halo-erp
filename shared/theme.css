@@ -1,5 +1,9 @@
 @variant dark (&:where(.dark, .dark *));
 
+/* Portals live outside this folder, so Tailwind never saw classes used only here.
+   Pressed buttons then kept an inherited light color on a white background. */
+@source ".";
+
 @theme {
   --color-canvas: var(--canvas);
   --color-surface: var(--surface);
@@ -80,6 +84,20 @@
     min-height: 100vh;
     transition: background-color 0.15s ease, color 0.15s ease;
   }
+
+  /* Tailwind preflight sets appearance: button. In a dark color scheme that
+     paints the label with the system ButtonText (white) and ignores text-black. */
+  button,
+  input:where([type="button"], [type="reset"], [type="submit"]),
+  ::file-selector-button {
+    appearance: none;
+  }
+
+  select option,
+  select optgroup {
+    background-color: var(--surface);
+    color: var(--fg);
+  }
 }
 
 ::-webkit-scrollbar {
@@ -109,6 +127,12 @@ input[type="date"]::-webkit-clear-button {
   margin: 0 !important;
   padding: 0 !important;
   pointer-events: none !important;
+}
+
+/* Pressed QC controls use a white fill. text-black is only in shared code and
+   does not stay in the CSS the browser loads, so the label inherits white. */
+button[aria-pressed="true"] {
+  color: #171717;
 }
 
 select:not([multiple]):not([size]),

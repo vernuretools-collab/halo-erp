@@ -57,6 +57,7 @@ create table if not exists public.reels (
   last_alarm_at timestamptz,
   started_at timestamptz,
   risk_status text not null default 'on_track',
+  hide_video boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -875,7 +876,7 @@ begin
 
   perform set_config('reel.transition', 'on', true);
   if p_decision = 'changes' then
-    update public.reels set status = 'changes_requested' where id = p_reel_id;
+    update public.reels set status = 'changes_requested', hide_video = false where id = p_reel_id;
     perform public.reel_log(p_reel_id, 'changes_requested', 'in_review', 'changes_requested');
     perform public.reel_notify(
       r.editor_id, p_reel_id, 'changes_requested_v' || v.version_no::text,
@@ -886,6 +887,7 @@ begin
   else
     update public.reels
     set status = 'ready_to_schedule',
+        hide_video = true,
         full_quality_url = v.full_quality_url,
         last_reminder_at = now() - interval '30 minutes'
     where id = p_reel_id;

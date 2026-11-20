@@ -8,6 +8,7 @@ import { createTimelineEntry } from '../timeline/services/timelineService'
 import {
   RISK_LABEL,
   REEL_STATUS_LABEL,
+  REEL_WORK_STAGES,
   computeRisk,
   formatWhen,
   fromIstInput,
@@ -22,6 +23,7 @@ import {
   getReel,
   listReelActivity,
   listReelVersions,
+  moveReelStage,
   publishReel,
   scheduleReel,
   setReelGolive,
@@ -46,7 +48,6 @@ export function ReelDetailPage() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [file, setFile] = useState(null)
-  const [fullQualityUrl, setFullQualityUrl] = useState('')
   const [caption, setCaption] = useState('')
   const [coverSet, setCoverSet] = useState(false)
   const [collabSent, setCollabSent] = useState(false)
@@ -126,6 +127,22 @@ export function ReelDetailPage() {
             <li>T-3 scheduled {formatWhen(deadlines.t3)}</li>
           </ul>
           <p className="mt-2 text-xs text-muted">Month {monthKey(reel.golive_at)}. Sundays are skipped. Deadlines close at 8 PM India time.</p>
+          {REEL_WORK_STAGES.includes(reel.status) && (
+            <label className="mt-4 block text-xs text-muted">
+              Stage
+              <select
+                aria-label="Reel stage"
+                className={`${FIELD} mt-1`}
+                value={reel.status}
+                disabled={busy}
+                onChange={(event) => run(() => moveReelStage(reel.id, event.target.value))}
+              >
+                {REEL_WORK_STAGES.map((stage) => (
+                  <option key={stage} value={stage}>{REEL_STATUS_LABEL[stage]}</option>
+                ))}
+              </select>
+            </label>
+          )}
           {canSchedule && reel.status !== 'published' && (
             <form
               className="mt-4 flex flex-wrap items-end gap-2"
@@ -160,7 +177,6 @@ export function ReelDetailPage() {
               <li key={version.id} className="rounded-xl border border-border px-3 py-2">
                 v{version.version_no} · {version.decision}
                 {version.feedback ? ` · ${version.feedback}` : ''}
-                <a className="ml-2 text-accent" href={version.full_quality_url} target="_blank" rel="noreferrer">Full quality</a>
                 {version.qc_item_id && employeeCanSeeQc(userDoc) && (
                   <Link className="ml-2 text-accent" to="/qc">Open in QC</Link>
                 )}
@@ -206,7 +222,6 @@ export function ReelDetailPage() {
                   reelId: reel.id,
                   versionNo: versions.length + 1,
                   file,
-                  fullQualityUrl,
                 })
               )
             }}
@@ -223,10 +238,6 @@ export function ReelDetailPage() {
                   if (message) setError(message)
                 }}
               />
-            </label>
-            <label className="text-sm">
-              <span className="mb-1 block text-muted">Full-quality link</span>
-              <input className={FIELD} value={fullQualityUrl} onChange={(e) => setFullQualityUrl(e.target.value)} placeholder="https://" />
             </label>
             <Button type="submit" disabled={busy}>Upload version</Button>
           </form>

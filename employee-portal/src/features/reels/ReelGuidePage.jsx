@@ -74,8 +74,8 @@ export function ReelGuidePage() {
               rows={[
                 ['1', 'Open the task only after it has a go-live date. Start editing.'],
                 ['2', 'Upload the review copy from the reel: MP4 or WebM, 720p, 50 MB or less. It stays in the portal, not on Drive.'],
-                ['3', 'Paste the full-quality Drive link from 01_FINAL. The name looks like HEKSH-R008_8PanelDress_v02.mp4. QC approves that exact file.'],
-                ['4', 'If QC requests changes, the popup names what to fix. Upload the next version with a new full-quality link.'],
+                ['3', 'Upload the edited MP4 or WebM. QC reviews that file.'],
+                ['4', 'If QC requests changes, the popup names what to fix. Upload the next version.'],
               ]}
             />
           </Section>
@@ -149,7 +149,7 @@ export function ReelGuidePage() {
             <ul className="list-disc space-y-1 pl-5">
               <li>If it is not in the portal, it did not happen. No approvals or feedback over WhatsApp.</li>
               <li>No reel is edited without a go-live date. Plan first, then assign.</li>
-              <li>Every upload carries the full-quality Drive link. QC approves the exact file that will be posted.</li>
+              <li>The editor uploads the cut. QC approves that file.</li>
               <li>Answer every reminder honestly. Each No is logged and visible to leadership.</li>
               <li>Cover and collaborator invites are set while scheduling, not after the post is live.</li>
             </ul>
@@ -179,7 +179,8 @@ export function ReelGuidePage() {
             <ul className="space-y-1">
               <li>`reel_plan` stores the go-live, editor, typed platforms, brief, raw footage, and deadlines. Reviewer can be empty.</li>
               <li>`reel_start` moves To Do to In Progress. Only the assigned editor can start.</li>
-              <li>`reel_add_version` requires an MP4 or WebM of 50 MB or less and a full-quality URL, then sets In Review.</li>
+              <li>`reel_move_stage` moves a reel between To Do, In Progress, In Review, and Changes Requested. Ready to Schedule, Scheduled, and Published stay on the schedule and publish actions.</li>
+              <li>`reel_add_version` requires an MP4 or WebM of 50 MB or less, then sets In Review.</li>
               <li>`reel_decide` approves or requests changes. The stored reviewer, leadership, or the planning SMM when no reviewer is stored, can decide.</li>
               <li>`reel_schedule` requires the caption and cover, and collaborator invites when the reel has collaborators.</li>
               <li>`reel_publish` requires the post link after the reel is scheduled.</li>

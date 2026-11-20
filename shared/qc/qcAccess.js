@@ -1,4 +1,4 @@
-/** Admin marks these on the employee record. Either one opens QC and Reels. */
+/** Admin marks these on the employee record. Either one opens QC. Only SMM opens Reels. */
 export function employeeIsEditorOrSmm(record) {
   if (!record) return false
   return record.qcEditor === true || record.qcSmm === true
@@ -9,7 +9,7 @@ export function employeeCanSeeQc(record) {
 }
 
 export function employeeCanSeeReels(record) {
-  return employeeIsEditorOrSmm(record)
+  return record?.qcSmm === true
 }
 
 export function qcAccessLabel(record) {

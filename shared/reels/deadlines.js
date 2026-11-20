@@ -10,6 +10,9 @@ export const REEL_STATUSES = [
   'published',
 ]
 
+/** Stages the board can move a reel between. Later stages stay on schedule and publish. */
+export const REEL_WORK_STAGES = ['todo', 'in_progress', 'in_review', 'changes_requested']
+
 export const REEL_STATUS_LABEL = {
   todo: 'To Do',
   in_progress: 'In Progress',
