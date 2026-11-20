@@ -62,22 +62,29 @@ export const useProjectBrowserAlerts = (userIdOrIds, profile = {}) => {
         snapshot.docChanges().forEach((change) => {
           if (change.type !== 'added') return
           const data = change.doc.data() || {}
-          if (data.type !== 'project' && data.type !== 'task') return
+          if (data.type !== 'project' && data.type !== 'task' && data.type !== 'qc') return
 
           void showForegroundBrowserNotification({
             notification: {
               title:
                 data.title ||
-                (data.type === 'task'
-                  ? 'Task status updated'
-                  : data.tag?.startsWith('project-assigned-')
-                    ? 'Assigned to a project'
-                    : 'New project created'),
+                (data.type === 'qc'
+                  ? 'QC update'
+                  : data.type === 'task'
+                    ? 'Task status updated'
+                    : data.tag?.startsWith('project-assigned-')
+                      ? 'Assigned to a project'
+                      : 'New project created'),
               body: data.message || '',
             },
             data: {
               type: data.type,
-              link: data.type === 'task' ? data.link || '/projects/tasks' : defaultProjectLink(data),
+              link:
+                data.type === 'qc'
+                  ? data.link || '/qc'
+                  : data.type === 'task'
+                    ? data.link || '/projects/tasks'
+                    : defaultProjectLink(data),
               tag: data.tag || `${data.type}-${change.doc.id}`,
               projectId: data.projectId,
               taskId: data.taskId,

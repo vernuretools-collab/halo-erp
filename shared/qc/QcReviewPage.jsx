@@ -57,7 +57,8 @@ function mergePlannedReels(items, reels) {
   const covered = new Set(items.map((item) => item.reel_id).filter(Boolean))
   const withPlan = items.map((item) => {
     const planned = (reels || []).find((reel) => reel.id === item.reel_id)
-    return planned ? { ...item, planned } : item
+    if (!planned) return item
+    return { ...item, planned, status: reelListStatus(planned.status) }
   })
   const extras = (reels || [])
     .filter((reel) => !covered.has(reel.id))
@@ -117,11 +118,11 @@ function projectName(projects, projectId) {
 
 export function QcReviewPage({ mode, projects, actor, editor = false, reviewer = false, identityIds = [] }) {
   const canReview = mode === 'admin' || reviewer
-  const showPlannedReels = mode === 'employee'
+  const showPlannedReels = true
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [filter, setFilter] = useState(canReview ? 'in_review' : 'all')
+  const [filter, setFilter] = useState(editor && !reviewer ? 'planned' : canReview ? 'in_review' : 'all')
   const [selectedId, setSelectedId] = useState('')
   const [versionId, setVersionId] = useState('')
   const [mediaUrl, setMediaUrl] = useState('')
@@ -182,7 +183,7 @@ export function QcReviewPage({ mode, projects, actor, editor = false, reviewer =
   }, [showPlannedReels])
 
   const queue = mergePlannedReels(items, showPlannedReels ? plannedReels : [])
-  const visible = queue.filter((item) => filter === 'all' || item.status === filter || item.plannedOnly)
+  const visible = queue.filter((item) => filter === 'all' || item.status === filter)
   const selected = visible.find((item) => item.id === selectedId) || visible[0] || null
   const selectedVersion =
     selected?.versions?.find((version) => version.id === versionId) ||
@@ -401,7 +402,11 @@ export function QcReviewPage({ mode, projects, actor, editor = false, reviewer =
         <p className="text-sm text-muted">Loading reviews…</p>
       ) : visible.length === 0 ? (
         <p className="rounded-2xl border border-border bg-surface p-5 text-sm text-muted">
-          {filter === 'approved' ? 'No approved files yet.' : 'No reviews in this list.'}
+          {filter === 'approved'
+            ? 'No approved files yet.'
+            : filter === 'planned'
+              ? 'No planned items yet.'
+              : 'No reviews in this list.'}
         </p>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
@@ -421,7 +426,7 @@ export function QcReviewPage({ mode, projects, actor, editor = false, reviewer =
                       <p className="mt-1 text-xs text-muted">{projectName(projectOptions, item.project_id)}</p>
                     )}
                     <span className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_CLASS[item.status] || ''}`}>
-                      {item.status === 'planned' ? 'Planned' : qcStatusLabel(item.status)}
+                      {qcStatusLabel(item.status)}
                     </span>
                   </button>
                 </li>

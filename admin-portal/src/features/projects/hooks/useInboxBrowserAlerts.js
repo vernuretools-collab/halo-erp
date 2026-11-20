@@ -76,16 +76,25 @@ export const useInboxBrowserAlerts = (userIdOrIds, profile = {}) => {
         snapshot.docChanges().forEach((change) => {
           if (change.type !== 'added') return
           const data = change.doc.data() || {}
-          if (data.type !== 'project' && data.type !== 'task') return
+          if (data.type !== 'project' && data.type !== 'task' && data.type !== 'qc') return
 
           void showForegroundBrowserNotification({
             notification: {
-              title: data.title || (data.type === 'project' ? 'New project created' : 'Task status updated'),
+              title:
+                data.title ||
+                (data.type === 'qc'
+                  ? 'QC update'
+                  : data.type === 'project'
+                    ? 'New project created'
+                    : 'Task status updated'),
               body: data.message || '',
             },
             data: {
               type: data.type,
-              link: data.adminLink || (data.type === 'project' ? '/projects/list' : '/projects/tasks'),
+              link:
+                data.type === 'qc'
+                  ? data.link || '/qc'
+                  : data.adminLink || (data.type === 'project' ? '/projects/list' : '/projects/tasks'),
               tag: data.tag || `${data.type}-${change.doc.id}`,
               projectId: data.projectId,
               taskId: data.taskId,

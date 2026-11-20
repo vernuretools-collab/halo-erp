@@ -217,3 +217,19 @@ When a reel is approved, `reel_decide` sets `reels.hide_video` to true. The stat
 
 - A change request sets `hide_video` back to false.
 - The QC screen hides the player only when that flag is true.
+
+## 2026-11-20 — SMM and editor progress notifications
+
+An SMM stage change and an editor upload notify the other person in the inbox.
+
+- Moving a reel between To Do, In Progress, In Review, and Changes Requested notifies the assigned editor, unless that editor made the move. Requesting changes does the same. The inbox item opens QC. Editors still do not get the Reels menu or reel popups.
+- An editor upload on a reel still notifies the SMM through the existing reel notification. A QC review that is not a reel notifies its reviewer, or every marked SMM when the review has no reviewer.
+- A QC status change to Changes Requested or Approved notifies the editor who uploaded the latest version, or every marked editor when that person is the one who changed the status.
+
+## 2026-11-20 — QC tabs do not share items
+
+Each QC tab shows one status. Planned, In Review, Changes Requested, and Approved do not list each other's items. All still shows every item.
+
+- Planned is a new reel that is not in review yet. An SMM plans it, and it stays on Planned until a cut is in review. In progress, before a cut is uploaded, stays on Planned too.
+- The Planned tab is on the employee QC page for both SMMs and editors, and on the admin QC page. An editor can open a planned reel and upload the first cut. An editor does not create the planned item.
+- A reel that already has a review uses the reel's stage for the tab, so a changes request does not stay under In Review.

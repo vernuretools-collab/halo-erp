@@ -26,6 +26,7 @@ const getIconForType = (type) => {
     case 'social_post':
       return <Share2 className="w-5 h-5 text-sky-500" />
     case 'reel':
+    case 'qc':
       return <Share2 className="w-5 h-5 text-accent" />
     case 'eod':
       return <Clock className="w-5 h-5 text-amber-600" />
@@ -55,6 +56,7 @@ const getBgForType = (type) => {
     case 'social_post':
       return 'bg-sky-50 dark:bg-sky-500/10'
     case 'reel':
+    case 'qc':
       return 'bg-accent-soft'
     case 'eod':
       return 'bg-amber-50 dark:bg-amber-500/10'

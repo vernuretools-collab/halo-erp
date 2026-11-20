@@ -8,6 +8,7 @@ const EXTENSIONS = new Set(['mp4', 'webm', 'jpg', 'jpeg', 'png', 'webp', 'gif'])
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif'])
 
 const STATUS_LABEL = {
+  planned: 'Planned',
   in_review: 'In review',
   changes_requested: 'Changes requested',
   approved: 'Approved',
@@ -15,6 +16,7 @@ const STATUS_LABEL = {
 
 export const QC_FILTERS = [
   { id: 'all', label: 'All' },
+  { id: 'planned', label: 'Planned' },
   { id: 'in_review', label: 'In review' },
   { id: 'changes_requested', label: 'Changes requested' },
   { id: 'approved', label: 'Approved' },

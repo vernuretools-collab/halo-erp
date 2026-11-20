@@ -50,6 +50,7 @@ export const NotificationCenter = () => {
       case 'social_post':
         return <Share2 className="w-4 h-4 text-sky-600 dark:text-sky-400" />
       case 'reel':
+      case 'qc':
         return <Share2 className="w-4 h-4 text-accent" />
       case 'eod':
         return <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400" />

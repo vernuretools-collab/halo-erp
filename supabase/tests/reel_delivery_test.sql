@@ -26,6 +26,9 @@ DECLARE
   v_qc text;
   v_err text;
 BEGIN
+  DELETE FROM public.notification_items
+  WHERE data->>'reelId' LIKE 'ZZTEST-%'
+     OR coalesce(data->>'tag', '') LIKE '%ZZTEST-%';
   DELETE FROM public.qc_items WHERE reel_id LIKE 'ZZTEST-%';
   DELETE FROM public.reels WHERE id LIKE 'ZZTEST-%';
 
@@ -95,6 +98,16 @@ BEGIN
     v_status = 'in_review' AND v_url IS NULL AND v_path = 'ZZTEST-R001/v1-cut.mp4' AND v_qc = 'in_review',
     format('status=%s url=%s path=%s qc=%s', v_status, v_url, v_path, v_qc)
   );
+  INSERT INTO reel_test_results VALUES (
+    'upload notifies the SMM',
+    exists (
+      select 1 from public.reel_notifications
+      where reel_id = 'ZZTEST-R001'
+        and user_id = v_smm_auth
+        and key like 'cut_uploaded%'
+    ),
+    'missing SMM reel notification'
+  );
 
   PERFORM set_config('request.jwt.claim.sub', v_smm_auth, true);
   PERFORM set_config(
@@ -112,6 +125,31 @@ BEGIN
     'change request keeps the cut and records the note',
     v_status = 'changes_requested' AND v_url = 'changes' AND v_path = 'Trim the opening.' AND v_qc = 'false',
     format('status=%s decision=%s feedback=%s hide=%s', v_status, v_url, v_path, v_qc)
+  );
+  INSERT INTO reel_test_results VALUES (
+    'change request notifies the editor',
+    exists (
+      select 1 from public.notification_items
+      where user_id in (v_editor, v_editor_auth)
+        and data->>'type' = 'qc'
+        and data->>'reelId' = 'ZZTEST-R001'
+        and data->>'title' = 'Changes requested'
+    ),
+    'missing editor inbox notification'
+  );
+
+  PERFORM public.reel_move_stage('ZZTEST-R001', 'in_review');
+  INSERT INTO reel_test_results VALUES (
+    'SMM stage change notifies the editor',
+    exists (
+      select 1 from public.notification_items
+      where user_id in (v_editor, v_editor_auth)
+        and data->>'type' = 'qc'
+        and data->>'reelId' = 'ZZTEST-R001'
+        and data->>'title' = 'Progress updated'
+        and data->>'message' like '%In Review%'
+    ),
+    'missing stage inbox notification'
   );
 
   PERFORM set_config('reel.transition', 'on', true);
@@ -161,6 +199,9 @@ BEGIN
     coalesce(v_err, 'missing')
   );
 
+  DELETE FROM public.notification_items
+  WHERE data->>'reelId' LIKE 'ZZTEST-%'
+     OR coalesce(data->>'tag', '') LIKE '%ZZTEST-%';
   DELETE FROM public.qc_items WHERE reel_id LIKE 'ZZTEST-%';
   DELETE FROM public.reel_notifications WHERE reel_id LIKE 'ZZTEST-%';
   DELETE FROM public.reel_activity WHERE reel_id LIKE 'ZZTEST-%';
