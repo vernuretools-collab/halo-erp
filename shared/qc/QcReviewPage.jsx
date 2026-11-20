@@ -53,6 +53,22 @@ function reelListStatus(status) {
   return 'planned'
 }
 
+function latestVersionOf(item) {
+  return (item?.versions || []).reduce((latest, version) => {
+    if (!latest || version.version_number > latest.version_number) return version
+    return latest
+  }, null)
+}
+
+function hasChangeMarks(item) {
+  return (latestVersionOf(item)?.comments?.length || 0) > 0
+}
+
+function queueStatus(item) {
+  if (item?.status === 'in_review' && hasChangeMarks(item)) return 'changes_requested'
+  return item?.status
+}
+
 function mergePlannedReels(items, reels) {
   const covered = new Set(items.map((item) => item.reel_id).filter(Boolean))
   const withPlan = items.map((item) => {
@@ -140,6 +156,8 @@ export function QcReviewPage({ mode, projects, actor, editor = false, reviewer =
   const [pinned, setPinned] = useState(null)
   const [plannedReels, setPlannedReels] = useState([])
   const [cutFile, setCutFile] = useState(null)
+  const [openReelId, setOpenReelId] = useState('')
+  const pendingNoteRef = useRef(null)
 
   const projectOptions = useMemo(
     () =>
@@ -149,11 +167,29 @@ export function QcReviewPage({ mode, projects, actor, editor = false, reviewer =
     [projects]
   )
 
+  async function alignMarkedReels(qcItems, reels) {
+    const merged = mergePlannedReels(qcItems, reels)
+    await Promise.all(
+      merged
+        .filter((item) => item.reel_id && item.planned?.status === 'in_review' && hasChangeMarks(item))
+        .map(async (item) => {
+          try {
+            await moveReelStage(item.reel_id, 'changes_requested')
+            const reel = reels.find((row) => row.id === item.reel_id)
+            if (reel) reel.status = 'changes_requested'
+          } catch {
+            /* Marks still file this cut under Changes requested. */
+          }
+        })
+    )
+  }
+
   async function refresh(preferId) {
     const [next, reels] = await Promise.all([
       listQcItems(),
       showPlannedReels ? listReels().catch(() => []) : Promise.resolve([]),
     ])
+    if (showPlannedReels) await alignMarkedReels(next, reels)
     setItems(next)
     setPlannedReels(reels)
     const merged = mergePlannedReels(next, reels)
@@ -183,8 +219,18 @@ export function QcReviewPage({ mode, projects, actor, editor = false, reviewer =
   }, [showPlannedReels])
 
   const queue = mergePlannedReels(items, showPlannedReels ? plannedReels : [])
-  const visible = queue.filter((item) => filter === 'all' || item.status === filter)
+  const visible = queue.filter((item) => filter === 'all' || queueStatus(item) === filter)
   const selected = visible.find((item) => item.id === selectedId) || visible[0] || null
+  const projectGroups = useMemo(() => {
+    const groups = new Map()
+    for (const item of visible) {
+      const label = projectName(projectOptions, item.project_id) || item.planned?.project_name || item.title || 'No project'
+      const key = String(item.project_id || label)
+      if (!groups.has(key)) groups.set(key, { key, label, items: [] })
+      groups.get(key).items.push(item)
+    }
+    return [...groups.values()]
+  }, [visible, projectOptions])
   const selectedVersion =
     selected?.versions?.find((version) => version.id === versionId) ||
     selected?.versions?.[selected.versions.length - 1] ||
@@ -227,9 +273,21 @@ export function QcReviewPage({ mode, projects, actor, editor = false, reviewer =
   useEffect(() => {
     setDrawing(false)
     setShapes([])
+    setPinned(null)
+    const note = pendingNoteRef.current
+    const notes = selectedVersion?.comments || []
+    if (note && notes.some((row) => row.id === note.id)) {
+      pendingNoteRef.current = null
+      setFocusCommentId(note.id)
+      setSeek(
+        note.time_seconds != null
+          ? { token: Date.now(), time: Number(note.time_seconds) }
+          : { token: 0, time: null }
+      )
+      return
+    }
     setFocusCommentId('')
     setSeek({ token: 0, time: null })
-    setPinned(null)
   }, [selectedVersion?.id])
 
   const compareKey = (selected?.versions || [])
@@ -284,6 +342,23 @@ export function QcReviewPage({ mode, projects, actor, editor = false, reviewer =
     }
   }
 
+  function openChange(item, version, note) {
+    setOpenReelId(item.id)
+    const sameCut = selected?.id === item.id && selectedVersion?.id === version?.id
+    if (!note) {
+      setSelectedId(item.id)
+      if (version?.id) setVersionId(version.id)
+      return
+    }
+    if (sameCut) {
+      openNote(note)
+      return
+    }
+    pendingNoteRef.current = note
+    setSelectedId(item.id)
+    if (version?.id) setVersionId(version.id)
+  }
+
   async function run(action) {
     setError('')
     setBusy(true)
@@ -304,6 +379,9 @@ export function QcReviewPage({ mode, projects, actor, editor = false, reviewer =
         if (message) throw new Error(message)
         const versionNo =
           (selected.versions?.reduce((max, version) => Math.max(max, version.version_number), 0) || 0) + 1
+        if (selected.planned?.status === 'in_review' && hasChangeMarks(selected)) {
+          await moveReelStage(selected.reel_id, 'changes_requested')
+        }
         await addReelVersion({
           reelId: selected.reel_id,
           versionNo,
@@ -411,6 +489,63 @@ export function QcReviewPage({ mode, projects, actor, editor = false, reviewer =
       ) : (
         <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
           <div className="flex min-h-0 flex-col gap-4">
+            {filter === 'changes_requested' ? (
+              <ul className="space-y-4">
+                {projectGroups.map((group) => (
+                  <li key={group.key}>
+                    <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted">{group.label}</p>
+                    <ul className="space-y-2">
+                      {group.items.map((item) => {
+                        const version = latestVersionOf(item)
+                        const notes = version?.comments || []
+                        const expanded = item.id === (openReelId || selected?.id)
+                        return (
+                          <li key={item.id} className={`rounded-2xl border bg-surface ${item.id === selected?.id ? 'border-accent' : 'border-border'}`}>
+                            <button
+                              type="button"
+                              onClick={() => openChange(item, version, null)}
+                              className="w-full p-3 text-left"
+                            >
+                              <p className="text-sm font-medium text-fg">{item.reel_id ? `${item.reel_id} · ` : ''}{item.title}</p>
+                              <p className="mt-1 text-xs text-muted">
+                                {notes.length ? `${notes.length} change ${notes.length === 1 ? 'request' : 'requests'}` : 'No marks on the latest cut'}
+                              </p>
+                            </button>
+                            {expanded && (
+                              notes.length ? (
+                                <ol className="space-y-1 border-t border-border p-2">
+                                  {notes.map((note, index) => (
+                                    <li key={note.id}>
+                                      <button
+                                        type="button"
+                                        onClick={() => openChange(item, version, note)}
+                                        className={`flex w-full gap-2 rounded-xl px-2 py-2 text-left text-sm ${
+                                          note.id === focusCommentId ? 'bg-accent/10' : 'hover:bg-chrome'
+                                        }`}
+                                      >
+                                        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-rose-500/15 text-[11px] font-semibold text-rose-600 dark:text-rose-300">
+                                          {index + 1}
+                                        </span>
+                                        <span className="min-w-0">
+                                          <span className="block text-xs font-medium text-muted">{note.timecode || 'Comment'}</span>
+                                          <span className="block text-fg">{note.body}</span>
+                                        </span>
+                                      </button>
+                                    </li>
+                                  ))}
+                                </ol>
+                              ) : (
+                                <p className="border-t border-border px-3 py-2 text-xs text-muted">No marks on the latest cut.</p>
+                              )
+                            )}
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </li>
+                ))}
+              </ul>
+            ) : (
             <ul className="space-y-2">
               {visible.map((item) => (
                 <li key={item.id}>
@@ -425,15 +560,16 @@ export function QcReviewPage({ mode, projects, actor, editor = false, reviewer =
                     {projectName(projectOptions, item.project_id) && (
                       <p className="mt-1 text-xs text-muted">{projectName(projectOptions, item.project_id)}</p>
                     )}
-                    <span className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_CLASS[item.status] || ''}`}>
-                      {qcStatusLabel(item.status)}
+                    <span className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_CLASS[queueStatus(item)] || ''}`}>
+                      {qcStatusLabel(queueStatus(item))}
                     </span>
                   </button>
                 </li>
               ))}
             </ul>
+            )}
 
-            {selectedVersion && (
+            {filter !== 'changes_requested' && selectedVersion && (
               <div className="min-h-0 flex-1">
                 <h3 className="mb-2 text-sm font-medium text-fg">Marks</h3>
                 {selectedVersion.comments?.length ? (
@@ -574,12 +710,14 @@ export function QcReviewPage({ mode, projects, actor, editor = false, reviewer =
                               setDrawing(false)
                             }
                             if (selected.reel_id) {
-                              await decideReel({
-                                reelId: selected.reel_id,
-                                decision: 'changes',
-                                feedback: feedback || 'See the frame comments.',
-                              })
-                            } else {
+                              if (selected.planned?.status === 'in_review') {
+                                await decideReel({
+                                  reelId: selected.reel_id,
+                                  decision: 'changes',
+                                  feedback: feedback || 'See the frame comments.',
+                                })
+                              }
+                            } else if (queueStatus(selected) !== 'changes_requested') {
                               await setQcStatus({ itemId: selected.id, status: 'changes_requested', actor })
                             }
                             await refresh(selected.id)

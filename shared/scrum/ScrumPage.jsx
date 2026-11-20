@@ -365,17 +365,15 @@ export function ScrumPage({ canAssignConductor = true }) {
         </div>
         <div className="flex flex-col items-end gap-3 shrink-0 w-full max-w-sm">
           <div className="flex items-center gap-2 self-end">
-            {!canAssignConductor && (
-              <button
-                type="button"
-                onClick={() => downloadScrumSheet(`scrum-${selectedDate}`, scrumExportRows(employees, drafts, selectedDate))}
-                disabled={dayLoading || !employeesReady}
-                className="shrink-0 inline-flex items-center justify-center gap-2 h-9 px-3 text-sm font-medium rounded-lg border border-border bg-surface text-fg disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-              >
-                <Download className="w-4 h-4" />
-                Export
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => downloadScrumSheet(`scrum-${selectedDate}`, scrumExportRows(employees, drafts, selectedDate))}
+              disabled={dayLoading || !employeesReady}
+              className="shrink-0 inline-flex items-center justify-center gap-2 h-9 px-3 text-sm font-medium rounded-lg border border-border bg-surface text-fg disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+              Export PDF
+            </button>
             <button
               type="button"
               onClick={saveVisible}

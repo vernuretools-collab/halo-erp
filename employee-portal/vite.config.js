@@ -47,6 +47,8 @@ export default defineConfig({
     alias: {
       ...supabaseFirebaseAliases(),
       '@supabase/supabase-js': path.resolve(__dirname, 'node_modules/@supabase/supabase-js'),
+      // onboardingPdf.js sits in admin-portal, which has no node_modules in this checkout.
+      jspdf: path.resolve(__dirname, 'node_modules/jspdf'),
     },
   },
   server: {

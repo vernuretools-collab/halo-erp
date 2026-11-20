@@ -306,17 +306,29 @@ export function QcStage({
     return () => other.removeEventListener('loadedmetadata', sync)
   }, [compare?.id, compare?.url])
 
-  useEffect(() => {
+  const seekRef = useRef({ token: 0, time: null })
+  seekRef.current = { token: seekToken, time: seekTime }
+
+  function applySeek() {
     const media = mediaRef.current
-    if (!media || kind !== 'video' || seekTime == null) return
-    media.pause()
-    media.currentTime = seekTime
-    const other = compareRef.current
-    if (other) {
-      other.pause()
-      other.currentTime = seekTime
+    const time = seekRef.current.time
+    if (!media || kind !== 'video' || time == null || !seekRef.current.token) return
+    const go = () => {
+      media.pause()
+      media.currentTime = time
+      const other = compareRef.current
+      if (other) {
+        other.pause()
+        other.currentTime = time
+      }
     }
-  }, [seekToken, seekTime, kind, compare?.id])
+    if (media.readyState >= 1) go()
+    else media.addEventListener('loadedmetadata', go, { once: true })
+  }
+
+  useEffect(() => {
+    applySeek()
+  }, [seekToken, seekTime, kind, url, compare?.id])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -511,7 +523,16 @@ export function QcStage({
               : undefined
           }
         >
-        <StageMedia url={url} kind={kind} mediaRef={mediaRef} muted={muted} onReady={() => setPaintKey((value) => value + 1)} />
+        <StageMedia
+          url={url}
+          kind={kind}
+          mediaRef={mediaRef}
+          muted={muted}
+          onReady={() => {
+            setPaintKey((value) => value + 1)
+            applySeek()
+          }}
+        />
         {compare && (
           <div className="pointer-events-none absolute inset-0" style={{ clipPath: `inset(0 0 0 ${wipe * 100}%)` }}>
             <StageMedia url={compare.url} kind={compare.kind} mediaRef={compareRef} muted />

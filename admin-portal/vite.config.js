@@ -44,7 +44,11 @@ export default defineConfig({
     tailwindcss()
   ],
   resolve: {
-    alias: supabaseFirebaseAliases(),
+    alias: {
+      ...supabaseFirebaseAliases(),
+      // Scrum PDF lives in shared/, so Vite will not see this app's jspdf install on its own.
+      jspdf: path.resolve(__dirname, 'node_modules/jspdf'),
+    },
   },
   server: {
     port: 3001,
